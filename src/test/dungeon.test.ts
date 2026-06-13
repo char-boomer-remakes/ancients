@@ -1,7 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { registerAllContent } from '../data';
+import { REG } from '../core/registry';
+import { applyDamage } from '../core/combat';
 import { generateDungeon, rollRoomSpawns } from '../core/dungeon';
 import { Rng } from '../core/rng';
-import type { AffixDef, DungeonDef, ItemDropTable, PlannedPack, RoomType, SpawnCard } from '../core/types';
+import { freshEchoProgress } from '../core/echo';
+import { xpForLevel } from '../core/stats';
+import { Game, newGameSave } from '../systems/game';
+import type { AffixDef, DungeonDef, GameSave, ItemDropTable, PlannedPack, RoomType, SpawnCard } from '../core/types';
+
+beforeAll(() => registerAllContent());
 
 const DROP: ItemDropTable = {
   guaranteed: [],
@@ -160,5 +168,80 @@ describe('dungeon generation D0', () => {
       }
     }
     expect(sawHellOnlyAffix).toBe(true);
+  });
+});
+
+function dungeonSave(): GameSave {
+  const save = newGameSave('juggernaut');
+  const team = [
+    { heroId: 'juggernaut', items: ['black-king-bar', 'battlefury', 'crystalys'] },
+    { heroId: 'sven', items: ['black-king-bar', 'crystalys', 'hyperstone'] },
+    { heroId: 'sniper', items: ['dragon-lance', 'maelstrom', 'crystalys'] },
+    { heroId: 'lich', items: ['kaya', 'glimmer-cape', 'force-staff'] },
+    { heroId: 'earthshaker', items: ['blink-dagger', 'black-king-bar', 'platemail'] }
+  ];
+  const portal = REG.region('icewrack').dungeons![0];
+  save.regionId = 'icewrack';
+  save.worldSeed = REG.region('icewrack').seed;
+  save.playerPos = { ...portal.pos };
+  save.party = team.map((h) => h.heroId);
+  save.recruited = team.map((h) => h.heroId);
+  save.roster = team.map((h) => ({
+    heroId: h.heroId,
+    level: 30,
+    xp: xpForLevel(30),
+    items: [0, 1, 2, 3, 4, 5].map((i) => (h.items[i] ? { id: h.items[i] } : null)),
+    neutralSlot: null,
+    talentPicks: [0, 0, 0, 0],
+    gambits: [{ if: [{ k: 'always' }], then: { k: 'attack-focus' } }],
+    echo: freshEchoProgress(),
+    facetIdx: 0,
+    hpPct: 1,
+    manaPct: 1,
+    abilityCooldowns: [0, 0, 0, 0]
+  }));
+  return save;
+}
+
+describe('dungeon session D1', () => {
+  it('enters from a portal, clears one generated room, grants loot, and exits', () => {
+    const g = Game.headless(dungeonSave());
+    const before = g.inventoryStash.length;
+
+    expect(g.tryInteract()).toBe(true);
+    expect(g.liveDungeon).toBeTruthy();
+    const session = g.liveDungeon!;
+    expect(session.def.id).toBe('frost-hollow');
+    expect(session.enemyUids.length).toBeGreaterThan(0);
+
+    const hero = session.drivenUnit()!;
+    for (const uid of [...session.enemyUids]) {
+      const enemy = session.sim.unit(uid);
+      if (enemy?.alive) applyDamage(session.sim, hero, enemy, 1e9, 'physical');
+      g.update(0.05);
+    }
+
+    expect(g.liveDungeon).toBeNull();
+    expect(g.inventoryStash.length).toBeGreaterThan(before);
+    expect(g.toasts.some((t) => t.text.includes('Frost Hollow room cleared'))).toBe(true);
+  });
+
+  it('ejects cleanly on a one-room wipe without saving mid-run state', () => {
+    const g = Game.headless(dungeonSave());
+    expect(g.startDungeon('frost-hollow', 'normal', { seed: 1001 })).toBe(true);
+    const session = g.liveDungeon!;
+    const enemy = session.sim.unit(session.enemyUids[0])!;
+
+    for (const uid of [...session.partyUids]) {
+      const hero = session.sim.unit(uid);
+      if (hero?.alive) applyDamage(session.sim, enemy, hero, 1e9, 'physical');
+      g.update(0.05);
+    }
+
+    expect(g.liveDungeon).toBeNull();
+    const save = g.buildSave();
+    expect(save.regionId).toBe('icewrack');
+    expect(save.playerPos).toEqual(REG.region('icewrack').dungeons![0].pos);
+    expect(g.toasts.some((t) => t.text.includes('ejects the party at the portal'))).toBe(true);
   });
 });

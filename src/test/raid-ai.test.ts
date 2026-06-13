@@ -1,0 +1,166 @@
+import { beforeAll, describe, expect, it } from 'vitest';
+import { registerAllContent } from '../data';
+import { runRaidEncounter, setupRaidSim } from '../core/macro';
+import { LiveRaid } from '../systems/raid-session';
+import { raidSetupFromDef } from '../core/phase3';
+import { chooseUtilityOrder, enemyBossEnraged, raidPeelTarget } from '../core/utility';
+import { combatProfile } from '../core/combat-profile';
+import { ALL_RAIDS } from '../data/raids';
+import { TUNING } from '../data/tuning';
+import type { EffectCtx } from '../core/effects';
+import type { MacroHeroSetup, SummonSpec } from '../core/types';
+import type { Unit } from '../core/unit';
+
+// ============================================================
+// AI_OVERHAUL A6: raid-aware ally considerations (peel adds, burn the
+// enrage), the AI-depth difficulty lever, and live == headless on a
+// fixed seed.
+// ============================================================
+
+beforeAll(() => registerAllContent());
+
+const ADD: SummonSpec = {
+  id: 'test-add',
+  name: 'Add',
+  lifetime: 60,
+  stats: { maxHp: 300, damage: 20, armor: 0, moveSpeed: 320, attackRange: 120, baseAttackTime: 1.6 },
+  silhouette: { build: 'biped', scale: 0.6, weapon: 'sword', head: 'horned' },
+  palette: ['#b23a2a', '#33100c', '#ff9a68']
+};
+const CTX: EffectCtx = { defId: 'test', level: 1, vfx: { archetype: 'ground-aoe', color: '#ff7a3a', color2: '#ffd27a' } };
+
+const PARTY: MacroHeroSetup[] = [
+  { heroId: 'juggernaut', level: 30, items: ['battlefury', 'butterfly'] },
+  { heroId: 'sven', level: 30, items: ['black-king-bar', 'assault-cuirass'] },
+  { heroId: 'lich', level: 30, items: ['mekansm', 'glimmer-cape'] },
+  { heroId: 'crystal-maiden', level: 30, items: ['glimmer-cape', 'arcane-boots'] },
+  { heroId: 'sniper', level: 30, items: ['maelstrom', 'dragon-lance'] }
+];
+
+function raid(party: string[]) {
+  const sim = setupRaidSim({
+    seed: 61,
+    party: party.map((heroId) => ({ heroId, level: 22 })),
+    boss: { heroId: 'sven', level: 26, hpScale: 4, damageScale: 1 },
+    maxSec: 60
+  });
+  const boss = sim.unitsArr.find((u) => u.team === 1 && u.ctrl.kind === 'boss')!;
+  const get = (heroId: string) => sim.unitsArr.find((u) => u.team === 0 && u.heroId === heroId)!;
+  return { sim, boss, get };
+}
+
+describe('raid-aware considerations', () => {
+  it('a frontliner peels an add off the backline', () => {
+    const { sim, boss, get } = raid(['sven', 'crystal-maiden']);
+    const sven = get('sven');       // frontline
+    const cm = get('crystal-maiden'); // backline
+    sven.pos = { x: boss.pos.x - 200, y: boss.pos.y };
+    cm.pos = { x: boss.pos.x - 700, y: boss.pos.y };
+    const add = sim.spawnSummon(ADD, boss, { x: cm.pos.x + 110, y: cm.pos.y }, CTX);
+    sim.rebuildSpatial();
+
+    expect(combatProfile(sven).posture).toBe('frontline');
+    const peel = raidPeelTarget(sim, sven, combatProfile(sven));
+    expect(peel?.uid).toBe(add.uid);
+
+    // a backliner does not peel
+    expect(raidPeelTarget(sim, cm, combatProfile(cm))).toBeNull();
+  });
+
+  it('no peel without a boss present (not a raid)', () => {
+    const sim = setupRaidSim({
+      seed: 9, party: [{ heroId: 'sven', level: 22 }], boss: { heroId: 'sven', level: 24 }, maxSec: 30
+    });
+    const sven = sim.unitsArr.find((u) => u.team === 0)!;
+    const fakeBoss = sim.unitsArr.find((u) => u.team === 1)!;
+    fakeBoss.ctrl = { kind: 'gambit' }; // strip the boss controller
+    sim.rebuildSpatial();
+    expect(raidPeelTarget(sim, sven, combatProfile(sven))).toBeNull();
+  });
+
+  it('burns the enrage: a ranged carry stops kiting once the boss is enraged', () => {
+    const { sim, boss, get } = raid(['sniper', 'crystal-maiden']);
+    const sniper = get('sniper');
+    // isolate the spacing fallback: no abilities to score
+    sniper.abilities.forEach((a) => (a.level = 0));
+    sniper.pos = { x: 2000, y: 2000 };
+    boss.pos = { x: 2200, y: 2000 }; // crowding the kiter
+    sim.rebuildSpatial();
+    expect(combatProfile(sniper).kiteDistance).toBeGreaterThan(0);
+
+    boss.ctrl.boss!.phase = 'sustained';
+    expect(enemyBossEnraged(sim, sniper)).toBe(false);
+    expect(chooseUtilityOrder(sim, sniper, boss)?.kind).toBe('move'); // kites
+
+    boss.ctrl.boss!.phase = 'enrage';
+    expect(enemyBossEnraged(sim, sniper)).toBe(true);
+    expect(chooseUtilityOrder(sim, sniper, boss)?.kind).toBe('attack-unit'); // burns
+  });
+
+  it('stacks the heal: a support meks when the party is wounded', () => {
+    const sim = setupRaidSim({
+      seed: 61,
+      party: [
+        { heroId: 'lich', level: 22, items: ['mekansm'] },
+        { heroId: 'juggernaut', level: 22 },
+        { heroId: 'sven', level: 22 }
+      ],
+      boss: { heroId: 'sven', level: 26, hpScale: 4, damageScale: 1 },
+      maxSec: 60
+    });
+    const boss = sim.unitsArr.find((u) => u.team === 1 && u.ctrl.kind === 'boss')!;
+    const lich = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'lich')!;
+    const j = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'juggernaut')!;
+    const s = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'sven')!;
+    lich.pos = { x: 2000, y: 2000 };
+    j.pos = { x: 2120, y: 2000 };
+    s.pos = { x: 2000, y: 2120 };
+    boss.pos = { x: 5000, y: 1500 };
+    j.hp = j.stats.maxHp * 0.55;
+    s.hp = s.stats.maxHp * 0.55;
+    sim.rebuildSpatial();
+    const order = chooseUtilityOrder(sim, lich, boss);
+    expect(order?.kind).toBe('item');
+    if (order?.kind === 'item') expect(lich.items[order.invSlot]?.defId).toBe('mekansm');
+  });
+});
+
+describe('AI-depth difficulty lever', () => {
+  it('dials boss aiDepth up by tier, beside the stat scaling', () => {
+    const def = ALL_RAIDS[0];
+    const normal = raidSetupFromDef(def, PARTY, 'normal', 1).boss;
+    const nightmare = raidSetupFromDef(def, PARTY, 'nightmare', 1).boss;
+    const hell = raidSetupFromDef(def, PARTY, 'hell', 1).boss;
+
+    expect(normal.aiDepth).toBe(TUNING.bossTierAiDepth.normal);
+    expect(nightmare.aiDepth).toBe(TUNING.bossTierAiDepth.nightmare);
+    expect(hell.aiDepth).toBe(TUNING.bossTierAiDepth.hell);
+    expect(normal.aiDepth).toBeLessThan(nightmare.aiDepth!);
+    expect(nightmare.aiDepth).toBeLessThan(hell.aiDepth!);
+
+    // the lever is independent of stat scaling, which also rises
+    expect(hell.hpScale).toBeGreaterThan(normal.hpScale);
+
+    // and it reaches the live sim's boss controller
+    const sim = setupRaidSim({ seed: 1, party: PARTY, boss: hell, maxSec: 30 });
+    const boss = sim.unitsArr.find((u) => u.team === 1 && u.ctrl.kind === 'boss')!;
+    expect(boss.ctrl.boss?.depth).toBe(TUNING.bossTierAiDepth.hell);
+  });
+});
+
+describe('live raid == headless encounter', () => {
+  it('agrees with the headless encounter on a fixed seed', () => {
+    const def = ALL_RAIDS[0];
+    const seed = 24680;
+    const headless = runRaidEncounter({ def, party: PARTY, tier: 'normal', seed });
+
+    const live = new LiveRaid(def, PARTY, 'normal', seed);
+    let guard = 0;
+    while (!live.done && guard++ < live.maxTicks + 5) live.step(1 / 30);
+
+    expect(live.result).not.toBeNull();
+    expect(live.result!.winner).toBe(headless.winner);
+    expect(live.result!.ticks).toBe(headless.ticks);
+    expect(live.result!.hash).toBe(headless.hash);
+  });
+});

@@ -273,7 +273,7 @@ export function draftTeams(def: DraftDef, recruited: string[], seed: number): { 
   return { player, enemy, bans };
 }
 
-export function raidSetupFromDef(def: RaidDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number): { seed: number; party: MacroHeroSetup[]; boss: MacroHeroSetup & { hpScale: number; damageScale: number }; maxSec: number } {
+export function raidSetupFromDef(def: RaidDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number): { seed: number; party: MacroHeroSetup[]; boss: MacroHeroSetup & { hpScale: number; damageScale: number; aiDepth: number; enrageSec: number }; maxSec: number } {
   const scale = tierScale(tier);
   return {
     seed,
@@ -281,7 +281,10 @@ export function raidSetupFromDef(def: RaidDef, party: MacroHeroSetup[], tier: Di
     boss: {
       ...def.boss,
       hpScale: (def.boss.hpScale ?? TUNING.raidBossHpScale) * scale.hp,
-      damageScale: (def.boss.damageScale ?? TUNING.raidBossDamageScale) * scale.damage
+      damageScale: (def.boss.damageScale ?? TUNING.raidBossDamageScale) * scale.damage,
+      // AI-depth lever beside the stat scaling (AI_OVERHAUL §6)
+      aiDepth: def.boss.aiDepth ?? TUNING.bossTierAiDepth[tier],
+      enrageSec: def.enrageSec
     },
     maxSec: def.enrageSec + 30
   };

@@ -727,6 +727,14 @@ export interface GateDef {
   /** Route opens only after this many heroes have been recruited (Phase 6 §3.4). */
   requiresRecruits?: number;
 }
+export interface DungeonPortalDef {
+  id: string;
+  dungeonId: string;
+  name: string;
+  pos: Vec2;
+  radius: number;
+  unlockQuest?: string;
+}
 export type ChestTier = 'common' | 'rich' | 'precious' | 'luxurious';
 export type ChestGate =
   | { kind: 'none' }
@@ -788,6 +796,7 @@ export interface RegionDef {
   echoSpawns?: EchoSpawnDef[];
   gates?: GateDef[];
   gyms?: { gymId: string; pos: Vec2; radius: number }[];
+  dungeons?: DungeonPortalDef[];
   secretShop?: { pos: Vec2; inventory: string[] };
   bosses?: string[];
   raids?: string[];
@@ -937,6 +946,8 @@ export interface RaidBossSetup extends MacroHeroSetup {
   damageScale?: number;
   /** Boss-brain opportunism (AI_OVERHAUL §5/§6): 0..1, scales off-threat targeting. */
   aiDepth?: number;
+  /** Encounter enrage timer (s); arms the boss phase-FSM enrage phase. */
+  enrageSec?: number;
 }
 
 // ---------- Orders ----------
@@ -1038,7 +1049,8 @@ export interface GameSave {
   factionChoices: Record<string, string>;
   heldUniques: string[];
   neutralStash: { id: string; count: number }[];
-  goldSinks: { buybacks: number; tomesUsed: number; respecs: number };
+  goldSinks: { buybacks: number; tomesUsed: number; respecs: number; gambleRolls: number; salvages: number };
+  essence: number;
   reputation: number;                     // karma (Phase 6 §3.2), default 0
   codexUnlocks: string[];                 // entry ids revealed on encounter (§3.14)
   journalSeen: string[];                  // acknowledged journal entries (§3.14)

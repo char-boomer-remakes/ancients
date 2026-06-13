@@ -319,6 +319,49 @@ function enemiesNear(sim: Sim, u: Unit, radius: number): number {
   return n;
 }
 
+// ---------- raid-aware considerations (AI_OVERHAUL §6) ----------
+
+/** An enemy boss is in its enrage phase: the party should burn, not kite. */
+export function enemyBossEnraged(sim: Sim, u: Unit): boolean {
+  for (const e of sim.unitsArr) {
+    if (e.alive && e.team !== u.team && e.ctrl.boss?.phase === 'enrage') return true;
+  }
+  return false;
+}
+
+function bossPresent(sim: Sim, u: Unit): boolean {
+  for (const e of sim.unitsArr) {
+    if (e.alive && e.team !== u.team && e.ctrl.kind === 'boss') return true;
+  }
+  return false;
+}
+
+/**
+ * Peel target for a frontline unit in a raid: the nearest enemy add (summon/creep)
+ * that is menacing a backline ally. A tank that sees adds on the casters goes and
+ * bodies them instead of mindlessly tunneling the boss.
+ */
+export function raidPeelTarget(sim: Sim, u: Unit, profile: CombatProfile): Unit | null {
+  if (profile.posture !== 'frontline' || !bossPresent(sim, u)) return null;
+  let best: Unit | null = null;
+  let bestD = Infinity;
+  sim.forEachNearbyUnit(u.pos, 820, (e) => {
+    if (!enemyCandidate(sim, u, e)) return;
+    if (e.kind !== 'summon' && e.kind !== 'creep') return;
+    if (dist2(e.pos, u.pos) > 800 * 800) return;
+    let menacing = false;
+    sim.forEachNearbyUnit(e.pos, 470, (a) => {
+      if (menacing || !a.alive || a.team !== u.team || a === u) return;
+      if (combatProfile(a).posture !== 'backline') return;
+      if (dist2(a.pos, e.pos) <= 450 * 450) menacing = true;
+    });
+    if (!menacing) return;
+    const d = dist2(e.pos, u.pos);
+    if (d < bestD || (d === bestD && best !== null && e.uid < best.uid)) { bestD = d; best = e; }
+  });
+  return best;
+}
+
 interface Scored { score: number; order: Order; slot: number }
 
 function scoreAbility(sim: Sim, u: Unit, slot: number, focus: Unit | null, profile: CombatProfile): Scored | null {
@@ -451,6 +494,13 @@ function scoreItemActive(sim: Sim, u: Unit, slot: number, focus: Unit | null, pr
  */
 export function chooseUtilityOrder(sim: Sim, u: Unit, focus: Unit | null): Order | null {
   const profile = combatProfile(u);
+
+  // raid peel (AI_OVERHAUL §6): a frontliner redirects to an add threatening the backline
+  if (u.ctrl.kind === 'gambit') {
+    const peel = raidPeelTarget(sim, u, profile);
+    if (peel) focus = peel;
+  }
+
   let best: Scored | null = null;
   for (let slot = 0; slot < u.abilities.length; slot++) {
     const cand = scoreAbility(sim, u, slot, focus, profile);
@@ -470,8 +520,9 @@ export function chooseUtilityOrder(sim: Sim, u: Unit, focus: Unit | null): Order
 
   if (!focus) return null;
 
-  // ranged kiters keep spacing when an enemy crowds them, but still trade
-  if (profile.kiteDistance > 0) {
+  // ranged kiters keep spacing when an enemy crowds them, but still trade — except
+  // when the boss is enraged, when the party burns instead of giving ground (§6).
+  if (profile.kiteDistance > 0 && !enemyBossEnraged(sim, u)) {
     const d = dist(u.pos, focus.pos);
     if (d < profile.kiteDistance * 0.7) {
       const away = norm(sub(u.pos, focus.pos));

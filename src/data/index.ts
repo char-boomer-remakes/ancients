@@ -21,6 +21,7 @@ import { ALL_QUESTS, ALL_TRIALS } from './quests';
 import { ALL_NEUTRAL_ITEMS } from './neutral-items';
 import { ALL_BOSSES } from './bosses';
 import { ALL_RAIDS } from './raids';
+import { ALL_DUNGEONS } from './dungeons';
 import { ALL_DRAFTS } from './drafts';
 import { ALL_TRAINERS } from './trainers';
 import { elementForAbility, elementForHero } from '../core/resonance';
@@ -40,6 +41,7 @@ function withElementTags(hero: HeroDef): HeroDef {
 
 export const ALL_HEROES: HeroDef[] = [JUGGERNAUT, CRYSTAL_MAIDEN, PUDGE, EARTHSHAKER, SNIPER, LICH, LUNA, SVEN, AXE, ...PHASE2_HEROES, ...PHASE3_HEROES].map(withElementTags);
 export const ALL_REGIONS = [TRANQUIL_VALE, NIGHTSILVER_WOODS, ICEWRACK, ...PHASE3_REGIONS];
+export { ALL_DUNGEONS };
 
 let registered = false;
 
@@ -57,6 +59,7 @@ export function registerAllContent(): void {
   for (const n of ALL_NEUTRAL_ITEMS) REG.registerNeutralItem(n);
   for (const b of ALL_BOSSES) REG.registerBoss(b);
   for (const r of ALL_RAIDS) REG.registerRaid(r);
+  for (const d of ALL_DUNGEONS) REG.registerDungeon(d);
   for (const d of ALL_DRAFTS) REG.registerDraft(d);
   for (const t of ALL_TRAINERS) REG.registerTrainer(t);
   for (const id of ['invoke', 'chronosphere', 'stone-gaze', 'reincarnation', 'rearm', 'roshan-respawn', 'terror-fear', 'defile-growth', 'swarm-spread', 'refresh-cooldowns']) {

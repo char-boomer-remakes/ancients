@@ -43,6 +43,7 @@ export const ICEWRACK: RegionDef = {
     { id: 'iw-to-desert', name: 'Cold Caravan Road to Devarshi', pos: { x: 11100, y: 2600 }, radius: 520, toRegionId: 'devarshi-desert', toPos: { x: 1100, y: 1800 }, requiredBadge: 'frost-badge' }
   ],
   gyms: [{ gymId: 'frost-gym', pos: { x: 6500, y: 3200 }, radius: 650 }],
+  dungeons: [{ id: 'iw-frost-hollow-portal', dungeonId: 'frost-hollow', name: 'Frost Hollow Portal', pos: { x: 5000, y: 9100 }, radius: 520 }],
   props: { treeDensity: 0.25, rockDensity: 0.75 },
   gateHint: 'The Frost Gym stands north of Frostford.'
 };

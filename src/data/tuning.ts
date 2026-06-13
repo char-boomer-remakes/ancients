@@ -70,7 +70,7 @@ export const TUNING = {
   startingGold: 2600,
   xpCurve: [0, 0, 230, 600, 1080, 1660, 2260, 2980, 3730, 4620, 5550, 6520, 7530, 8580, 9805, 11055, 12330, 13630, 14955, 16455, 18045, 19645, 21495, 23595, 25945, 28545, 31395, 34495, 37845, 41445, 45295],
   levelCap: 30,
-  postCapXpToGold: 0.25,      // gold per excess xp
+  postCapXpToGold: 0.12,      // gold per excess xp; loot now carries more of the post-cap reward
   xpActivePct: 1.0,
   xpParticipantPct: 0.75,
   xpBenchPct: 0.5,
@@ -85,15 +85,22 @@ export const TUNING = {
     shadeshore: 1.6,
     'vile-reaches': 1.82,
     quoidge: 2.05,
-    'hidden-wood': 2.3,
-    'mount-joerlak': 2.6,
-    'mad-moon-crater': 3.0
+    'hidden-wood': 2.15,
+    'mount-joerlak': 2.35,
+    'mad-moon-crater': 2.55
   },
   tierRewardMult: { normal: 1.0, nightmare: 1.65, hell: 2.45 },
   creepTierRewardMult: { small: 1.0, medium: 1.35, large: 1.85, ancient: 2.6 },
   creepStarBountyMult: [1.0, 1.75, 2.8],
   neutralDropPctByTier: { small: 0.10, medium: 0.14, large: 0.20, ancient: 0.28 },
   tinkersBench: { rerollCost: 225, reclaimCost: 150, enchantCost: 600 },
+  blackMarket: {
+    recipeWheelCost: 650,
+    relicWheelBaseCost: 2400,
+    relicWheelStepCost: 450,
+    salvageEssence: { common: 1, uncommon: 2, rare: 4, mythical: 7, legendary: 12, immortal: 20, arcana: 30 },
+    relicRarityCeiling: 'legendary' as const
+  },
   buybackBaseCost: 350,
   tomeXp: 420,
   tomeCost: 275,
@@ -193,6 +200,9 @@ export const TUNING = {
     nightmare: { hp: 1.65, damage: 1.28, armor: 1.18 },
     hell: { hp: 2.45, damage: 1.65, armor: 1.35 }
   },
+  // AI-depth difficulty lever (AI_OVERHAUL §6): higher tiers dial the boss brain's
+  // opportunism (off-threat plays), not just stats. Beside bossTierScale, not instead.
+  bossTierAiDepth: { normal: 0.45, nightmare: 0.7, hell: 1.0 },
   bossAssembledDropPct: { normal: 0.08, nightmare: 0.16, hell: 0.30 },
 
   // --- macro arena ---

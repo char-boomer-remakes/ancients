@@ -41,11 +41,12 @@ import { ELITE_DRAFT } from '../data/drafts';
 import { resonanceMods } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import type { ActiveElement, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, EchoProgress, GambitRule, GameSave, GraphicsSettings, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, SimEvent, StingerId, Vec2 } from '../core/types';
+import type { ActiveElement, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, EchoProgress, GambitRule, GameSave, GraphicsSettings, ItemDropTable, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, SimEvent, StingerId, Vec2 } from '../core/types';
 import { ProceduralAudio } from '../engine/audio';
 import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
 import { LiveRaid } from './raid-session';
+import { DungeonSession } from './dungeon-session';
 
 /** The Roshan raid — the only one that yields the Aegis, respawns on a timer, and re-drops cheese (§3.9). */
 const ROSHAN_RAID_ID = 'roshan-pit';
@@ -311,6 +312,9 @@ export class Game {
   private liveRaidTier: DifficultyTier = 'normal';
   private liveRaidClears = 0;
   private liveRaidAegis = false;
+  liveDungeon: DungeonSession | null = null;
+  private liveDungeonId: string | null = null;
+  private liveDungeonTier: DifficultyTier = 'normal';
   /** HUD hook: open the gym pre-fight screen (§3.5). Null in headless. */
   onOpenGymPrefight: ((gymId: string) => void) | null = null;
 
@@ -436,13 +440,14 @@ export class Game {
 
   /** Sim currently receiving player input: overworld by default, live sub-sim during live fights. */
   inputSim(): Sim {
-    return this.liveGym?.sim ?? this.liveRaid?.sim ?? this.sim;
+    return this.liveGym?.sim ?? this.liveRaid?.sim ?? this.liveDungeon?.sim ?? this.sim;
   }
 
   /** Unit currently driven by player input. Null in a live gym until a Captain's Call is active. */
   controlledUnit(): Unit | null {
     if (this.liveGym) return this.liveGym.playerDrivenUnit();
     if (this.liveRaid) return this.liveRaid.drivenUnit();
+    if (this.liveDungeon) return this.liveDungeon.drivenUnit();
     return this.activeUnit();
   }
 
@@ -475,6 +480,17 @@ export class Game {
     if (!this.liveRaid) return false;
     const ok = this.liveRaid.selectDriver(idx);
     const u = this.liveRaid.drivenUnit();
+    if (ok && u) {
+      this.scene.selectedUid = u.uid;
+      this.msg(`Driving ${u.name}`, 'info');
+    }
+    return ok;
+  }
+
+  selectLiveDungeonHero(idx: number): boolean {
+    if (!this.liveDungeon) return false;
+    const ok = this.liveDungeon.selectDriver(idx);
+    const u = this.liveDungeon.drivenUnit();
     if (ok && u) {
       this.scene.selectedUid = u.uid;
       this.msg(`Driving ${u.name}`, 'info');
@@ -646,6 +662,12 @@ export class Game {
     return (this.region.gyms ?? []).find((g) => dist(u.pos, g.pos) <= g.radius) ?? null;
   }
 
+  nearbyDungeonPortal(): NonNullable<RegionDef['dungeons']>[number] | null {
+    const u = this.activeUnit();
+    if (!u) return null;
+    return (this.region.dungeons ?? []).find((p) => dist(u.pos, p.pos) <= p.radius) ?? null;
+  }
+
   nearbyChest(): NonNullable<RegionDef['chests']>[number] | null {
     const u = this.activeUnit();
     if (!u) return null;
@@ -696,6 +718,8 @@ export class Game {
   tryInteract(): boolean {
     if (this.openNearbyChest()) return true;
     if (this.offerShardsAtShrine()) return true;
+    const portal = this.nearbyDungeonPortal();
+    if (portal) return this.startDungeon(portal.dungeonId, 'normal');
     const gym = this.nearbyGym();
     if (gym) {
       if (!this.gymStartGuard(gym.gymId)) return false;
@@ -1080,6 +1104,89 @@ export class Game {
     this.msg(`${def.name} cleared! (clear #${clears + 1})`, 'good');
     this.audio.playStinger('raid-clear');
     this.autosave('raid');
+  }
+
+  startDungeon(dungeonId: string, tier: DifficultyTier = 'normal', opts: { seed?: number; maxSec?: number } = {}): boolean {
+    if (this.liveGym || this.liveRaid || this.liveDungeon) return false;
+    const def = REG.dungeon(dungeonId);
+    if (def.regionId !== this.region.id) {
+      this.msg(`${def.name} is not in this region`, 'bad');
+      return false;
+    }
+    if (!def.tiers.includes(tier)) {
+      this.msg(`${def.name} does not support ${tier}`, 'bad');
+      return false;
+    }
+    if (this.party.length === 0) {
+      this.msg('A dungeon needs at least one hero', 'bad');
+      return false;
+    }
+    const seed = opts.seed ?? stableContentSeed(`${dungeonId}:${tier}`, Math.round(this.playtime));
+    this.liveDungeonId = dungeonId;
+    this.liveDungeonTier = tier;
+    this.liveDungeon = new DungeonSession(def, this.gymPlayerTeam(), tier, seed, { maxSec: opts.maxSec });
+    this.queuedOrders = [];
+    this.scene.resetUnitViews();
+    const u = this.liveDungeon.drivenUnit();
+    if (u) this.scene.selectedUid = u.uid;
+    this.msg(`${def.name}: room ${this.liveDungeon.room.index} opened. Clear the pack to exit.`, 'info');
+    return true;
+  }
+
+  private updateLiveDungeon(dt: number): void {
+    const dungeon = this.liveDungeon;
+    if (!dungeon) return;
+    if (!this.paused) dungeon.step(Math.min(dt, 0.1));
+    this.advanceQueuedOrder();
+    this.frameEvents = dungeon.sim.events.drain();
+    for (const ev of this.frameEvents) {
+      this.scene.pushEvent(ev, dungeon.sim);
+      this.audio.handleEvent(ev);
+      if (ev.t === 'kill-credit') {
+        const victim = dungeon.sim.unit(ev.victimUid);
+        if (victim?.kind === 'creep' && victim.tier) this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid);
+      }
+    }
+    this.scene.update(dungeon.sim, dungeon.cameraFollow(), dt, 0.5);
+    if (dungeon.done && dungeon.result) {
+      const id = this.liveDungeonId!;
+      const tier = this.liveDungeonTier;
+      const result = dungeon.result;
+      const table = dungeon.room.reward.table;
+      this.endLiveDungeon();
+      this.applyDungeonResult(id, tier, result.cleared, table);
+    }
+  }
+
+  private endLiveDungeon(): void {
+    this.liveDungeon = null;
+    this.liveDungeonId = null;
+    this.queuedOrders = [];
+    this.scene.resetUnitViews();
+    const u = this.activeUnit();
+    if (u) this.scene.selectedUid = u.uid;
+  }
+
+  private applyDungeonResult(dungeonId: string, tier: DifficultyTier, cleared: boolean, table?: ItemDropTable): void {
+    const def = REG.dungeon(dungeonId);
+    if (!cleared) {
+      this.msg(`${def.name} ejects the party at the portal. Regroup and return.`, 'bad');
+      this.autosave('dungeon');
+      return;
+    }
+    if (table) {
+      const roll = rollItemDrops(table, tier, {}, new Rng(stableContentSeed(`${dungeonId}:room-reward:${tier}`, Math.round(this.playtime))));
+      for (const it of roll.items) {
+        const drop = bindIfNeeded(it);
+        this.inventoryStash.push(drop);
+        this.codexUnlock('item:' + drop.id);
+      }
+      if (roll.items.length > 0) {
+        this.msg(`${def.name} reward: ${roll.items.map((it) => REG.item(it.id).name).join(', ')}`, 'good');
+      }
+    }
+    this.msg(`${def.name} room cleared. You return to the portal.`, 'good');
+    this.autosave('dungeon');
   }
 
   /** Deliver a raid clear's loot + pity; Roshan also grants the Aegis, sets the respawn timer, and re-drops cheese. */
@@ -1779,6 +1886,7 @@ export class Game {
   trySwap(idx: number): boolean {
     if (this.liveGym) return this.selectLiveGymHero(idx);
     if (this.liveRaid) return this.selectLiveRaidHero(idx);
+    if (this.liveDungeon) return this.selectLiveDungeonHero(idx);
     if (idx === this.activeIdx) return false;
     const rec = this.party[idx];
     if (!rec) return false;
@@ -2991,6 +3099,10 @@ export class Game {
     }
     if (this.liveRaid) {
       this.updateLiveRaid(realDt);
+      return;
+    }
+    if (this.liveDungeon) {
+      this.updateLiveDungeon(realDt);
       return;
     }
     if (this.paused) {

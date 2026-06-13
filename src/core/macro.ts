@@ -149,7 +149,7 @@ export function setupRaidSim(setup: RaidSetup): Sim {
     kind: 'boss',
     threat: {},
     homePos: { x: TUNING.arenaWidth - TUNING.macroTeamXInset, y: centerY },
-    boss: { depth: setup.boss.aiDepth ?? TUNING.ai.bossAiDepth }
+    boss: { depth: setup.boss.aiDepth ?? TUNING.ai.bossAiDepth, enrageSec: setup.boss.enrageSec }
   }, bossLevel, bossBuild);
   const hpScale = setup.boss.hpScale ?? TUNING.raidBossHpScale;
   const damageScale = setup.boss.damageScale ?? TUNING.raidBossDamageScale;
@@ -336,8 +336,6 @@ export function runRaidEncounter(setup: RaidEncounterSetup): RaidEncounterResult
   const sim = setupRaidSim({ seed: rs.seed, party: rs.party, boss: rs.boss, maxSec });
   if (setup.captureEvents) sim.events.captureAll = true;
   const boss = sim.unitsArr.find((u) => u.team === 1 && u.ctrl.kind === 'boss')!;
-  // arm the boss phase-FSM with the encounter's enrage timer (AI_OVERHAUL §5)
-  if (boss.ctrl.boss) boss.ctrl.boss.enrageSec = def.enrageSec;
   const mechanics = createRaidMechanicRunner(def, sim, boss);
 
   const base = runBattleToResult(sim, maxSec, { onTick: mechanics.tick, aegisTeam: setup.aegis ? 0 : undefined });
