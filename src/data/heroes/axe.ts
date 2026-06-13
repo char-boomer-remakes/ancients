@@ -160,5 +160,6 @@ export const AXE: HeroDef = {
     'Axe accepts your surrender after the shouting.',
     'The blade voted yes.'
   ],
-  bounty: { xp: 340, gold: 230 }
+  bounty: { xp: 340, gold: 230 },
+  recruitmentQuestId: 'recruit-axe'
 };

@@ -181,5 +181,6 @@ export const SNIPER: HeroDef = {
     'Shrapnel first. Apologies never.'
   ],
   bounty: { xp: 300, gold: 200 },
+  recruitmentQuestId: 'recruit-sniper',
   starter: true
 };

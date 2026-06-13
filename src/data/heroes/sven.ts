@@ -160,5 +160,6 @@ export const SVEN: HeroDef = {
     'Honor without mercy is just armor.',
     'Storm first. Sermon later.'
   ],
-  bounty: { xp: 340, gold: 230 }
+  bounty: { xp: 340, gold: 230 },
+  recruitmentQuestId: 'recruit-sven'
 };

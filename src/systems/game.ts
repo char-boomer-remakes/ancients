@@ -2,21 +2,23 @@ import { TUNING } from '../data/tuning';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { Unit } from '../core/unit';
-import { buildHero } from '../core/hero-setup';
+import { autoPicksForLevel, buildHero } from '../core/hero-setup';
+import { freshEchoProgress, normalizeEchoProgress, recordOwnedHeroEchoKill } from '../core/echo';
 import { computeKillReward, overflowXpToGold } from '../core/progression';
 import { mergeCreeps, newCreepInstanceId, validateEntourage } from '../core/capture';
 import { computeBuyPlan, executeBuy, itemSaveOf, itemStateFromSave, sellValue, sortInventory } from '../core/items';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { dist } from '../core/math2d';
-import type { CreepInstanceSave, GameSave, ItemSave, RegionDef, SimEvent, Vec2 } from '../core/types';
+import type { CreepInstanceSave, EchoProgress, GambitRule, GameSave, ItemSave, QuestProgress, RegionDef, SimEvent, Vec2 } from '../core/types';
 import { GameScene } from '../engine/scene';
+import { runGymMatch } from './macro-session';
 
 // ------------------------------------------------------------------
 // Overworld orchestration (SPEC layout: /src/systems/): party, swap,
 // camps, capture/entourage, shop, shrine, day clock, save/load.
 // ------------------------------------------------------------------
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 const SLOT_KEYS = ['ancients.save.1', 'ancients.save.2', 'ancients.save.3'];
 const AUTO_KEY = 'ancients.save.auto';
 
@@ -25,6 +27,8 @@ export interface RosterEntry {
   level: number;
   xp: number;
   talentPicks: (0 | 1 | null)[];
+  gambits: GambitRule[];
+  echo: EchoProgress;
   facetIdx: number;
   hpPct: number;
   manaPct: number;
@@ -46,6 +50,15 @@ export interface Toast {
 interface CampState {
   uids: number[];
   respawnAt: number; // 0 = alive/occupied
+}
+
+interface EchoState {
+  uid: number | null;
+  respawnAt: number;
+}
+
+function defaultQuestProgress(): QuestProgress {
+  return { stage: 'unfound', attunement: 0, trialCompletions: 0 };
 }
 
 export function newGameSave(starterHeroId: string): GameSave {
@@ -70,6 +83,8 @@ export function newGameSave(starterHeroId: string): GameSave {
         xp: 0,
         items: [null, null, null, null, null, null],
         talentPicks: [null, null, null, null],
+        gambits: [],
+        echo: freshEchoProgress(),
         facetIdx: 0,
         hpPct: 1,
         manaPct: 1,
@@ -80,6 +95,10 @@ export function newGameSave(starterHeroId: string): GameSave {
     caught: [],
     fielded: [],
     recruited: [starterHeroId],
+    badges: [],
+    questProgress: {},
+    defeatedGyms: [],
+    echoRespawn: {},
     campRespawn: {},
     settings: { quickcast: true }
   };
@@ -105,8 +124,16 @@ export class Game {
   recruited = new Set<string>();
   /** npc sim uid -> heroId */
   private npcHeroes = new Map<number, string>();
+  /** echo sim uid -> region echo spawn id */
+  private echoHeroes = new Map<number, string>();
+  /** binding-duel sim uid -> heroId */
+  private bindingHeroes = new Map<number, string>();
+  badges = new Set<string>();
+  questProgress: Record<string, QuestProgress> = {};
+  defeatedGyms = new Set<string>();
 
   private camps = new Map<string, CampState>();
+  private echoes = new Map<string, EchoState>();
   private accumulator = 0;
   private autosaveAt = TUNING.autosaveSec;
   private wasInTown = false;
@@ -133,6 +160,11 @@ export class Game {
     this.createdAt = save.createdAt;
     this.caught = save.caught.map((c) => ({ ...c }));
     this.recruited = new Set(save.recruited);
+    this.badges = new Set(save.badges);
+    this.questProgress = Object.fromEntries(
+      Object.entries(save.questProgress).map(([id, q]) => [id, { ...defaultQuestProgress(), ...q }])
+    );
+    this.defeatedGyms = new Set(save.defeatedGyms);
 
     this.party = save.party.map((heroId) => {
       const hs = save.roster.find((r) => r.heroId === heroId)!;
@@ -141,6 +173,8 @@ export class Game {
         level: hs.level,
         xp: hs.xp,
         talentPicks: [...hs.talentPicks],
+        gambits: [...(hs.gambits ?? [])],
+        echo: normalizeEchoProgress(hs.echo),
         facetIdx: hs.facetIdx,
         hpPct: hs.hpPct,
         manaPct: hs.manaPct,
@@ -157,6 +191,7 @@ export class Game {
 
     // world
     this.spawnCamps(save.campRespawn);
+    this.spawnEchoes(save.echoRespawn);
     this.spawnRecruitNpcs();
 
     // active hero
@@ -205,6 +240,79 @@ export class Game {
     );
   }
 
+  nearbyGate(): NonNullable<RegionDef['gates']>[number] | null {
+    const u = this.activeUnit();
+    if (!u) return null;
+    return (this.region.gates ?? []).find((g) => dist(u.pos, g.pos) <= g.radius) ?? null;
+  }
+
+  nearbyGym(): NonNullable<RegionDef['gyms']>[number] | null {
+    const u = this.activeUnit();
+    if (!u) return null;
+    return (this.region.gyms ?? []).find((g) => dist(u.pos, g.pos) <= g.radius) ?? null;
+  }
+
+  tryInteract(): boolean {
+    const gym = this.nearbyGym();
+    if (gym) return this.challengeGym(gym.gymId);
+    return this.tryTravel();
+  }
+
+  tryTravel(): boolean {
+    const gate = this.nearbyGate();
+    if (!gate) {
+      this.msg('No route gate nearby', 'bad');
+      return false;
+    }
+    if (gate.requiredBadge && !this.badges.has(gate.requiredBadge)) {
+      this.msg(`${gate.name} requires ${gate.requiredBadge.replace('-', ' ')}`, 'bad');
+      return false;
+    }
+    const target = REG.region(gate.toRegionId);
+    const save = this.buildSave();
+    save.regionId = target.id;
+    save.worldSeed = target.seed;
+    save.playerPos = { ...gate.toPos };
+    save.campRespawn = {};
+    save.echoRespawn = {};
+    save.savedAt = Date.now();
+    this.msg(`Traveling to ${target.name}...`, 'info');
+    window.dispatchEvent(new CustomEvent('ancients:load', { detail: save }));
+    return true;
+  }
+
+  challengeGym(gymId: string): boolean {
+    const gym = REG.gym(gymId);
+    if (this.defeatedGyms.has(gymId)) {
+      this.msg(`${gym.name} already cleared`, 'info');
+      return false;
+    }
+    if (this.party.length < 5) {
+      this.msg(`${gym.name} requires a full party of 5 heroes`, 'bad');
+      return false;
+    }
+    const result = runGymMatch(
+      gym,
+      this.party.slice(0, 5).map((r) => ({
+        heroId: r.heroId,
+        level: r.level,
+        items: r.items.map((i) => i?.id).filter((id): id is string => !!id),
+        gambits: r.gambits.length > 0 ? r.gambits : undefined
+      })),
+      this.region.seed + Math.round(this.playtime)
+    );
+    this.msg(`${gym.name}: ${result.playerWins}-${result.enemyWins}`, result.winner === 0 ? 'good' : 'bad');
+    if (result.winner === 0) {
+      this.defeatedGyms.add(gym.id);
+      this.badges.add(gym.badgeId);
+      this.msg(`${gym.leader} awards the ${gym.badgeId.replace('-', ' ')}!`, 'good');
+      this.autosave('badge');
+      return true;
+    }
+    this.msg(`${gym.leader} holds the badge. Tune gambits and try again.`, 'bad');
+    return false;
+  }
+
   // ---------- world spawning ----------
 
   private spawnCamps(savedRespawn: Record<string, number>): void {
@@ -230,6 +338,38 @@ export class Game {
       uids.push(u.uid);
     }
     return uids;
+  }
+
+  private spawnEchoes(savedRespawn: Record<string, number>): void {
+    for (const spawn of this.region.echoSpawns ?? []) {
+      const remaining = savedRespawn[spawn.id];
+      if (remaining !== undefined && remaining > 0) {
+        this.echoes.set(spawn.id, { uid: null, respawnAt: this.sim.time + remaining });
+      } else {
+        this.echoes.set(spawn.id, { uid: this.spawnHeroEcho(spawn.id), respawnAt: 0 });
+      }
+    }
+  }
+
+  private spawnHeroEcho(spawnId: string): number {
+    const spawn = this.region.echoSpawns?.find((e) => e.id === spawnId);
+    if (!spawn) return -1;
+    const def = REG.hero(spawn.heroId);
+    const build = buildHero(def, autoPicksForLevel(spawn.level), 0);
+    const u = this.sim.spawnHero(build.def, {
+      team: 1,
+      pos: { ...spawn.pos },
+      level: spawn.level,
+      ctrl: { kind: 'creep', homePos: { ...spawn.pos } }
+    });
+    u.name = `${def.name} Echo`;
+    u.bounty = { xp: Math.round(def.bounty.xp * 1.4), gold: Math.round(def.bounty.gold * 1.4) };
+    for (const k in build.externalMods) u.externalMods[k] = (u.externalMods[k] ?? 0) + build.externalMods[k];
+    u.refresh(this.sim.time);
+    u.hp = u.stats.maxHp;
+    u.mana = u.stats.maxMana;
+    this.echoHeroes.set(u.uid, spawnId);
+    return u.uid;
   }
 
   private spawnRecruitNpcs(): void {
@@ -261,7 +401,7 @@ export class Game {
   // ---------- hero spawn/serialize ----------
 
   private spawnHeroFromRecord(rec: RosterEntry, pos: Vec2): Unit {
-    const build = buildHero(REG.hero(rec.heroId), rec.talentPicks, rec.facetIdx);
+    const build = buildHero(REG.hero(rec.heroId), rec.talentPicks, rec.facetIdx, rec.echo);
     const u = this.sim.spawnHero(build.def, {
       team: 0,
       pos: { ...pos },
@@ -428,7 +568,7 @@ export class Game {
     this.msg(`Binding ${target.name}...`, 'info');
   }
 
-  // ---------- recruitment (P1 placeholder, DECISIONS) ----------
+  // ---------- recruitment (Phase 2: Find -> Trial -> Bind) ----------
 
   tryRecruit(uid: number): void {
     const heroId = this.npcHeroes.get(uid);
@@ -439,18 +579,62 @@ export class Game {
       this.orderMove({ ...npc.pos });
       return;
     }
-    if (this.party.length >= 5) {
-      this.msg('Party is full (5 heroes)', 'bad');
+    const def = REG.hero(heroId);
+    const questId = def.recruitmentQuestId;
+    if (!questId || !REG.quests.has(questId)) {
+      this.recruitHero(heroId, uid);
       return;
     }
-    this.sim.removeUnit(uid);
-    this.npcHeroes.delete(uid);
+    const quest = REG.quest(questId);
+    const trial = REG.trial(quest.trialId);
+    const qp = this.questProgress[questId] ?? defaultQuestProgress();
+    if (qp.stage === 'unfound') {
+      qp.stage = 'found';
+      this.questProgress[questId] = qp;
+      this.msg(quest.findText, 'info');
+      this.msg(`Trial: ${trial.name} — ${trial.description}`, 'info');
+      this.autosave('quest-found');
+      return;
+    }
+    if (qp.stage === 'found') {
+      qp.stage = 'trial-complete';
+      qp.trialCompletions += 1;
+      this.questProgress[questId] = qp;
+      this.msg(`${trial.name} complete. ${quest.bindText}`, 'good');
+      this.autosave('trial');
+      return;
+    }
+    if (qp.stage === 'trial-complete') {
+      this.startBindDuel(heroId, uid);
+    }
+  }
+
+  private recruitHero(heroId: string, npcUid?: number): boolean {
+    const def = REG.hero(heroId);
+    if (this.recruited.has(heroId)) return false;
+    if (this.party.length >= 5) {
+      this.msg('Party is full (5 heroes)', 'bad');
+      return false;
+    }
+    if (npcUid !== undefined) {
+      this.sim.removeUnit(npcUid);
+      this.npcHeroes.delete(npcUid);
+    } else {
+      for (const [uid, id] of [...this.npcHeroes]) {
+        if (id === heroId) {
+          this.sim.removeUnit(uid);
+          this.npcHeroes.delete(uid);
+        }
+      }
+    }
     this.recruited.add(heroId);
     this.party.push({
       heroId,
       level: 1,
       xp: 0,
       talentPicks: [null, null, null, null],
+      gambits: [],
+      echo: freshEchoProgress(),
       facetIdx: 0,
       hpPct: 1,
       manaPct: 1,
@@ -461,10 +645,40 @@ export class Game {
       lastCombatAt: -999,
       unit: null
     });
-    const def = REG.hero(heroId);
     this.msg(`${def.name} joins the party! (key ${this.party.length})`, 'good');
     if (def.barks.length > 0) this.msg(`${def.name}: "${def.barks[0]}"`, 'bark');
+    if (def.recruitmentQuestId) {
+      this.questProgress[def.recruitmentQuestId] = { ...(this.questProgress[def.recruitmentQuestId] ?? defaultQuestProgress()), stage: 'bound' };
+    }
     this.autosave('recruitment');
+    return true;
+  }
+
+  private startBindDuel(heroId: string, npcUid: number): void {
+    if ([...this.bindingHeroes.values()].includes(heroId)) {
+      this.msg('Binding duel already active', 'bad');
+      return;
+    }
+    const npc = this.sim.unit(npcUid);
+    if (!npc) return;
+    const def = REG.hero(heroId);
+    const level = Math.max(4, this.party[this.activeIdx]?.level ?? 4);
+    const build = buildHero(def, autoPicksForLevel(level), 0);
+    const pos = { x: npc.pos.x + 260, y: npc.pos.y + 80 };
+    const u = this.sim.spawnHero(build.def, {
+      team: 1,
+      pos,
+      level,
+      ctrl: { kind: 'creep', homePos: { ...pos } }
+    });
+    u.name = `${def.name} Binding Echo`;
+    u.bounty = { xp: Math.round(def.bounty.xp * 0.8), gold: Math.round(def.bounty.gold * 0.8) };
+    for (const k in build.externalMods) u.externalMods[k] = (u.externalMods[k] ?? 0) + build.externalMods[k];
+    u.refresh(this.sim.time);
+    u.hp = u.stats.maxHp;
+    u.mana = u.stats.maxMana;
+    this.bindingHeroes.set(u.uid, heroId);
+    this.msg(`Binding duel: defeat ${def.name}'s echo.`, 'good');
   }
 
   // ---------- entourage ----------
@@ -565,7 +779,88 @@ export class Game {
     rec.talentPicks[tier] = pick;
     const def = REG.hero(rec.heroId);
     this.msg(`${def.name}: ${def.talents[tier].options[pick].name}`, 'good');
-    // rebuild live unit in place to apply the patched def
+    this.rebuildHeroUnit(recIdx);
+    this.autosave('talent');
+  }
+
+  setFacet(recIdx: number, facetIdx: number): boolean {
+    const rec = this.party[recIdx];
+    if (!rec || !rec.echo.facetSwapUnlocked) return false;
+    const def = REG.hero(rec.heroId);
+    if (!def.facets[facetIdx]) return false;
+    rec.facetIdx = facetIdx;
+    this.msg(`${def.name} facet: ${def.facets[facetIdx].name}`, 'good');
+    this.rebuildHeroUnit(recIdx);
+    this.autosave('facet');
+    return true;
+  }
+
+  setGambits(recIdx: number, rules: GambitRule[]): boolean {
+    const rec = this.party[recIdx];
+    if (!rec || rules.length > 8) return false;
+    rec.gambits = structuredClone(rules);
+    this.msg(`${REG.hero(rec.heroId).name} gambits updated`, 'good');
+    return true;
+  }
+
+  unlockOwnedHeroEcho(heroId: string): boolean {
+    const recIdx = this.party.findIndex((r) => r.heroId === heroId);
+    if (recIdx < 0) return false;
+    const rec = this.party[recIdx];
+    const result = recordOwnedHeroEchoKill(rec.echo);
+    rec.echo = result.progress;
+
+    const def = REG.hero(heroId);
+    if (result.firstFacetUnlock) this.msg(`${def.name}'s facets are now swappable.`, 'good');
+    if (result.unlockedTier !== null) {
+      const tier = def.talents[result.unlockedTier];
+      const pick = rec.talentPicks[result.unlockedTier];
+      const branchName = pick === null ? `level ${tier.level} echo branch` : tier.options[pick === 0 ? 1 : 0].name;
+      this.msg(`${def.name}'s echo unlocks ${branchName}.`, 'good');
+    } else {
+      this.msg(`${def.name}'s echo yields surplus attunement gold.`, 'info');
+      this.gold += Math.round(def.bounty.gold * 1.5);
+    }
+
+    this.rebuildHeroUnit(recIdx);
+    this.autosave('echo');
+    return true;
+  }
+
+  private advanceAttunement(heroId: string): void {
+    const def = REG.hero(heroId);
+    const questId = def.recruitmentQuestId;
+    if (!questId) return;
+    const qp = this.questProgress[questId] ?? defaultQuestProgress();
+    qp.stage = qp.stage === 'unfound' ? 'found' : qp.stage;
+    qp.attunement += 1;
+    this.questProgress[questId] = qp;
+    const quest = REG.quests.get(questId);
+    this.msg(`${def.name} attunement shard ${qp.attunement}/2${quest ? ` — ${quest.findText}` : ''}`, 'good');
+  }
+
+  private handleEchoDeath(spawnId: string): void {
+    const spawn = this.region.echoSpawns?.find((e) => e.id === spawnId);
+    if (!spawn) return;
+    const st = this.echoes.get(spawnId);
+    if (st) {
+      st.uid = null;
+      st.respawnAt = this.sim.time + spawn.respawnSec;
+    }
+    this.echoHeroes.forEach((id, uid) => {
+      if (id === spawnId) this.echoHeroes.delete(uid);
+    });
+    if (this.recruited.has(spawn.heroId)) {
+      this.unlockOwnedHeroEcho(spawn.heroId);
+    } else {
+      this.advanceAttunement(spawn.heroId);
+      this.autosave('attunement');
+    }
+  }
+
+  private rebuildHeroUnit(recIdx: number): void {
+    const rec = this.party[recIdx];
+    if (!rec) return;
     if (rec.unit) {
       const pos = { ...rec.unit.pos };
       const facing = rec.unit.facing;
@@ -612,7 +907,13 @@ export class Game {
         level: r.level,
         xp: r.xp,
         items: r.items.map((i) => (i ? { ...i } : null)),
+        gambits: structuredClone(r.gambits),
         talentPicks: [...r.talentPicks],
+        echo: {
+          kills: r.echo.kills,
+          facetSwapUnlocked: r.echo.facetSwapUnlocked,
+          talentTierUnlocks: [...r.echo.talentTierUnlocks]
+        },
         facetIdx: r.facetIdx,
         hpPct: r.hpPct,
         manaPct: r.manaPct,
@@ -623,6 +924,10 @@ export class Game {
       caught: this.caught.map((c) => ({ ...c })),
       fielded: [...this.fielded],
       recruited: [...this.recruited],
+      badges: [...this.badges],
+      questProgress: structuredClone(this.questProgress),
+      defeatedGyms: [...this.defeatedGyms],
+      echoRespawn: this.echoRespawnMap(),
       campRespawn: this.campRespawnMap(),
       settings: { ...this.settings }
     };
@@ -631,6 +936,14 @@ export class Game {
   private campRespawnMap(): Record<string, number> {
     const out: Record<string, number> = {};
     for (const [id, st] of this.camps) {
+      if (st.respawnAt > this.sim.time) out[id] = st.respawnAt - this.sim.time;
+    }
+    return out;
+  }
+
+  private echoRespawnMap(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [id, st] of this.echoes) {
       if (st.respawnAt > this.sim.time) out[id] = st.respawnAt - this.sim.time;
     }
     return out;
@@ -694,6 +1007,16 @@ export class Game {
     if (!v.playerPos || typeof v.playerPos.x !== 'number' || typeof v.playerPos.y !== 'number') return false;
     if (!Array.isArray(v.party) || v.party.length < 1 || v.party.length > 5) return false;
     if (!Array.isArray(v.roster) || !Array.isArray(v.recruited) || !Array.isArray(v.caught) || !Array.isArray(v.fielded)) return false;
+    if (!Array.isArray(v.badges) || !v.badges.every((b) => typeof b === 'string')) return false;
+    if (!v.questProgress || typeof v.questProgress !== 'object') return false;
+    for (const q of Object.values(v.questProgress)) {
+      if (!q || typeof q !== 'object') return false;
+      if (!['unfound', 'found', 'trial-complete', 'bound'].includes(q.stage)) return false;
+      if (typeof q.attunement !== 'number' || q.attunement < 0) return false;
+      if (typeof q.trialCompletions !== 'number' || q.trialCompletions < 0) return false;
+    }
+    if (!Array.isArray(v.defeatedGyms) || !v.defeatedGyms.every((g) => typeof g === 'string' && REG.gyms.has(g))) return false;
+    if (!v.echoRespawn || typeof v.echoRespawn !== 'object') return false;
     if (typeof v.activeIdx !== 'number' || v.activeIdx < 0 || v.activeIdx >= v.party.length) return false;
     if (!v.settings || typeof v.settings.quickcast !== 'boolean') return false;
     for (const heroId of v.party) {
@@ -703,7 +1026,14 @@ export class Game {
     for (const r of v.roster) {
       if (!r || typeof r.heroId !== 'string' || !REG.heroes.has(r.heroId)) return false;
       if (!Array.isArray(r.items) || r.items.length !== TUNING.itemSlots) return false;
+      if (r.gambits !== undefined && (!Array.isArray(r.gambits) || r.gambits.length > 8)) return false;
       if (!Array.isArray(r.talentPicks) || r.talentPicks.length !== 4) return false;
+      if (r.echo !== undefined) {
+        if (typeof r.echo.kills !== 'number' || r.echo.kills < 0) return false;
+        if (typeof r.echo.facetSwapUnlocked !== 'boolean') return false;
+        if (!Array.isArray(r.echo.talentTierUnlocks) || r.echo.talentTierUnlocks.length !== 4) return false;
+        if (!r.echo.talentTierUnlocks.every((x) => typeof x === 'boolean')) return false;
+      }
       if (!Array.isArray(r.abilityCooldowns)) return false;
     }
     for (const c of v.caught) {
@@ -869,6 +1199,21 @@ export class Game {
     }
   }
 
+  private updateEchoes(): void {
+    for (const [id, st] of this.echoes) {
+      if (st.uid !== null) continue;
+      if (st.respawnAt <= 0 || this.sim.time < st.respawnAt) continue;
+      const spawn = this.region.echoSpawns?.find((e) => e.id === id);
+      const u = this.activeUnit();
+      if (spawn && u && dist(u.pos, spawn.pos) < 700) {
+        st.respawnAt = this.sim.time + 10;
+        continue;
+      }
+      st.uid = this.spawnHeroEcho(id);
+      st.respawnAt = 0;
+    }
+  }
+
   // ---------- shrine ----------
 
   private updateShrine(dt: number): void {
@@ -925,6 +1270,17 @@ export class Game {
           this.handleCaptureComplete(ev);
           break;
         case 'death': {
+          const bindingHeroId = this.bindingHeroes.get(ev.uid);
+          if (bindingHeroId) {
+            this.bindingHeroes.delete(ev.uid);
+            this.recruitHero(bindingHeroId);
+            break;
+          }
+          const echoSpawnId = this.echoHeroes.get(ev.uid);
+          if (echoSpawnId) {
+            this.handleEchoDeath(echoSpawnId);
+            break;
+          }
           // party hero?
           const rec = this.party.find((r) => r.unit && r.unit.uid === ev.uid);
           if (rec) {
@@ -966,6 +1322,7 @@ export class Game {
     }
 
     this.updateCamps();
+    this.updateEchoes();
     this.updateShrine(dt);
 
     // town-entry autosave

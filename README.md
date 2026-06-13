@@ -6,12 +6,12 @@ The project uses no external art assets. Units, terrain, icons, VFX, and UI are 
 
 ## Current State
 
-Phase 1 is playable and passing. The current build includes:
+Phase 2 is playable and passing. The current build includes:
 
 - A deterministic, renderer-independent combat core that runs at a fixed 30 Hz.
-- One playable region, Tranquil Vale, with a town, shrine, shops, creep camps, recruitable heroes, and map markers.
-- Nine data-driven heroes: Juggernaut, Crystal Maiden, Pudge, Earthshaker, Sniper, Lich, Luna, Sven, and Axe.
-- Dota-inspired abilities, statuses, items, cooldowns, projectiles, capture, creep merging, entourage fielding, XP, gold, and save/load.
+- Three playable regions: Tranquil Vale, Nightsilver Woods, and Icewrack, with towns, shrines, shops, camps, gates, echoes, gyms, and map markers.
+- Twenty data-driven heroes with talents, facets, recruitment quests, and Phase 2 echo progression.
+- Dota-inspired abilities, statuses, items, cooldowns, projectiles, capture, creep merging, entourage fielding, XP, gold, save/load, badge-gated travel, gambits, and macro gyms.
 - A procedural Three.js overworld with gameplay and map camera modes.
 - Headless vitest coverage for data linting, combat determinism, capture/merge behavior, boundary checks, item identity, saves, and macro simulation.
 
@@ -54,6 +54,7 @@ npm run typecheck # run TypeScript without emitting
 - `Z/X/C/V`: item actives
 - `1-5`: swap active party hero
 - `T`: channel Binding Totem on a weakened creep
+- `G`: interact with nearby gates and gyms
 - `B`: shop while in town
 - `Tab`: party, inventory, and caught creep panel
 - `M`: toggle map view
@@ -65,10 +66,10 @@ Quick-cast is enabled by default.
 
 1. Run `npm run dev`, open the local Vite URL, click **New Game**, and pick Juggernaut.
 2. In Dawnshade, press `B`, open **Components**, buy **Blink Dagger**, close the shop, and press `Z` at the cursor to blink.
-3. Right-click Pudge north of town to recruit him, then press `2` and `1` to test hero swapping.
-4. Move northeast to the tutorial kobold camp. Fight a kobold, weaken it below 30% HP, hover or select it, then press `T` to capture it.
-5. Press `Tab`, field the captured kobold, and watch it follow and fight as an AI companion.
-6. Press `M` to view map markers, then use `Esc` to save and reload.
+3. Right-click a recruitable hero to Find, right-click again to complete their trial, then defeat the Binding Echo to recruit them.
+4. Press `Tab` to set gambit presets, inspect echo progress, and swap facets after an echo unlock.
+5. Fight a hero echo marker to unlock a talent branch/facet benefit, then travel through gates with `G`.
+6. Challenge the Lunar and Frost Gyms with `G`; badges, quests, gambits, echoes, party, inventory, and region persist through save/load.
 
 ## Architecture
 

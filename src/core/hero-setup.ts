@@ -1,4 +1,5 @@
-import type { HeroDef, TalentDef } from './types';
+import { activeTalentOptionsForTier } from './echo';
+import type { EchoProgress, HeroDef, TalentDef } from './types';
 
 // ------------------------------------------------------------------
 // Talents & facets are data (SPEC §5): stat mods merge into the
@@ -31,9 +32,15 @@ function applyCooldownAdd(def: HeroDef, ca: { abilityId: string; amount: number 
 
 /**
  * Produce a patched hero def + stat mods for a given talent/facet selection.
- * picks[i] selects option 0/1 of talent tier i (null = unpicked).
+ * picks[i] selects option 0/1 of talent tier i (null = unpicked);
+ * echo progress activates the opposite branch for unlocked tiers.
  */
-export function buildHero(base: HeroDef, picks: (0 | 1 | null)[] = [null, null, null, null], facetIdx = 0): HeroBuild {
+export function buildHero(
+  base: HeroDef,
+  picks: (0 | 1 | null)[] = [null, null, null, null],
+  facetIdx = 0,
+  echo?: EchoProgress
+): HeroBuild {
   const def: HeroDef = structuredClone(base);
   const externalMods: Record<string, number> = {};
   const addMods = (mods?: Record<string, number>) => {
@@ -42,12 +49,12 @@ export function buildHero(base: HeroDef, picks: (0 | 1 | null)[] = [null, null, 
   };
 
   base.talents.forEach((tier, i) => {
-    const pick = picks[i];
-    if (pick === null || pick === undefined) return;
-    const t: TalentDef = tier.options[pick];
-    addMods(t.mods as Record<string, number> | undefined);
-    if (t.abilityOverride) applyOverride(def, t.abilityOverride);
-    if (t.cooldownAdd) applyCooldownAdd(def, t.cooldownAdd);
+    for (const pick of activeTalentOptionsForTier(picks, echo, i)) {
+      const t: TalentDef = tier.options[pick];
+      addMods(t.mods as Record<string, number> | undefined);
+      if (t.abilityOverride) applyOverride(def, t.abilityOverride);
+      if (t.cooldownAdd) applyCooldownAdd(def, t.cooldownAdd);
+    }
   });
 
   const facet = base.facets[facetIdx] ?? base.facets[0];

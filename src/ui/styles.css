@@ -52,6 +52,8 @@ button, .btn {
 button:hover, .btn:hover { background: #263350; border-color: var(--accent); }
 button:disabled { opacity: 0.45; cursor: default; }
 .btn.small { padding: 4px 10px; font-size: 12px; }
+.btn.tiny { padding: 2px 7px; font-size: 11px; }
+.btn.on { border-color: var(--gold); color: var(--gold); }
 .btn.big { font-size: 20px; padding: 14px 34px; }
 .btn.warn:hover { border-color: var(--bad); }
 .dim-btn { opacity: 0.75; }
@@ -105,6 +107,17 @@ button:disabled { opacity: 0.45; cursor: default; }
 .pf-name { font-size: 12px; white-space: nowrap; overflow: hidden; }
 .pf-name em { color: var(--dim); font-style: normal; }
 .pf-dead { font-size: 11px; color: var(--bad); }
+.echo-row, .facet-row, .gambit-row { margin-top: 5px; font-size: 11px; color: var(--dim); }
+.pip {
+  display: inline-block;
+  width: 9px; height: 9px;
+  margin-left: 3px;
+  border-radius: 50%;
+  border: 1px solid var(--panel-line);
+  background: #121722;
+}
+.pip.on { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 6px rgba(106, 184, 255, 0.6); }
+.facet-row { display: flex; flex-wrap: wrap; gap: 4px; }
 
 .bar {
   height: 6px;

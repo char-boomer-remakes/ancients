@@ -4,7 +4,7 @@ import { TUNING } from '../data/tuning';
 
 // ------------------------------------------------------------------
 // Controls (SPEC §6): RMB move/attack, QWER abilities (quickcast),
-// ZXCV item actives, 1-5 swap, T capture, M map, Tab party, B shop.
+// ZXCV item actives, 1-5 swap, T capture, G interact/travel, M map, Tab party, B shop.
 // ------------------------------------------------------------------
 
 export type TargetingState =
@@ -214,6 +214,9 @@ export class InputController {
         if (uid >= 0) g.tryCapture(uid);
         return;
       }
+      case 'g':
+        g.tryInteract();
+        return;
       case 's':
         g.orderStop();
         return;

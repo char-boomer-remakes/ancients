@@ -3,11 +3,12 @@ import { TUNING } from '../data/tuning';
 import { xpProgress } from '../core/progression';
 import { itemReady, sellValue, computeBuyPlan } from '../core/items';
 import { levelArr } from '../core/values';
+import { buildDefaultGambit } from '../core/controllers';
 import { abilityIcon, itemIcon, heroPortrait } from '../engine/icons';
 import { WORLD_SCALE } from '../engine/scale';
 import { Game } from '../systems/game';
 import type { InputController } from '../systems/input';
-import type { ItemDef, SimEvent } from '../core/types';
+import type { GambitRule, ItemDef, SimEvent } from '../core/types';
 import * as THREE from 'three';
 
 // ------------------------------------------------------------------
@@ -72,7 +73,7 @@ export class Hud {
     input.onToggleParty = () => this.toggleModal('party');
     input.onToggleShop = () => {
       if (!this.game.canShop() && this.modalKind !== 'shop') {
-        this.game.msg('The shop is in Dawnshade (the town)', 'bad');
+        this.game.msg(`The shop is in ${this.game.region.town.name} (the town)`, 'bad');
         return;
       }
       this.toggleModal('shop');
@@ -110,7 +111,7 @@ export class Hud {
       <span class="region">${g.region.name}</span>
       <span class="clock ${isNight ? 'night' : 'day'}">${isNight ? 'Night' : 'Day'} ${clockPct}%</span>
       <span class="gold">${Math.floor(g.gold)} g</span>
-      <span class="keys-hint">RMB move/attack · QWER cast · ZXCV items · 1-5 swap · T capture · B shop · Tab party · M map · Esc menu</span>
+      <span class="keys-hint">RMB move/attack · QWER cast · ZXCV items · 1-5 swap · T capture · G interact · B shop · Tab party · M map · Esc menu</span>
     `;
   }
 
@@ -381,7 +382,18 @@ export class Hud {
       }
     }
     if (this.input.targeting.kind !== 'none') hint = 'Choose a target (left-click) · Esc to cancel';
-    if (g.canShop() && this.modalKind === 'none' && !hint) hint = 'Dawnshade — press B to shop';
+    const gym = g.nearbyGym();
+    if (gym && this.modalKind === 'none' && !hint) {
+      const def = REG.gym(gym.gymId);
+      hint = `${def.name} — press G to challenge`;
+    }
+    const gate = g.nearbyGate();
+    if (gate && this.modalKind === 'none' && !hint) {
+      hint = gate.requiredBadge && !g.badges.has(gate.requiredBadge)
+        ? `${gate.name} — requires ${gate.requiredBadge.replace('-', ' ')}`
+        : `${gate.name} — press G to travel`;
+    }
+    if (g.canShop() && this.modalKind === 'none' && !hint) hint = `${g.region.town.name} — press B to shop`;
     this.hint.textContent = hint;
     this.hint.classList.toggle('hidden', hint === '');
   }
@@ -427,12 +439,26 @@ export class Hud {
     let heroes = '';
     g.party.forEach((rec, i) => {
       const def = REG.hero(rec.heroId);
+      const echoPips = rec.echo.talentTierUnlocks.map((x) => `<span class="pip ${x ? 'on' : ''}"></span>`).join('');
+      const facets = rec.echo.facetSwapUnlocked
+        ? `<div class="facet-row">${def.facets.map((f, idx) =>
+            `<button class="btn tiny ${idx === rec.facetIdx ? 'on' : ''}" data-facet="${i}:${idx}" title="${f.description}">${f.name}</button>`
+          ).join('')}</div>`
+        : '<div class="rr-sub">Facet swap locked: defeat this hero echo once.</div>';
+      const gambitLabel = rec.gambits.length > 0 ? `${rec.gambits.length} custom rules` : 'default role gambit';
       heroes += `
         <div class="roster-row ${i === g.activeIdx ? 'active' : ''}">
           <img src="${heroPortrait(def.palette, def.name[0])}" alt="">
           <div class="rr-main">
             <b>${def.name}</b> <em>Lv ${rec.unit ? rec.unit.level : rec.level} · key ${i + 1}</em>
             <div class="rr-sub">${def.attribute.toUpperCase()} · ${def.roles.join(' / ')}</div>
+            <div class="echo-row">Echoes ${rec.echo.kills} · talents ${echoPips}</div>
+            ${facets}
+            <div class="gambit-row">Gambit: ${gambitLabel}
+              <button class="btn tiny" data-gambit="${i}:default">Default</button>
+              <button class="btn tiny" data-gambit="${i}:aggro">Aggro</button>
+              <button class="btn tiny" data-gambit="${i}:safe">Safe</button>
+            </div>
           </div>
         </div>`;
     });
@@ -476,6 +502,40 @@ export class Hud {
         this.renderPartyModal();
       });
     });
+    this.modal.querySelectorAll('[data-facet]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const [recIdx, facetIdx] = (el as HTMLElement).dataset.facet!.split(':').map(Number);
+        g.setFacet(recIdx, facetIdx);
+        this.renderPartyModal();
+      });
+    });
+    this.modal.querySelectorAll('[data-gambit]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const [idxRaw, preset] = (el as HTMLElement).dataset.gambit!.split(':');
+        const recIdx = Number(idxRaw);
+        const def = REG.hero(g.party[recIdx].heroId);
+        const rules = preset === 'default' ? buildDefaultGambit(def.roles) : this.gambitPreset(preset as 'aggro' | 'safe');
+        g.setGambits(recIdx, rules);
+        this.renderPartyModal();
+      });
+    });
+  }
+
+  private gambitPreset(preset: 'aggro' | 'safe'): GambitRule[] {
+    if (preset === 'aggro') {
+      return [
+        { if: [{ k: 'ability-ready', slot: 3 }, { k: 'fight-time-gt', sec: 5 }], then: { k: 'cast', slot: 3, targetMode: 'most-clustered' } },
+        { if: [{ k: 'ability-ready', slot: 0 }], then: { k: 'cast', slot: 0, targetMode: 'focus' } },
+        { if: [{ k: 'ability-ready', slot: 1 }], then: { k: 'cast', slot: 1, targetMode: 'lowest-hp-enemy' } },
+        { if: [{ k: 'always' }], then: { k: 'attack-focus' } }
+      ];
+    }
+    return [
+      { if: [{ k: 'self-hp-below', pct: 35 }], then: { k: 'retreat' } },
+      { if: [{ k: 'ally-hp-below', pct: 45 }, { k: 'ability-ready', slot: 1 }], then: { k: 'cast', slot: 1, targetMode: 'lowest-hp-ally' } },
+      { if: [{ k: 'ability-ready', slot: 0 }, { k: 'distance-to-focus-lt', dist: 700 }], then: { k: 'cast', slot: 0, targetMode: 'focus' } },
+      { if: [{ k: 'always' }], then: { k: 'attack-focus' } }
+    ];
   }
 
   // --- shop ---
@@ -522,7 +582,7 @@ export class Hud {
     });
 
     this.modalShell(
-      `Dawnshade Shop — <span class="gold">${Math.floor(g.gold)} g</span>`,
+      `${g.region.town.name} Shop — <span class="gold">${Math.floor(g.gold)} g</span>`,
       `
       <div class="shop-tabs">${tabs}</div>
       <div class="shop-grid">${grid}</div>
@@ -572,6 +632,10 @@ export class Hud {
       return;
     }
     const t = def.talents[tier];
+    const echoUnlocked = rec.echo.talentTierUnlocks[tier];
+    const echoText = echoUnlocked
+      ? 'Echo attunement unlocked: after you choose a branch, the opposite branch applies too.'
+      : "The other branch stays echo-locked until this hero's echo is defeated.";
     this.modalShell(
       `${def.name} — Level ${t.level} Talent`,
       `
@@ -580,7 +644,7 @@ export class Hud {
         <div class="talent-or">or</div>
         <button class="talent-opt" data-pick="1"><b>${t.options[1].name}</b></button>
       </div>
-      <p class="dim">The other branch stays echo-locked (Phase 2).</p>`
+      <p class="dim">${echoText}</p>`
     );
     this.modal.querySelectorAll('[data-pick]').forEach((el) => {
       el.addEventListener('click', () => {

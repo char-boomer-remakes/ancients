@@ -317,6 +317,12 @@ export interface AghanimDef {
   implemented: boolean;       // ≥15 implemented by Phase 3
 }
 
+export interface EchoProgress {
+  kills: number;                   // owned hero echo kills
+  facetSwapUnlocked: boolean;      // first echo kill opens facet swapping
+  talentTierUnlocks: boolean[];    // 4 tiers; true means the opposite branch applies too
+}
+
 // ---------- Models (procedural, SPEC §3) ----------
 export interface SilhouetteSpec {
   build: 'biped' | 'quad' | 'blob' | 'brute' | 'golem' | 'bird' | 'ward';
@@ -362,6 +368,7 @@ export interface HeroDef {
   barks: string[];             // ~6 original lines, Dota voice, never Valve text
   bounty: { xp: number; gold: number };
   starter?: boolean;
+  recruitmentQuestId?: string;
 }
 
 // ---------- Creeps ----------
@@ -413,6 +420,22 @@ export interface CampDef {
   radius: number;
   respawnSec: number;
 }
+export interface EchoSpawnDef {
+  id: string;
+  heroId: string;
+  pos: Vec2;
+  level: number;
+  respawnSec: number;
+}
+export interface GateDef {
+  id: string;
+  name: string;
+  pos: Vec2;
+  radius: number;
+  toRegionId: string;
+  toPos: Vec2;
+  requiredBadge?: string;
+}
 export interface RegionDef {
   id: string;
   name: string;
@@ -425,8 +448,59 @@ export interface RegionDef {
   shopInventory: string[];
   camps: CampDef[];
   heroSpawns: { heroId: string; pos: Vec2 }[];
+  echoSpawns?: EchoSpawnDef[];
+  gates?: GateDef[];
+  gyms?: { gymId: string; pos: Vec2; radius: number }[];
   props: { treeDensity: number; rockDensity: number };
   gateHint?: string;
+}
+
+// ---------- Recruitment / gyms ----------
+export type TrialKind =
+  | 'honor-duel'
+  | 'timed-cull'
+  | 'relic-fetch'
+  | 'survive-night'
+  | 'frost-exam'
+  | 'skillshot-exam';
+
+export interface TrialDef {
+  id: string;
+  heroId: string;
+  kind: TrialKind;
+  name: string;
+  description: string;
+  regionId: string;
+  pos: Vec2;
+  requiredHeroIds?: string[];
+}
+
+export interface RecruitmentQuestDef {
+  id: string;
+  heroId: string;
+  trialId: string;
+  findText: string;
+  trialText: string;
+  bindText: string;
+}
+
+export type QuestStage = 'unfound' | 'found' | 'trial-complete' | 'bound';
+export interface QuestProgress {
+  stage: QuestStage;
+  attunement: number;
+  trialCompletions: number;
+}
+
+export interface GymDef {
+  id: string;
+  name: string;
+  badgeId: string;
+  regionId: string;
+  leader: string;
+  theme: string;
+  bestOf: 3;
+  enemyTeam: MacroHeroSetup[];
+  enemyBonusCaptainCalls?: number;
 }
 
 // ---------- Gambits (SPEC §7) ----------
@@ -436,6 +510,10 @@ export type GambitCondition =
   | { k: 'ally-hp-below'; pct: number }
   | { k: 'enemy-hp-below'; pct: number }
   | { k: 'self-mana-above'; pct: number }
+  | { k: 'self-mana-below'; pct: number }
+  | { k: 'has-status'; status: StatusId; target: 'self' | 'focus' }
+  | { k: 'target-role'; role: string }
+  | { k: 'target-attribute'; attribute: Attribute }
   | { k: 'enemies-within'; radius: number; count: number }
   | { k: 'allies-alive'; count: number }
   | { k: 'ability-ready'; slot: number }
@@ -455,6 +533,13 @@ export type GambitAction =
 export interface GambitRule {
   if: GambitCondition[];
   then: GambitAction;
+}
+
+export interface MacroHeroSetup {
+  heroId: string;
+  level?: number;
+  items?: string[];
+  gambits?: GambitRule[];
 }
 
 // ---------- Orders ----------
@@ -507,7 +592,9 @@ export interface HeroSave {
   level: number;
   xp: number;
   items: (ItemSave | null)[];   // 6 slots
+  gambits?: GambitRule[];
   talentPicks: (0 | 1 | null)[]; // 4 tiers
+  echo?: EchoProgress;
   facetIdx: number;
   hpPct: number;
   manaPct: number;
@@ -538,6 +625,10 @@ export interface GameSave {
   caught: CreepInstanceSave[];
   fielded: string[];            // creep instance uids, ≤3
   recruited: string[];
+  badges: string[];
+  questProgress: Record<string, QuestProgress>;
+  defeatedGyms: string[];
+  echoRespawn: Record<string, number>; // echo spawn id -> seconds remaining
   campRespawn: Record<string, number>; // camp id -> seconds remaining
   settings: { quickcast: boolean };
 }

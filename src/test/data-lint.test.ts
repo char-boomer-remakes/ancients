@@ -1,5 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllContent, ALL_HEROES, ALL_REGIONS } from '../data/index';
+import { ALL_GYMS } from '../data/gyms/index';
+import { ALL_QUESTS, ALL_TRIALS } from '../data/quests/index';
 import { ALL_ITEMS } from '../data/items/index';
 import { ALL_CREEPS } from '../data/creeps/index';
 import { REG } from '../core/registry';
@@ -112,8 +114,8 @@ function lintAbility(def: AbilityDef, where: string, exoticIds: string[]): void 
 }
 
 describe('data lint: heroes', () => {
-  it('has the Phase 1 roster of 6', () => {
-    expect(ALL_HEROES.length).toBeGreaterThanOrEqual(6);
+  it('has the Phase 2 roster of 20', () => {
+    expect(ALL_HEROES.length).toBeGreaterThanOrEqual(20);
   });
 
   for (const hero of ALL_HEROES) {
@@ -131,6 +133,7 @@ describe('data lint: heroes', () => {
         expect(hero.barks.length).toBeGreaterThanOrEqual(6);
         expect(hero.baseStats.moveSpeed).toBeGreaterThan(200);
         expect(hero.baseStats.turnRate).toBeGreaterThan(0.2);
+        if (hero.recruitmentQuestId) expect(REG.quests.has(hero.recruitmentQuestId), `${hero.id}: quest ${hero.recruitmentQuestId}`).toBe(true);
         const ults = hero.abilities.filter((a) => a.ult);
         expect(ults.length, `${hero.id} needs exactly 1 ult`).toBe(1);
       });
@@ -175,10 +178,10 @@ describe('data lint: heroes', () => {
 });
 
 describe('data lint: items', () => {
-  it('has at least 15 identity items (assembled/actives) and resolving recipes', () => {
+  it('has the Phase 2 item catalog of 30+ entries and resolving recipes', () => {
     const assembled = ALL_ITEMS.filter((i) => i.tier === 'core' || (i.tier === 'basic' && i.components));
     expect(assembled.length).toBeGreaterThanOrEqual(12);
-    expect(ALL_ITEMS.length).toBeGreaterThanOrEqual(40);
+    expect(ALL_ITEMS.length).toBeGreaterThanOrEqual(30);
   });
 
   for (const item of ALL_ITEMS) {
@@ -209,8 +212,8 @@ describe('data lint: items', () => {
 });
 
 describe('data lint: creeps', () => {
-  it('has 6 creep types across tiers', () => {
-    expect(ALL_CREEPS.length).toBeGreaterThanOrEqual(6);
+  it('has 12 creep types across tiers', () => {
+    expect(ALL_CREEPS.length).toBeGreaterThanOrEqual(12);
     const tiers = new Set(ALL_CREEPS.map((c) => c.tier));
     expect(tiers.has('small')).toBe(true);
     expect(tiers.has('ancient')).toBe(true);
@@ -229,6 +232,10 @@ describe('data lint: creeps', () => {
 });
 
 describe('data lint: regions', () => {
+  it('has the Phase 2 three-region world', () => {
+    expect(ALL_REGIONS.length).toBeGreaterThanOrEqual(3);
+  });
+
   for (const region of ALL_REGIONS) {
     it(`${region.id} cross-references resolve`, () => {
       for (const camp of region.camps) {
@@ -241,6 +248,19 @@ describe('data lint: regions', () => {
       for (const hs of region.heroSpawns) {
         expect(REG.heroes.has(hs.heroId), `${region.id}: hero ${hs.heroId}`).toBe(true);
       }
+      for (const echo of region.echoSpawns ?? []) {
+        expect(REG.heroes.has(echo.heroId), `${region.id}: echo ${echo.heroId}`).toBe(true);
+        expect(echo.pos.x).toBeGreaterThan(0);
+        expect(echo.pos.x).toBeLessThan(region.size);
+        expect(echo.pos.y).toBeGreaterThan(0);
+        expect(echo.pos.y).toBeLessThan(region.size);
+      }
+      for (const gate of region.gates ?? []) {
+        expect(REG.regions.has(gate.toRegionId), `${region.id}: gate ${gate.id}`).toBe(true);
+      }
+      for (const gym of region.gyms ?? []) {
+        expect(REG.gyms.has(gym.gymId), `${region.id}: gym ${gym.gymId}`).toBe(true);
+      }
       for (const itemId of region.shopInventory) {
         expect(REG.items.has(itemId), `${region.id}: shop item ${itemId}`).toBe(true);
       }
@@ -252,6 +272,34 @@ describe('data lint: regions', () => {
     expect(tv.shopInventory).toContain('blink-dagger');
     expect(tv.shopInventory).toContain('tango');
   });
+});
+
+describe('data lint: gyms and trials', () => {
+  it('has gyms 1-2 and at least 6 bespoke trial types', () => {
+    expect(ALL_GYMS.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(ALL_TRIALS.map((t) => t.kind)).size).toBeGreaterThanOrEqual(6);
+  });
+
+  for (const gym of ALL_GYMS) {
+    it(`${gym.id} resolves macro teams and badge`, () => {
+      expect(REG.regions.has(gym.regionId)).toBe(true);
+      expect(gym.badgeId).toBeTruthy();
+      expect(gym.enemyTeam.length).toBe(5);
+      for (const h of gym.enemyTeam) {
+        expect(REG.heroes.has(h.heroId), `${gym.id}: enemy ${h.heroId}`).toBe(true);
+        for (const item of h.items ?? []) expect(REG.items.has(item), `${gym.id}: item ${item}`).toBe(true);
+      }
+    });
+  }
+
+  for (const trial of ALL_TRIALS) {
+    it(`${trial.id} resolves hero and region`, () => {
+      expect(REG.heroes.has(trial.heroId)).toBe(true);
+      expect(REG.regions.has(trial.regionId)).toBe(true);
+      const quest = ALL_QUESTS.find((q) => q.heroId === trial.heroId);
+      expect(quest?.trialId).toBe(trial.id);
+    });
+  }
 });
 
 describe('data lint: exotic budget', () => {

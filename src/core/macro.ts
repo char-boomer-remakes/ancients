@@ -4,20 +4,13 @@ import { Sim } from './sim';
 import { buildDefaultGambit } from './controllers';
 import { autoPicksForLevel, buildHero } from './hero-setup';
 import { makeItemState } from './items';
-import type { GambitRule } from './types';
+import type { MacroHeroSetup } from './types';
 import type { Unit } from './unit';
 
 // ------------------------------------------------------------------
 // Macro layer (SPEC §7): 5v5 on a small arena, auto-resolving on the
 // shared core. Headless-runnable to completion inside a test.
 // ------------------------------------------------------------------
-
-export interface MacroHeroSetup {
-  heroId: string;
-  level?: number;
-  items?: string[];
-  gambits?: GambitRule[];
-}
 
 export interface MacroSetup {
   seed: number;

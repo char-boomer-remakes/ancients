@@ -1,4 +1,4 @@
-import type { CreepDef, HeroDef, ItemDef, RegionDef } from './types';
+import type { CreepDef, GymDef, HeroDef, ItemDef, RecruitmentQuestDef, RegionDef, TrialDef } from './types';
 
 // ---------------------------------------------------------------
 // Content registry. Data files register themselves; systems are
@@ -13,6 +13,9 @@ class Registry {
   items = new Map<string, ItemDef>();
   creeps = new Map<string, CreepDef>();
   regions = new Map<string, RegionDef>();
+  gyms = new Map<string, GymDef>();
+  trials = new Map<string, TrialDef>();
+  quests = new Map<string, RecruitmentQuestDef>();
   exotics = new Map<string, ExoticImpl>();
 
   registerHero(def: HeroDef): void {
@@ -26,6 +29,15 @@ class Registry {
   }
   registerRegion(def: RegionDef): void {
     this.regions.set(def.id, def);
+  }
+  registerGym(def: GymDef): void {
+    this.gyms.set(def.id, def);
+  }
+  registerTrial(def: TrialDef): void {
+    this.trials.set(def.id, def);
+  }
+  registerQuest(def: RecruitmentQuestDef): void {
+    this.quests.set(def.id, def);
   }
   registerExotic(id: string, impl: ExoticImpl): void {
     this.exotics.set(id, impl);
@@ -51,11 +63,29 @@ class Registry {
     if (!d) throw new Error(`unknown region: ${id}`);
     return d;
   }
+  gym(id: string): GymDef {
+    const d = this.gyms.get(id);
+    if (!d) throw new Error(`unknown gym: ${id}`);
+    return d;
+  }
+  trial(id: string): TrialDef {
+    const d = this.trials.get(id);
+    if (!d) throw new Error(`unknown trial: ${id}`);
+    return d;
+  }
+  quest(id: string): RecruitmentQuestDef {
+    const d = this.quests.get(id);
+    if (!d) throw new Error(`unknown quest: ${id}`);
+    return d;
+  }
   clear(): void {
     this.heroes.clear();
     this.items.clear();
     this.creeps.clear();
     this.regions.clear();
+    this.gyms.clear();
+    this.trials.clear();
+    this.quests.clear();
     this.exotics.clear();
   }
 }

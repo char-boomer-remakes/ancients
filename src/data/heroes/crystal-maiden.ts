@@ -6,7 +6,7 @@ export const CRYSTAL_MAIDEN: HeroDef = {
   title: 'Rylai of the Blueheart Glacier',
   attribute: 'int',
   roles: ['support', 'disabler', 'nuker'],
-  region: 'tranquil-vale',
+  region: 'icewrack',
   lore: 'Sent south from Icewrack so her frost would stop ruining the orchards, Rylai carries winter with her like a lantern.',
   baseStats: {
     str: 18, agi: 16, int: 22,
@@ -187,5 +187,6 @@ export const CRYSTAL_MAIDEN: HeroDef = {
     'When the field freezes, stand behind me. Not in front. Please.'
   ],
   bounty: { xp: 300, gold: 200 },
+  recruitmentQuestId: 'recruit-crystal-maiden',
   starter: true
 };

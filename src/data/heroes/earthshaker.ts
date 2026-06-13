@@ -189,5 +189,6 @@ export const EARTHSHAKER: HeroDef = {
     'Crowd together. The echo loves company.',
     'My totem and I have an understanding: I swing, it sings.'
   ],
-  bounty: { xp: 320, gold: 210 }
+  bounty: { xp: 320, gold: 210 },
+  recruitmentQuestId: 'recruit-earthshaker'
 };

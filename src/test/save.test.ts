@@ -11,6 +11,15 @@ describe('save game validation', () => {
 
     expect(save.version).toBe(SAVE_VERSION);
     expect(save.gold).toBe(TUNING.startingGold);
+    expect(save.roster[0].echo).toEqual({
+      kills: 0,
+      facetSwapUnlocked: false,
+      talentTierUnlocks: [false, false, false, false]
+    });
+    expect(save.badges).toEqual([]);
+    expect(save.questProgress).toEqual({});
+    expect(save.defeatedGyms).toEqual([]);
+    expect(save.echoRespawn).toEqual({});
     expect(Game.validateSave(save)).toBe(true);
   });
 
@@ -20,5 +29,7 @@ describe('save game validation', () => {
     expect(Game.validateSave({ ...save, version: 0 })).toBe(false);
     expect(Game.validateSave({ ...save, regionId: 'missing-region' })).toBe(false);
     expect(Game.validateSave({ ...save, party: ['rubick'], recruited: ['rubick'] })).toBe(false);
+    expect(Game.validateSave({ ...save, roster: [{ ...save.roster[0], echo: { kills: -1, facetSwapUnlocked: false, talentTierUnlocks: [false, false, false, false] } }] })).toBe(false);
+    expect(Game.validateSave({ ...save, defeatedGyms: ['missing-gym'] })).toBe(false);
   });
 });

@@ -174,6 +174,9 @@ export class GameScene {
     add(region.shrine.pos.x, region.shrine.pos.y, 0.46, 0x67d7ff, 'disc');
     for (const camp of region.camps) add(camp.pos.x, camp.pos.y, 0.28, 0xdb6b55, 'disc');
     for (const spawn of region.heroSpawns) add(spawn.pos.x, spawn.pos.y, 0.38, 0xb88cff, 'ring');
+    for (const echo of region.echoSpawns ?? []) add(echo.pos.x, echo.pos.y, 0.42, 0x8fe8ff, 'ring');
+    for (const gate of region.gates ?? []) add(gate.pos.x, gate.pos.y, 0.5, 0x7aff9a, 'ring');
+    for (const gym of region.gyms ?? []) add(gym.pos.x, gym.pos.y, 0.58, 0xff9ad5, 'ring');
   }
 
   /** Game layer forwards sim events here (it also consumes them for UI). */

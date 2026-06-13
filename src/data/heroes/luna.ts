@@ -6,7 +6,7 @@ export const LUNA: HeroDef = {
   title: 'Moon Rider of Nightsilver',
   attribute: 'agi',
   roles: ['carry', 'nuker', 'pusher'],
-  region: 'tranquil-vale',
+  region: 'nightsilver-woods',
   lore: 'A mounted knight of Selemene, riding ahead of the Nightsilver host to hunt the Mad Moon shards that answer the wrong goddess.',
   baseStats: {
     str: 21, agi: 24, int: 23,
@@ -154,5 +154,6 @@ export const LUNA: HeroDef = {
     'The woods remember my oath.',
     'Moonlight is mercy only from far away.'
   ],
-  bounty: { xp: 330, gold: 220 }
+  bounty: { xp: 330, gold: 220 },
+  recruitmentQuestId: 'recruit-luna'
 };

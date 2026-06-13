@@ -8,13 +8,18 @@ import { LICH } from './heroes/lich';
 import { LUNA } from './heroes/luna';
 import { SVEN } from './heroes/sven';
 import { AXE } from './heroes/axe';
+import { PHASE2_HEROES } from './heroes/phase2';
 import { ALL_ITEMS } from './items/index';
 import { ALL_CREEPS } from './creeps/index';
 import { TRANQUIL_VALE } from './regions/tranquil-vale';
+import { NIGHTSILVER_WOODS } from './regions/nightsilver-woods';
+import { ICEWRACK } from './regions/icewrack';
+import { ALL_GYMS } from './gyms';
+import { ALL_QUESTS, ALL_TRIALS } from './quests';
 import type { HeroDef } from '../core/types';
 
-export const ALL_HEROES: HeroDef[] = [JUGGERNAUT, CRYSTAL_MAIDEN, PUDGE, EARTHSHAKER, SNIPER, LICH, LUNA, SVEN, AXE];
-export const ALL_REGIONS = [TRANQUIL_VALE];
+export const ALL_HEROES: HeroDef[] = [JUGGERNAUT, CRYSTAL_MAIDEN, PUDGE, EARTHSHAKER, SNIPER, LICH, LUNA, SVEN, AXE, ...PHASE2_HEROES];
+export const ALL_REGIONS = [TRANQUIL_VALE, NIGHTSILVER_WOODS, ICEWRACK];
 
 let registered = false;
 
@@ -26,6 +31,9 @@ export function registerAllContent(): void {
   for (const i of ALL_ITEMS) REG.registerItem(i);
   for (const c of ALL_CREEPS) REG.registerCreep(c);
   for (const r of ALL_REGIONS) REG.registerRegion(r);
+  for (const t of ALL_TRIALS) REG.registerTrial(t);
+  for (const q of ALL_QUESTS) REG.registerQuest(q);
+  for (const g of ALL_GYMS) REG.registerGym(g);
   // Exotic registry: zero exotics spent in Phase 1 (budget ~25, SPEC §2).
 }
 

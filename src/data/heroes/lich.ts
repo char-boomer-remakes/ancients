@@ -206,5 +206,6 @@ export const LICH: HeroDef = {
     'I froze my own rebellion once. Twice, counting today.',
     'Stand by the shield-bearer. The cold prefers the brave.'
   ],
-  bounty: { xp: 300, gold: 200 }
+  bounty: { xp: 300, gold: 200 },
+  recruitmentQuestId: 'recruit-lich'
 };

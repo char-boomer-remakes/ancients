@@ -181,5 +181,6 @@ export const PUDGE: HeroDef = {
     'Hooked, cooked, and... no, that is the whole list.',
     'Stand still. This is the gentle part.'
   ],
-  bounty: { xp: 320, gold: 210 }
+  bounty: { xp: 320, gold: 210 },
+  recruitmentQuestId: 'recruit-pudge'
 };

@@ -45,10 +45,23 @@ export const TRANQUIL_VALE: RegionDef = {
     { heroId: 'pudge', pos: { x: 6350, y: 7050 } },
     { heroId: 'earthshaker', pos: { x: 2400, y: 3000 } },
     { heroId: 'lich', pos: { x: 9200, y: 3400 } },
-    { heroId: 'luna', pos: { x: 8400, y: 8600 } },
     { heroId: 'sven', pos: { x: 3200, y: 7050 } },
-    { heroId: 'axe', pos: { x: 7300, y: 3200 } }
+    { heroId: 'axe', pos: { x: 7300, y: 3200 } },
+    { heroId: 'witch-doctor', pos: { x: 5200, y: 9300 } },
+    { heroId: 'omniknight', pos: { x: 4550, y: 3350 } },
+    { heroId: 'windranger', pos: { x: 8250, y: 6900 } },
+    { heroId: 'phantom-assassin', pos: { x: 2650, y: 8800 } }
   ],
+  echoSpawns: [
+    { id: 'tv-echo-juggernaut', heroId: 'juggernaut', pos: { x: 8750, y: 9100 }, level: 10, respawnSec: 160 },
+    { id: 'tv-echo-pudge', heroId: 'pudge', pos: { x: 7000, y: 7850 }, level: 10, respawnSec: 160 },
+    { id: 'tv-echo-sven', heroId: 'sven', pos: { x: 2500, y: 7400 }, level: 10, respawnSec: 160 },
+    { id: 'tv-echo-axe', heroId: 'axe', pos: { x: 7900, y: 2700 }, level: 11, respawnSec: 160 }
+  ],
+  gates: [
+    { id: 'tv-to-nw', name: 'North Pass to Nightsilver Woods', pos: { x: 6000, y: 850 }, radius: 520, toRegionId: 'nightsilver-woods', toPos: { x: 5600, y: 11050 } }
+  ],
+  gyms: [],
   props: { treeDensity: 0.7, rockDensity: 0.3 },
-  gateHint: 'The northern pass to Nightsilver Woods opens for the bearer of a Gym Badge. (Phase 2)'
+  gateHint: 'The northern pass leads to Nightsilver Woods.'
 };

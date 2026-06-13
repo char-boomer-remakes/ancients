@@ -1,6 +1,7 @@
 import { TUNING } from '../data/tuning';
 import { dist, v2 } from './math2d';
 import { nearestEnemy } from './actions';
+import { REG } from './registry';
 import type { Unit } from './unit';
 import type { GambitAction, GambitCondition, GambitRule, GambitTargetMode, Vec2 } from './types';
 import type { Sim } from './sim';
@@ -240,6 +241,18 @@ function evalCondition(sim: Sim, u: Unit, cond: GambitCondition, focus: Unit | u
       return sim.unitsArr.some((o) => o.alive && o.team !== u.team && o.kind !== 'npc' && o.hp / o.stats.maxHp < cond.pct / 100);
     case 'self-mana-above':
       return u.stats.maxMana > 0 && u.mana / u.stats.maxMana > cond.pct / 100;
+    case 'self-mana-below':
+      return u.stats.maxMana > 0 && u.mana / u.stats.maxMana < cond.pct / 100;
+    case 'has-status': {
+      const target = cond.target === 'focus' ? focus : u;
+      if (!target) return false;
+      if (cond.status === 'buff') return target.statuses.some((s) => s.status === 'buff');
+      return target.hasStatus(cond.status);
+    }
+    case 'target-role':
+      return focus?.heroId ? REG.hero(focus.heroId).roles.includes(cond.role) : false;
+    case 'target-attribute':
+      return focus?.attribute === cond.attribute;
     case 'enemies-within':
       return sim.unitsInRadius(u.pos, cond.radius, (o) => o.team !== u.team && o.kind !== 'npc').length >= cond.count;
     case 'allies-alive':

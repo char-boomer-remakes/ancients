@@ -22,3 +22,7 @@ Dated one-liners for every nontrivial call, per SPEC §0.
 - 2026-06-12: Added spell amplification and status resistance to the stat vocabulary for Kaya/Sange identity instead of treating those items as cosmetic stat sticks.
 - 2026-06-12: Increased procedural model tessellation and switched unit materials to smooth Lambert shading; preserves asset-free stylization while reducing placeholder-low-poly jaggedness.
 - 2026-06-12: Combat feel pass keeps one shared core: faster AI cadence, role-based macro formations, taunt as forced attacks, and a damage-threat boss controller for 5v1 raids.
+- 2026-06-12: Phase 2 echo economy starts as per-hero persisted `EchoProgress`: first owned-echo kill unlocks facet swapping, then one talent tier at a time activates the opposite branch through the generic `buildHero` path.
+- 2026-06-12: Phase 2 region travel hot-swaps the single loaded region through the existing save/load event path; this preserves the current renderer architecture while enabling a three-region continent.
+- 2026-06-12: Recruitment trials are data-defined per hero and use a generic Find→Trial→Bind interpreter; the bind step is a real enemy hero echo fight, while the six bespoke trial kinds stay lightweight and reusable for Phase 2.
+- 2026-06-12: Gyms reuse the headless macro sim as best-of-3 sessions; Captain Calls are simulated as timed player-control windows that issue clutch orders, keeping gym logic testable without a second renderer.
