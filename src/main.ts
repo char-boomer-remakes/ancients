@@ -1,10 +1,12 @@
 import './ui/styles.css';
 import { registerAllContent } from './data';
+import { REG } from './core/registry';
 import { Game } from './systems/game';
 import { InputController } from './systems/input';
 import { debugEnabled, mountDebugPanel } from './systems/debug';
 import { Hud } from './ui/hud';
 import { showTitle } from './ui/title';
+import { withLoading } from './ui/loading';
 import type { GameSave } from './core/types';
 
 registerAllContent();
@@ -32,34 +34,45 @@ function teardown(): void {
 
 function startGame(save: GameSave): void {
   teardown();
-  game = new Game(canvas, save);
-  (window as unknown as { __game: Game }).__game = game;
-  input = new InputController(game, canvas);
-  hud = new Hud(game, input, () => {
-    teardown();
-    boot();
-  });
-  if (debugEnabled()) unmountDebug = mountDebugPanel(game);
+  let regionName = 'the Isle';
+  try {
+    regionName = REG.region(save.regionId).name;
+  } catch {
+    /* unknown region id — keep the generic label */
+  }
+  // Build + warm the scene behind a loading screen so the one-time shader/env
+  // compile hitch lands off-screen instead of on the first playable frame.
+  withLoading(`Entering ${regionName}…`, () => {
+    game = new Game(canvas, save);
+    game.prewarm();
+    (window as unknown as { __game: Game }).__game = game;
+    input = new InputController(game, canvas);
+    hud = new Hud(game, input, () => {
+      teardown();
+      boot();
+    });
+    if (debugEnabled()) unmountDebug = mountDebugPanel(game);
 
-  let last = performance.now();
-  const frame = (): void => {
-    const now = performance.now();
-    const dt = (now - last) / 1000;
-    last = now;
-    input!.update();
-    game!.update(dt);
-    hud!.update();
-  };
-  const loop = (): void => {
+    let last = performance.now();
+    const frame = (): void => {
+      const now = performance.now();
+      const dt = (now - last) / 1000;
+      last = now;
+      input!.update();
+      game!.update(dt);
+      hud!.update();
+    };
+    const loop = (): void => {
+      rafId = requestAnimationFrame(loop);
+      frame();
+    };
     rafId = requestAnimationFrame(loop);
-    frame();
-  };
-  rafId = requestAnimationFrame(loop);
-  // rAF stops entirely while the tab/view is hidden; keep simulating so the
-  // world doesn't freeze mid-fight (Game.update clamps dt internally).
-  tickTimer = window.setInterval(() => {
-    if (performance.now() - last > 200) frame();
-  }, 100);
+    // rAF stops entirely while the tab/view is hidden; keep simulating so the
+    // world doesn't freeze mid-fight (Game.update clamps dt internally).
+    tickTimer = window.setInterval(() => {
+      if (performance.now() - last > 200) frame();
+    }, 100);
+  });
 }
 
 function boot(): void {

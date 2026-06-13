@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Rng, hashString } from '../core/rng';
 import type { RegionDef } from '../core/types';
 import { WORLD_SCALE } from './scale';
+import { loadTex, loadModel, instancedFromModel } from './asset-loaders';
 
 // ------------------------------------------------------------------
 // Procedural low-poly terrain: vertex-jittered plane, painted height
@@ -13,6 +14,45 @@ export interface TerrainInfo {
   group: THREE.Group;
   heightAt(simX: number, simY: number): number; // world-units height
   obstacles: { pos: { x: number; y: number }; radius: number }[];
+  /** Advances animated materials (water ripples). No-op when none. */
+  update?(time: number): void;
+}
+
+// Generated grayscale ground-detail texture (GRAPHICS_SPEC §5.1): mostly white
+// so it barely darkens the painted height bands, with sparse speckle + soft
+// blotches for a hand-painted read. Browser-only; null under node tests.
+function makeGroundDetail(rng: Rng): THREE.Texture | null {
+  if (typeof document === 'undefined') return null;
+  const size = 256;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return null;
+  const img = ctx.createImageData(size, size);
+  for (let i = 0; i < size * size; i++) {
+    const n = 232 + rng.next() * 23; // 232..255, subtle grain
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = n;
+    img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  for (let b = 0; b < 80; b++) {
+    const x = rng.next() * size;
+    const y = rng.next() * size;
+    const r = 6 + rng.next() * 46;
+    const dark = rng.next() < 0.55;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, dark ? 'rgba(70,66,56,0.22)' : 'rgba(255,255,255,0.16)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
 }
 
 function valueNoise(rng: Rng, gridN: number): number[][] {
@@ -50,6 +90,126 @@ const BIOME_COLORS: Record<string, { low: number; mid: number; high: number; tre
   forest: { low: 0x2e5c28, mid: 0x3e7a34, high: 0x5c9447, tree: 0x2a5224, trunk: 0x52402c, rock: 0x7d7d89 }
 };
 
+// Phase 1 (GRAPHICS_SPEC §13): ground each biome with a real ambientCG PBR
+// surface (CC0) when the files are present. Maps are loaded async and best-
+// effort, so the vertex-painted material below is always the live fallback.
+const TERRAIN_PBR_SET: Record<string, string> = {
+  grass: 'Grass001',
+  forest: 'Grass001',
+  coast: 'Grass001',
+  snow: 'Snow010A',
+  desert: 'Ground080',
+  wasteland: 'Ground048'
+};
+
+function applyTerrainPBR(mat: THREE.MeshStandardMaterial, biome: string, repeat: number): void {
+  const set = TERRAIN_PBR_SET[biome] ?? TERRAIN_PBR_SET.grass;
+  const base = `/assets/textures/terrain/${set}`;
+  void Promise.all([
+    loadTex(`${base}_Color.jpg`, { srgb: true, repeat }),
+    loadTex(`${base}_NormalGL.jpg`, { repeat }),
+    loadTex(`${base}_Roughness.jpg`, { repeat })
+  ]).then(([color, normal, rough]) => {
+    if (!color && !normal && !rough) return; // headless / all failed: keep the painted floor
+    if (color) mat.map = color;
+    if (normal) {
+      mat.normalMap = normal;
+      mat.normalScale = new THREE.Vector2(0.7, 0.7);
+    }
+    if (rough) {
+      mat.roughnessMap = rough;
+      mat.roughness = 1;
+    }
+    mat.flatShading = false; // smooth base normals so the normal map reads cleanly
+    mat.needsUpdate = true;
+  });
+}
+
+// Phase 2 (GRAPHICS_SPEC §13): authored Quaternius foliage/props + buildings
+// (CC0). Loaded async; the instanced primitives / box huts stay live until the
+// GLBs arrive, so no-asset and headless runs keep the procedural silhouette.
+const FOLIAGE_BASE = '/assets/props/foliage';
+const TOWN_BASE = '/assets/props/town';
+
+const TREE_MODELS: Record<string, string[]> = {
+  grass: ['oak_1', 'oak_2', 'pine_1'],
+  forest: ['oak_1', 'oak_2', 'oak_4', 'pine_1', 'pine_2'],
+  coast: ['oak_1', 'pine_1'],
+  snow: ['pine_2', 'pine_4'],
+  desert: ['oak_4'],
+  wasteland: ['oak_4', 'pine_4']
+};
+const ROCK_MODELS = ['rock_1', 'rock_2', 'rock_3'];
+const TOWN_BUILDINGS = ['house_1', 'house_2', 'house_3', 'inn', 'blacksmith'];
+
+function modelUrls(base: string, names: string[]): string[] {
+  return names.map((n) => `${base}/${n}.glb`);
+}
+
+/** Clone an authored scene, seat its base at y=0, and scale it to `targetHeight`. */
+function normalizedClone(scene: THREE.Object3D, targetHeight: number): THREE.Group {
+  const clone = scene.clone(true) as THREE.Group;
+  const box = new THREE.Box3().setFromObject(clone);
+  const size = box.getSize(new THREE.Vector3());
+  const k = targetHeight / (size.y || 1);
+  clone.scale.setScalar(k);
+  clone.position.y = -box.min.y * k;
+  clone.updateMatrixWorld(true);
+  return clone;
+}
+
+/** Once authored GLBs load, instance them across the placements and hide the fallback. */
+function swapToInstancedModels(
+  group: THREE.Group,
+  fallback: THREE.Object3D[],
+  urls: string[],
+  matrices: THREE.Matrix4[],
+  targetHeight: number
+): void {
+  if (!matrices.length || !urls.length) return;
+  void Promise.all(urls.map((u) => loadModel(u))).then((scenes) => {
+    const loaded = scenes.filter((s): s is THREE.Group => !!s);
+    if (!loaded.length) return; // keep the procedural fallback
+    const models = loaded.map((s) => normalizedClone(s, targetHeight));
+    const buckets: THREE.Matrix4[][] = models.map(() => []);
+    matrices.forEach((m, i) => buckets[i % models.length].push(m));
+    models.forEach((model, idx) => {
+      if (!buckets[idx].length) return;
+      for (const inst of instancedFromModel(model, buckets[idx])) group.add(inst);
+    });
+    for (const f of fallback) f.visible = false;
+  });
+}
+
+/** Once building GLBs load, place a varied one per hut slot and hide the box huts. */
+function swapTownBuildings(
+  g: THREE.Group,
+  fallback: THREE.Object3D[],
+  placements: { x: number; z: number; baseY: number; rotY: number }[]
+): void {
+  if (!placements.length) return;
+  void Promise.all(modelUrls(TOWN_BASE, TOWN_BUILDINGS).map((u) => loadModel(u))).then((scenes) => {
+    const loaded = scenes.filter((s): s is THREE.Group => !!s);
+    if (!loaded.length) return;
+    placements.forEach((p, i) => {
+      const b = normalizedClone(loaded[i % loaded.length], 3.6);
+      b.position.x = p.x;
+      b.position.z = p.z;
+      b.position.y += p.baseY;
+      b.rotation.y = p.rotY;
+      b.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh) {
+          m.castShadow = true;
+          m.receiveShadow = true;
+        }
+      });
+      g.add(b);
+    });
+    for (const f of fallback) f.visible = false;
+  });
+}
+
 export function buildTerrain(region: RegionDef): TerrainInfo {
   const group = new THREE.Group();
   const sizeW = region.size / WORLD_SCALE;
@@ -76,6 +236,7 @@ export function buildTerrain(region: RegionDef): TerrainInfo {
   const cLow = new THREE.Color(colors.low);
   const cMid = new THREE.Color(colors.mid);
   const cHigh = new THREE.Color(colors.high);
+  const WHITE_TINT = new THREE.Color(0xffffff);
   const jitter = new Rng(region.seed + 77);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i) + sizeW / 2;
@@ -88,23 +249,66 @@ export function buildTerrain(region: RegionDef): TerrainInfo {
     pos.setY(i, h);
     const t = Math.min(1, h / 4.2);
     const c = t < 0.45 ? cLow.clone().lerp(cMid, t / 0.45) : cMid.clone().lerp(cHigh, (t - 0.45) / 0.55);
+    // Ease the painted band toward neutral so the photographic albedo map (when
+    // present) reads through the vertex tint instead of double-saturating it.
+    c.lerp(WHITE_TINT, 0.2);
     // subtle patchiness
     const shade = 0.92 + jitter.next() * 0.16;
     colorArr.push(c.r * shade, c.g * shade, c.b * shade);
   }
   geo.setAttribute('color', new THREE.Float32BufferAttribute(colorArr, 3));
   geo.computeVertexNormals();
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  const detail = makeGroundDetail(new Rng(region.seed + 999));
+  if (detail) detail.repeat.set(26, 26);
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    flatShading: true,
+    roughness: 0.96,
+    metalness: 0.02,
+    envMapIntensity: 0.3,
+    map: detail ?? null
+  });
   const ground = new THREE.Mesh(geo, mat);
   ground.position.set(sizeW / 2, 0, sizeW / 2);
   ground.receiveShadow = true;
   group.add(ground);
+  applyTerrainPBR(mat, region.biome, Math.max(8, Math.round(sizeW / 8)));
 
-  // water ring outside the playfield for vibes
-  const water = new THREE.Mesh(
-    new THREE.PlaneGeometry(sizeW * 3, sizeW * 3),
-    new THREE.MeshLambertMaterial({ color: 0x2c5a78 })
-  );
+  // Animated shader water ring outside the playfield (GRAPHICS_SPEC §5.4):
+  // summed sines ripple the surface and paint deeper troughs / foamy crests.
+  const waterMat = new THREE.ShaderMaterial({
+    transparent: true,
+    uniforms: {
+      uTime: { value: 0 },
+      uDeep: { value: new THREE.Color(0x123247) },
+      uShallow: { value: new THREE.Color(0x3f86a8) },
+      uFoam: { value: new THREE.Color(0x9fd8e8) }
+    },
+    vertexShader: /* glsl */ `
+      uniform float uTime;
+      varying float vWave;
+      void main() {
+        float w = sin(position.x * 0.55 + uTime * 1.3) * 0.18
+                + sin(position.y * 0.5 - uTime * 1.05) * 0.15
+                + sin((position.x + position.y) * 0.3 + uTime * 0.7) * 0.11;
+        vWave = w;
+        vec3 p = position;
+        p.z += w;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uDeep, uShallow, uFoam;
+      varying float vWave;
+      void main() {
+        float t = clamp(vWave * 2.2 + 0.5, 0.0, 1.0);
+        vec3 col = mix(uDeep, uShallow, t);
+        col = mix(col, uFoam, smoothstep(0.2, 0.3, vWave));
+        gl_FragColor = vec4(col, 0.94);
+      }
+    `
+  });
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(sizeW * 3, sizeW * 3, 90, 90), waterMat);
   water.rotateX(-Math.PI / 2);
   water.position.set(sizeW / 2, -1.2, sizeW / 2);
   group.add(water);
@@ -131,12 +335,16 @@ export function buildTerrain(region: RegionDef): TerrainInfo {
 
   // trees: instanced cone + trunk
   const treeGeo = new THREE.ConeGeometry(0.95, 2.6, 6);
-  const treeMat = new THREE.MeshLambertMaterial({ color: colors.tree, flatShading: true });
+  const treeMat = new THREE.MeshStandardMaterial({ color: colors.tree, flatShading: true, roughness: 0.85, metalness: 0.02 });
   const trunkGeo = new THREE.CylinderGeometry(0.22, 0.3, 1.0, 5);
-  const trunkMat = new THREE.MeshLambertMaterial({ color: colors.trunk, flatShading: true });
+  const trunkMat = new THREE.MeshStandardMaterial({ color: colors.trunk, flatShading: true, roughness: 0.9, metalness: 0.02 });
   const trees = new THREE.InstancedMesh(treeGeo, treeMat, treeCount);
   const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
   const m4 = new THREE.Matrix4();
+  const yUp = new THREE.Vector3(0, 1, 0);
+  // Feet-based transforms reused to instance authored GLB props (Phase 2) over
+  // the same deterministic placements once the models load.
+  const treeMatrices: THREE.Matrix4[] = [];
   let placedTrees = 0;
   for (let i = 0; i < treeCount * 4 && placedTrees < treeCount; i++) {
     const x = propRng.range(400, region.size - 400);
@@ -146,14 +354,12 @@ export function buildTerrain(region: RegionDef): TerrainInfo {
     const h = heightAt(x, y);
     const wx = x / WORLD_SCALE;
     const wz = y / WORLD_SCALE;
-    m4.compose(
-      new THREE.Vector3(wx, h + 1.3 * s + 0.7, wz),
-      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), propRng.range(0, Math.PI * 2)),
-      new THREE.Vector3(s, s, s)
-    );
+    const qY = new THREE.Quaternion().setFromAxisAngle(yUp, propRng.range(0, Math.PI * 2));
+    m4.compose(new THREE.Vector3(wx, h + 1.3 * s + 0.7, wz), qY, new THREE.Vector3(s, s, s));
     trees.setMatrixAt(placedTrees, m4);
     m4.compose(new THREE.Vector3(wx, h + 0.5, wz), new THREE.Quaternion(), new THREE.Vector3(s, s, s));
     trunks.setMatrixAt(placedTrees, m4);
+    treeMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(wx, h, wz), qY, new THREE.Vector3(s, s, s)));
     obstacles.push({ pos: { x, y }, radius: 55 * s });
     placedTrees++;
   }
@@ -162,35 +368,41 @@ export function buildTerrain(region: RegionDef): TerrainInfo {
   trees.castShadow = true;
   group.add(trees);
   group.add(trunks);
+  swapToInstancedModels(group, [trees, trunks], modelUrls(FOLIAGE_BASE, TREE_MODELS[region.biome] ?? TREE_MODELS.grass), treeMatrices, 4.6);
 
   // rocks
   const rockGeo = new THREE.DodecahedronGeometry(0.8, 0);
-  const rockMat = new THREE.MeshLambertMaterial({ color: colors.rock, flatShading: true });
+  const rockMat = new THREE.MeshStandardMaterial({ color: colors.rock, flatShading: true, roughness: 0.7, metalness: 0.08 });
   const rocks = new THREE.InstancedMesh(rockGeo, rockMat, rockCount);
+  const rockMatrices: THREE.Matrix4[] = [];
   let placedRocks = 0;
   for (let i = 0; i < rockCount * 4 && placedRocks < rockCount; i++) {
     const x = propRng.range(400, region.size - 400);
     const y = propRng.range(400, region.size - 400);
     if (!isClear(x, y)) continue;
     const s = propRng.range(0.6, 2.2);
-    m4.compose(
-      new THREE.Vector3(x / WORLD_SCALE, heightAt(x, y) + 0.3 * s, y / WORLD_SCALE),
-      new THREE.Quaternion().setFromEuler(new THREE.Euler(propRng.range(0, 1), propRng.range(0, Math.PI * 2), propRng.range(0, 1))),
-      new THREE.Vector3(s, s * 0.8, s)
-    );
+    const qR = new THREE.Quaternion().setFromEuler(new THREE.Euler(propRng.range(0, 1), propRng.range(0, Math.PI * 2), propRng.range(0, 1)));
+    m4.compose(new THREE.Vector3(x / WORLD_SCALE, heightAt(x, y) + 0.3 * s, y / WORLD_SCALE), qR, new THREE.Vector3(s, s * 0.8, s));
     rocks.setMatrixAt(placedRocks, m4);
+    rockMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x / WORLD_SCALE, heightAt(x, y), y / WORLD_SCALE), qR, new THREE.Vector3(s, s, s)));
     obstacles.push({ pos: { x, y }, radius: 60 * s });
     placedRocks++;
   }
   rocks.count = placedRocks;
   rocks.castShadow = true;
   group.add(rocks);
+  swapToInstancedModels(group, [rocks], modelUrls(FOLIAGE_BASE, ROCK_MODELS), rockMatrices, 1.5);
 
   // town: stone circle + simple huts + shrine crystal
   const town = buildTown(region, heightAt);
   group.add(town);
 
-  return { group, heightAt, obstacles };
+  return {
+    group,
+    heightAt,
+    obstacles,
+    update: (time: number) => { waterMat.uniforms.uTime.value = time; }
+  };
 }
 
 function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number): THREE.Group {
@@ -203,14 +415,16 @@ function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number
   // plaza
   const plaza = new THREE.Mesh(
     new THREE.CylinderGeometry(region.town.radius / WORLD_SCALE * 0.55, region.town.radius / WORLD_SCALE * 0.58, 0.3, 24),
-    new THREE.MeshLambertMaterial({ color: 0xb8a888, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0xb8a888, flatShading: true, roughness: 0.85, metalness: 0.04 })
   );
   plaza.position.set(wx, baseY + 0.12, wz);
   g.add(plaza);
 
-  // huts around the plaza
-  const hutMat = new THREE.MeshLambertMaterial({ color: 0x9a7a52, flatShading: true });
-  const roofMat = new THREE.MeshLambertMaterial({ color: 0xb84a32, flatShading: true });
+  // huts around the plaza (procedural fallback; swapped for authored buildings below)
+  const hutMat = new THREE.MeshStandardMaterial({ color: 0x9a7a52, flatShading: true, roughness: 0.88, metalness: 0.03 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0xb84a32, flatShading: true, roughness: 0.7, metalness: 0.05 });
+  const hutMeshes: THREE.Object3D[] = [];
+  const townPlacements: { x: number; z: number; baseY: number; rotY: number }[] = [];
   for (let i = 0; i < 6; i++) {
     const ang = (i / 6) * Math.PI * 2 + 0.4;
     const r = region.town.radius / WORLD_SCALE * 0.42;
@@ -223,19 +437,23 @@ function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number
     roof.position.set(hx, baseY + 2.6, hz);
     roof.rotation.y = ang + Math.PI / 4;
     g.add(hut, roof);
+    hutMeshes.push(hut, roof);
+    // Buildings face the plaza centre.
+    townPlacements.push({ x: hx, z: hz, baseY: heightAt(t.x + Math.cos(ang) * (r * WORLD_SCALE), t.y + Math.sin(ang) * (r * WORLD_SCALE)), rotY: ang + Math.PI });
   }
+  swapTownBuildings(g, hutMeshes, townPlacements);
 
   // shrine: floating crystal on a plinth
   const sx = region.shrine.pos.x / WORLD_SCALE;
   const sz = region.shrine.pos.y / WORLD_SCALE;
   const plinth = new THREE.Mesh(
     new THREE.CylinderGeometry(1.0, 1.3, 0.9, 6),
-    new THREE.MeshLambertMaterial({ color: 0x8d8d99, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x8d8d99, flatShading: true, roughness: 0.6, metalness: 0.15 })
   );
   plinth.position.set(sx, baseY + 0.6, sz);
   const crystal = new THREE.Mesh(
     new THREE.OctahedronGeometry(0.8),
-    new THREE.MeshLambertMaterial({ color: 0x7adfc4, emissive: 0x2c8a6a })
+    new THREE.MeshStandardMaterial({ color: 0x7adfc4, emissive: 0x49f0c0, emissiveIntensity: 1.7, roughness: 0.15, metalness: 0.1 })
   );
   crystal.position.set(sx, baseY + 2.4, sz);
   crystal.name = 'shrine-crystal';
@@ -244,15 +462,15 @@ function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number
   // shop stall: counter + awning
   const shopX = wx + 3.5;
   const shopZ = wz + 1.5;
-  const counter = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.1, 1.2), new THREE.MeshLambertMaterial({ color: 0x7a5a36, flatShading: true }));
+  const counter = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.1, 1.2), new THREE.MeshStandardMaterial({ color: 0x7a5a36, flatShading: true, roughness: 0.9, metalness: 0.03 }));
   counter.position.set(shopX, baseY + 0.7, shopZ);
-  const awning = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.2, 2.0), new THREE.MeshLambertMaterial({ color: 0xd8b04a, flatShading: true }));
+  const awning = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.2, 2.0), new THREE.MeshStandardMaterial({ color: 0xd8b04a, flatShading: true, roughness: 0.65, metalness: 0.1 }));
   awning.position.set(shopX, baseY + 2.3, shopZ);
-  const pole1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.8, 5), new THREE.MeshLambertMaterial({ color: 0x5a4a32 }));
+  const pole1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.8, 5), new THREE.MeshStandardMaterial({ color: 0x5a4a32, roughness: 0.8, metalness: 0.05 }));
   pole1.position.set(shopX - 1.5, baseY + 1.4, shopZ + 0.8);
   const pole2 = pole1.clone();
   pole2.position.x = shopX + 1.5;
-  const sign = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.1), new THREE.MeshLambertMaterial({ color: 0xe8c87c, emissive: 0x6a5a2c }));
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.1), new THREE.MeshStandardMaterial({ color: 0xe8c87c, emissive: 0x6a5a2c, emissiveIntensity: 0.7, roughness: 0.5, metalness: 0.1 }));
   sign.position.set(shopX, baseY + 3.0, shopZ);
   sign.name = 'shop-sign';
   g.add(counter, awning, pole1, pole2, sign);

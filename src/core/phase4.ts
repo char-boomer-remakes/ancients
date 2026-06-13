@@ -1,4 +1,4 @@
-import type { AudioSettings, GameSave } from './types';
+import type { AudioSettings, GameSave, GraphicsSettings } from './types';
 import type { GameSaveV3, LegacySettings } from './phase3';
 
 // ------------------------------------------------------------------
@@ -11,18 +11,30 @@ export function defaultAudioSettings(): AudioSettings {
   return { master: 0.8, sfx: 0.8, voice: 0.7, stinger: 0.7, muted: false };
 }
 
+export function defaultGraphicsSettings(): GraphicsSettings {
+  return { quality: 'auto', exposure: 0.92, grade: 1, reducedMotion: false };
+}
+
 /**
  * Fold legacy loose volumes into the v4 audio channel object.
  * masterVolume -> master, sfxVolume -> sfx, musicVolume -> stinger (stingers are
  * the musical layer); voice has no v3 analogue, so it defaults. (DECISIONS.md)
  */
-export function migrateAudioSettings(old: (LegacySettings & { audio?: AudioSettings }) | undefined): GameSave['settings'] {
+export function migrateAudioSettings(old: (LegacySettings & { audio?: AudioSettings; graphics?: GraphicsSettings }) | undefined): GameSave['settings'] {
   const d = defaultAudioSettings();
   const existing = old?.audio;
+  const gd = defaultGraphicsSettings();
+  const gx = old?.graphics;
   return {
     quickcast: old?.quickcast ?? true,
     resonance: old?.resonance ?? false,
     minimap: old?.minimap,
+    graphics: {
+      quality: gx?.quality ?? gd.quality,
+      exposure: gx?.exposure ?? gd.exposure,
+      grade: gx?.grade ?? gd.grade,
+      reducedMotion: gx?.reducedMotion ?? gd.reducedMotion
+    },
     audio: existing
       ? {
           master: existing.master ?? d.master,

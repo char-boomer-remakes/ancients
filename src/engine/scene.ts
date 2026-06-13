@@ -4,13 +4,22 @@ import type { Sim } from '../core/sim';
 import type { Unit } from '../core/unit';
 import { REG } from '../core/registry';
 import { buildTerrain, type TerrainInfo } from './terrain';
-import { applyHeroLikeness, applyItemAppearances, buildUnitRig, buildSelectionRing, type UnitRig } from './models';
+import { applyHeroLikeness, applyItemAppearances, buildUnitRig, buildSelectionRing, mountHeroModel, type UnitRig } from './models';
+import { HeroAssetLoader, heroAssetEntry, creepCreatureUrl } from './assets';
 import { animateRig, newAnimState, type AnimState } from './animator';
 import { VfxManager } from './vfx';
 import { lodForDistance, shouldAnimateAtLod } from './lod';
 import { WORLD_SCALE } from './scale';
 import { TUNING } from '../data/tuning';
-import { clampedPixelRatio, qualityPreset, type QualityTier } from './performance';
+import { clampedPixelRatio, qualityPreset, type QualityTier, type QualityPreset } from './performance';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { loadHdr, loadModelAsset, cloneModel } from './asset-loaders';
 
 // ------------------------------------------------------------------
 // GameScene: owns the three.js world. Reads sim state every frame,
@@ -42,27 +51,182 @@ interface MapMarker {
 
 export type CameraMode = 'follow' | 'map';
 
+// Hemi is deliberately low: the PBR env map now supplies most of the ambient
+// fill, so a strong hemisphere light on top would wash the scene out.
 const DAY = {
   sky: new THREE.Color('#8fc3e8'),
   fog: new THREE.Color('#a8d0e8'),
   sun: new THREE.Color('#fff2d8'),
-  hemi: 0.75,
-  sunI: 1.15
+  hemi: 0.42,
+  sunI: 1.1
 };
 const DUSK = {
   sky: new THREE.Color('#d98a5e'),
   fog: new THREE.Color('#caa07a'),
   sun: new THREE.Color('#ffb36a'),
-  hemi: 0.5,
-  sunI: 0.7
+  hemi: 0.3,
+  sunI: 0.66
 };
 const NIGHT = {
-  sky: new THREE.Color('#101828'),
-  fog: new THREE.Color('#16203a'),
+  sky: new THREE.Color('#16213b'),
+  fog: new THREE.Color('#1d2a48'),
   sun: new THREE.Color('#9db8e8'),
-  hemi: 0.28,
-  sunI: 0.22
+  // Moonlit, not pitch-black: enough hemi + moon key to read terrain and units
+  // (GRAPHICS_SPEC §3.2). The cool sun color + dark sky + grade keep it night.
+  hemi: 0.46,
+  sunI: 0.4
 };
+
+// Color-grade + vignette post pass (GRAPHICS_SPEC §3.1). Tint/saturation/
+// contrast are driven per-frame from the active biome blended toward a cool
+// night look. Keeps the Dota-style painterly, high-contrast read.
+const GRADE_SHADER = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    uTint: { value: new THREE.Color(1, 1, 1) },
+    uSaturation: { value: 1.1 },
+    uContrast: { value: 1.06 },
+    uBrightness: { value: 1.0 },
+    uVignette: { value: 0.8 },
+    uStrength: { value: 1.0 }
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform vec3 uTint;
+    uniform float uSaturation, uContrast, uBrightness, uVignette, uStrength;
+    varying vec2 vUv;
+    void main() {
+      vec4 src = texture2D(tDiffuse, vUv);
+      vec3 c = src.rgb * uBrightness * uTint;
+      c = (c - 0.5) * uContrast + 0.5;
+      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c = mix(vec3(l), c, uSaturation);
+      float d = distance(vUv, vec2(0.5));
+      float vig = smoothstep(0.85, uVignette * 0.5, d);
+      c *= mix(1.0, vig, 0.42);
+      // uStrength scales the whole grade (incl. vignette) toward the raw image,
+      // so the settings slider can dial it down to off or up past the default.
+      c = mix(src.rgb, c, uStrength);
+      gl_FragColor = vec4(clamp(c, 0.0, 1.0), src.a);
+    }
+  `
+};
+
+// Gradient sky dome (GRAPHICS_SPEC §5.3): a back-side sphere shaded from a
+// hazy horizon up to a deeper zenith, tinted live by the day/night palette.
+const SKY_SHADER = {
+  uniforms: {
+    uTop: { value: new THREE.Color('#6ea8d8') },
+    uBottom: { value: new THREE.Color('#a8d0e8') },
+    uExp: { value: 0.55 }
+  },
+  vertexShader: /* glsl */ `
+    varying vec3 vDir;
+    void main() {
+      vDir = position;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    varying vec3 vDir;
+    uniform vec3 uTop, uBottom;
+    uniform float uExp;
+    void main() {
+      float h = pow(max(normalize(vDir).y, 0.0), uExp);
+      gl_FragColor = vec4(mix(uBottom, uTop, h), 1.0);
+    }
+  `
+};
+
+// Per-biome ambient weather (GRAPHICS_SPEC §5.6). count scales with the quality
+// tier's weatherDensity; fall/sway/colour give each region its own air.
+interface WeatherSpec { count: number; color: number; size: number; fall: number; sway: number; }
+const BIOME_WEATHER: Record<string, WeatherSpec> = {
+  snow: { count: 420, color: 0xffffff, size: 0.16, fall: 1.6, sway: 0.7 },
+  desert: { count: 180, color: 0xe8d6a8, size: 0.1, fall: 0.5, sway: 1.1 },
+  wasteland: { count: 240, color: 0x8a7a6a, size: 0.12, fall: 1.0, sway: 0.6 },
+  forest: { count: 150, color: 0xbfe89a, size: 0.13, fall: 0.7, sway: 0.9 },
+  grass: { count: 120, color: 0xdfe8b0, size: 0.11, fall: 0.5, sway: 0.9 },
+  coast: { count: 140, color: 0xdfeefc, size: 0.11, fall: 0.45, sway: 1.0 }
+};
+const WEATHER_BOX = { w: 90, h: 46, d: 90 };
+
+// Soft round particle sprite (radial alpha) for additive weather/VFX. Built
+// numerically as a DataTexture so it needs no DOM or GL context.
+let SOFT_SPRITE: THREE.DataTexture | null = null;
+function softSprite(): THREE.DataTexture {
+  if (SOFT_SPRITE) return SOFT_SPRITE;
+  const s = 32;
+  const data = new Uint8Array(s * s * 4);
+  const c = (s - 1) / 2;
+  for (let y = 0; y < s; y++) {
+    for (let x = 0; x < s; x++) {
+      const d = Math.hypot(x - c, y - c) / c;
+      const a = Math.max(0, 1 - d);
+      const i = (y * s + x) * 4;
+      data[i] = data[i + 1] = data[i + 2] = 255;
+      data[i + 3] = Math.floor(255 * a * a);
+    }
+  }
+  const tex = new THREE.DataTexture(data, s, s);
+  tex.needsUpdate = true;
+  return (SOFT_SPRITE = tex);
+}
+
+// Generated micro-surface detail (Phase 5 hero textures). A tiling value-noise +
+// faint scratches used as a bump map so cloth/metal catch light unevenly instead of
+// reading as flat plastic. Canvas-only → null in headless tests (buildUnitRig stays
+// texture-free and node-safe); the scene applies this at view-creation time.
+let HERO_DETAIL: THREE.Texture | null | undefined;
+function heroDetailTexture(): THREE.Texture | null {
+  if (HERO_DETAIL !== undefined) return HERO_DETAIL;
+  if (typeof document === 'undefined') return (HERO_DETAIL = null);
+  const size = 128;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return (HERO_DETAIL = null);
+  const img = ctx.createImageData(size, size);
+  let seed = 1337;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 0xffffffff);
+  for (let i = 0; i < size * size; i++) {
+    const v = 150 + rnd() * 105; // bright base → gentle bump only
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  ctx.strokeStyle = 'rgba(60,60,60,0.5)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 22; i++) {
+    ctx.beginPath();
+    ctx.moveTo(rnd() * size, rnd() * size);
+    ctx.lineTo(rnd() * size, rnd() * size);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  tex.anisotropy = 2;
+  return (HERO_DETAIL = tex);
+}
+
+interface GradeTarget { tint: [number, number, number]; sat: number; contrast: number; }
+const BIOME_GRADE: Record<string, GradeTarget> = {
+  grass: { tint: [1.03, 1.01, 0.94], sat: 1.12, contrast: 1.06 },
+  forest: { tint: [0.98, 1.04, 0.96], sat: 1.14, contrast: 1.07 },
+  snow: { tint: [0.96, 0.99, 1.07], sat: 0.96, contrast: 1.08 },
+  desert: { tint: [1.07, 1.0, 0.88], sat: 1.06, contrast: 1.05 },
+  wasteland: { tint: [1.06, 0.95, 0.9], sat: 0.86, contrast: 1.1 },
+  coast: { tint: [0.98, 1.01, 1.05], sat: 1.1, contrast: 1.05 }
+};
+const NIGHT_GRADE: GradeTarget = { tint: [0.82, 0.9, 1.14], sat: 0.78, contrast: 1.06 };
 
 const HP_BAR_GEOMETRY = new THREE.PlaneGeometry(1, 1);
 const HP_BAR_WIDTH = 1.5;
@@ -78,7 +242,23 @@ export class GameScene {
 
   private hemi: THREE.HemisphereLight;
   private sun: THREE.DirectionalLight;
+  private rim: THREE.DirectionalLight;
+  private quality: QualityPreset;
+  private readonly biome: string;
+  private composer: EffectComposer | null = null;
+  private bloomPass: UnrealBloomPass | null = null;
+  private gradePass: ShaderPass | null = null;
+  private smaaPass: SMAAPass | null = null;
+  private skyMat: THREE.ShaderMaterial;
+  private skyDome: THREE.Mesh;
+  private weather: THREE.Points | null = null;
+  private weatherVel: Float32Array | null = null;
   private views = new Map<number, UnitView>();
+  private heroAssets = new HeroAssetLoader();
+  // Live, user-tunable graphics state (GRAPHICS_SPEC §6 settings).
+  private exposureBase = 0.92;
+  private gradeScale = 1;
+  private reducedMotion = false;
   private raycaster = new THREE.Raycaster();
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private mapMarkers: MapMarker[] = [];
@@ -94,13 +274,31 @@ export class GameScene {
 
   constructor(canvas: HTMLCanvasElement, region: RegionDef, quality: QualityTier = 'high') {
     const qualityCfg = qualityPreset(quality);
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.quality = qualityCfg;
+    this.biome = region.biome;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !qualityCfg.smaa });
     this.renderer.setPixelRatio(clampedPixelRatio(window.devicePixelRatio, quality));
     this.renderer.shadowMap.enabled = qualityCfg.shadows;
     this.renderer.shadowMap.type = qualityCfg.shadowType === 'pcf' ? THREE.PCFShadowMap : THREE.BasicShadowMap;
+    // Filmic tonemap + sRGB so PBR highlights and bloom read like Dota (§3.1).
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = this.exposureBase;
 
     this.camera = new THREE.PerspectiveCamera(46, 1, 0.5, 700);
     this.scene.fog = new THREE.Fog(DAY.fog.getHex(), 60, 300);
+
+    // Image-based lighting: a neutral room env map gives PBR materials real
+    // specular response. Built once on the GPU, then released.
+    if (qualityCfg.envMap) {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      // Keep IBL as a subtle fill: RoomEnvironment's bright panels would
+      // otherwise throw hot specular highlights that the bloom pass blows out.
+      // updateDayNight() drives the live value with the cycle.
+      (this.scene as unknown as { environmentIntensity: number }).environmentIntensity = 0.3;
+      pmrem.dispose();
+      this.installHdrEnvironment();
+    }
 
     this.hemi = new THREE.HemisphereLight(0xcfe8ff, 0x46584a, DAY.hemi);
     this.scene.add(this.hemi);
@@ -108,21 +306,126 @@ export class GameScene {
     this.sun = new THREE.DirectionalLight(DAY.sun, DAY.sunI);
     this.sun.castShadow = qualityCfg.shadows;
     this.sun.shadow.mapSize.set(qualityCfg.shadowMapSize, qualityCfg.shadowMapSize);
+    this.sun.shadow.bias = -0.0004;
     const sc = this.sun.shadow.camera;
     sc.left = -60; sc.right = 60; sc.top = 60; sc.bottom = -60;
     sc.near = 1; sc.far = 400;
     this.scene.add(this.sun, this.sun.target);
 
+    // Cool rim/back light opposite the sun for hero separation (§3.2).
+    this.rim = new THREE.DirectionalLight(0x9fc6ff, 0.4);
+    this.scene.add(this.rim, this.rim.target);
+
+    // Gradient sky dome: follows the camera, tinted by the cycle (§5.3).
+    this.skyMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTop: { value: new THREE.Color('#6ea8d8') },
+        uBottom: { value: new THREE.Color('#a8d0e8') },
+        uExp: { value: SKY_SHADER.uniforms.uExp.value }
+      },
+      vertexShader: SKY_SHADER.vertexShader,
+      fragmentShader: SKY_SHADER.fragmentShader,
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false
+    });
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(600, 32, 16), this.skyMat);
+    this.skyDome.renderOrder = -1;
+    this.scene.add(this.skyDome);
+
     this.terrain = buildTerrain(region);
     this.scene.add(this.terrain.group);
+
+    if (qualityCfg.weatherDensity > 0) this.buildWeather(region.biome, qualityCfg.weatherDensity);
 
     this.vfx = new VfxManager((x, y) => this.terrain.heightAt(x, y), qualityCfg.transientVfxCap);
     this.scene.add(this.vfx.group);
 
     this.createMapMarkers(region);
 
+    if (qualityCfg.postFx) this.setupComposer(qualityCfg);
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  /** Build the EffectComposer stack: render → bloom → grade → output → SMAA.
+   *  Each pass is gated by the quality preset (GRAPHICS_SPEC §1.5, §9.6). */
+  private setupComposer(q: QualityPreset): void {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const composer = new EffectComposer(this.renderer);
+    composer.addPass(new RenderPass(this.scene, this.camera));
+    if (q.bloom) {
+      this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), q.bloomStrength, q.bloomRadius, 1.0);
+      composer.addPass(this.bloomPass);
+    }
+    if (q.grade) {
+      this.gradePass = new ShaderPass(GRADE_SHADER);
+      composer.addPass(this.gradePass);
+    }
+    composer.addPass(new OutputPass());
+    if (q.smaa) {
+      this.smaaPass = new SMAAPass();
+      composer.addPass(this.smaaPass);
+    }
+    this.composer = composer;
+  }
+
+  /** Ambient weather: a camera-following cloud of additive soft particles
+   *  whose count/fall/colour come from the biome and quality tier (§5.6). */
+  private buildWeather(biome: string, density: number): void {
+    const spec = BIOME_WEATHER[biome] ?? BIOME_WEATHER.grass;
+    const count = Math.max(1, Math.floor(spec.count * density));
+    const positions = new Float32Array(count * 3);
+    const vel = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * WEATHER_BOX.w;
+      positions[i * 3 + 1] = Math.random() * WEATHER_BOX.h;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * WEATHER_BOX.d;
+      vel[i * 3] = (Math.random() - 0.5) * spec.sway;
+      vel[i * 3 + 1] = -(0.5 + Math.random()) * spec.fall;
+      vel[i * 3 + 2] = (Math.random() - 0.5) * spec.sway;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({
+      color: spec.color,
+      size: spec.size,
+      map: softSprite(),
+      transparent: true,
+      opacity: 0.66,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      sizeAttenuation: true
+    });
+    this.weather = new THREE.Points(geo, mat);
+    this.weather.frustumCulled = false;
+    this.weather.renderOrder = 5;
+    this.weatherVel = vel;
+    this.scene.add(this.weather);
+  }
+
+  private updateWeather(dt: number): void {
+    if (!this.weather || !this.weatherVel || this.reducedMotion) return;
+    this.weather.position.set(this.camera.position.x, this.camTarget.y, this.camera.position.z);
+    const pos = this.weather.geometry.attributes.position as THREE.BufferAttribute;
+    const arr = pos.array as Float32Array;
+    const vel = this.weatherVel;
+    const hw = WEATHER_BOX.w / 2;
+    const hd = WEATHER_BOX.d / 2;
+    for (let i = 0; i < arr.length; i += 3) {
+      arr[i] += vel[i] * dt;
+      arr[i + 1] += vel[i + 1] * dt;
+      arr[i + 2] += vel[i + 2] * dt;
+      if (arr[i + 1] < 0) {
+        arr[i + 1] += WEATHER_BOX.h;
+        arr[i] = (Math.random() - 0.5) * WEATHER_BOX.w;
+        arr[i + 2] = (Math.random() - 0.5) * WEATHER_BOX.d;
+      }
+      if (arr[i] < -hw) arr[i] += WEATHER_BOX.w; else if (arr[i] > hw) arr[i] -= WEATHER_BOX.w;
+      if (arr[i + 2] < -hd) arr[i + 2] += WEATHER_BOX.d; else if (arr[i + 2] > hd) arr[i + 2] -= WEATHER_BOX.d;
+    }
+    pos.needsUpdate = true;
   }
 
   resize(): void {
@@ -131,6 +434,101 @@ export class GameScene {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.composer?.setSize(w, h);
+    this.bloomPass?.setSize(w, h);
+    this.smaaPass?.setSize(w, h);
+  }
+
+  /** Pre-compile the programs for everything currently in the scene against the
+   *  camera, so the first rendered frame doesn't pay the GLSL compile/link cost
+   *  as one visible hitch (GRAPHICS_SPEC §9.4). Call behind a loading screen. */
+  prewarm(): void {
+    this.renderer.compile(this.scene, this.camera);
+  }
+
+  /** Live-apply user graphics settings: exposure, grade strength, reduced motion. */
+  setGraphics(g: { exposure?: number; grade?: number; reducedMotion?: boolean }): void {
+    if (g.exposure !== undefined) {
+      this.exposureBase = Math.max(0.5, Math.min(1.5, g.exposure));
+      this.renderer.toneMappingExposure = this.exposureBase;
+    }
+    if (g.grade !== undefined) {
+      this.gradeScale = Math.max(0, Math.min(1.5, g.grade));
+      if (this.gradePass) this.gradePass.uniforms.uStrength.value = this.gradeScale;
+    }
+    if (g.reducedMotion !== undefined) {
+      this.reducedMotion = g.reducedMotion;
+      if (this.weather) this.weather.visible = !this.reducedMotion;
+    }
+  }
+
+  /** Rebuild quality-gated systems for a new tier at runtime (Settings UI §6).
+   *  Disposes the old post stack/weather/shadow map so switching is leak-free. */
+  setQuality(tier: QualityTier): void {
+    const q = qualityPreset(tier);
+    this.quality = q;
+    this.renderer.setPixelRatio(clampedPixelRatio(window.devicePixelRatio, tier));
+
+    this.renderer.shadowMap.enabled = q.shadows;
+    this.renderer.shadowMap.type = q.shadowType === 'pcf' ? THREE.PCFShadowMap : THREE.BasicShadowMap;
+    this.sun.castShadow = q.shadows;
+    this.sun.shadow.mapSize.set(q.shadowMapSize, q.shadowMapSize);
+    this.sun.shadow.map?.dispose();
+    this.sun.shadow.map = null as unknown as THREE.WebGLRenderTarget; // re-alloc at new size
+
+    if (q.envMap && !this.scene.environment) {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      pmrem.dispose();
+      this.installHdrEnvironment();
+    } else if (!q.envMap && this.scene.environment) {
+      this.scene.environment.dispose();
+      this.scene.environment = null;
+    }
+
+    if (this.weather) {
+      this.scene.remove(this.weather);
+      this.weather.geometry.dispose();
+      (this.weather.material as THREE.Material).dispose();
+      this.weather = null;
+      this.weatherVel = null;
+    }
+    if (q.weatherDensity > 0) {
+      this.buildWeather(this.biome, q.weatherDensity);
+      if (this.weather) (this.weather as THREE.Points).visible = !this.reducedMotion;
+    }
+
+    if (this.composer) {
+      this.composer.dispose();
+      this.composer = null;
+      this.bloomPass = null;
+      this.gradePass = null;
+      this.smaaPass = null;
+    }
+    if (q.postFx) this.setupComposer(q);
+
+    this.resize();
+    this.renderer.toneMappingExposure = this.exposureBase;
+    if (this.gradePass) this.gradePass.uniforms.uStrength.value = this.gradeScale;
+  }
+
+  /**
+   * Phase 1 (GRAPHICS_SPEC §13): upgrade IBL from the neutral RoomEnvironment to
+   * a real Poly Haven outdoor HDRI (CC0) for grounded specular + sky reflections.
+   * Async + best-effort: the RoomEnvironment fill set above stays if the .hdr is
+   * missing or we're headless. The day/night cycle keeps driving environmentIntensity.
+   */
+  private installHdrEnvironment(): void {
+    if (!this.quality.envMap) return;
+    void loadHdr('/assets/env/vale_day_1k.hdr').then((hdr) => {
+      if (!hdr || !this.renderer) return;
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      const env = pmrem.fromEquirectangular(hdr).texture;
+      pmrem.dispose();
+      hdr.dispose();
+      this.scene.environment?.dispose();
+      this.scene.environment = env;
+    });
   }
 
   /** Wheel zoom: clamped per mode. */
@@ -158,7 +556,11 @@ export class GameScene {
     this.updateDayNight(timeOfDay01);
     this.updateCamera(followUnit, renderDt);
     this.updateMapMarkers();
-    this.renderer.render(this.scene, this.camera);
+    if (!this.reducedMotion) this.terrain.update?.(this.time);
+    this.skyDome.position.copy(this.camera.position);
+    this.updateWeather(renderDt);
+    if (this.composer) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
   }
 
   /** Drop every cached unit view + transient VFX. Used when the rendered sim
@@ -242,6 +644,17 @@ export class GameScene {
     }
   }
 
+  /** Apply the generated bump detail to a hero's PBR materials (browser only). */
+  private applyHeroDetail(rig: UnitRig): void {
+    const tex = heroDetailTexture();
+    if (!tex) return;
+    for (const m of rig.materials) {
+      m.bumpMap = tex;
+      m.bumpScale = 0.014;
+      m.needsUpdate = true;
+    }
+  }
+
   private createView(u: Unit): UnitView {
     let sil = u.kind === 'hero' && u.heroId ? REG.hero(u.heroId).silhouette : undefined;
     let palette: [string, string, string] | undefined =
@@ -259,9 +672,33 @@ export class GameScene {
     if (!palette) palette = ['#888899', '#666677', '#aaaabb'];
 
     const rig = buildUnitRig(sil, palette);
-    if (u.kind === 'hero' && u.heroId) applyHeroLikeness(rig, u.heroId);
+    if (u.kind === 'hero' && u.heroId) {
+      applyHeroLikeness(rig, u.heroId);
+      this.applyHeroDetail(rig);
+    }
     applyItemAppearances(rig, this.itemAppearancesFor(u));
     this.scene.add(rig.root);
+
+    // Pluggable rig (Phase 5): if an authored glTF is shipped for this hero, swap it
+    // in once it loads; otherwise the procedural rig above stays as the fallback.
+    const assetEntry = u.kind === 'hero' ? heroAssetEntry(u.heroId) : null;
+    if (assetEntry) {
+      void this.heroAssets.loadHero(assetEntry).then((asset) => {
+        if (asset && this.views.has(u.uid)) mountHeroModel(rig, cloneModel(asset.scene), asset.animations, assetEntry.clips);
+      });
+    }
+
+    // Phase 3 (GRAPHICS_SPEC §13): mount an authored Quaternius creature (CC0)
+    // for creeps; mountHeroModel hides the procedural body, so the rig stays the
+    // live fallback if the GLB is missing. The model rides rig.body (bob/lean).
+    if (u.kind === 'creep') {
+      const creatureUrl = creepCreatureUrl(u.creepId, sil.build);
+      if (creatureUrl) {
+        void loadModelAsset(creatureUrl).then((asset) => {
+          if (asset && this.views.has(u.uid)) mountHeroModel(rig, cloneModel(asset.scene), asset.animations);
+        });
+      }
+    }
 
     const ringColor = u.team === this.playerTeam ? 0x5ad95a : 0xe05a5a;
     const ring = buildSelectionRing(u.radius / WORLD_SCALE + 0.15, ringColor);
@@ -492,6 +929,16 @@ export class GameScene {
     this.sun.color.copy(sunC);
     this.sun.intensity = sunI;
 
+    // IBL is a constant fill, so modulate it with the cycle. The night floor was
+    // near-zero (~0.02) which read as black; lift it so PBR materials keep an
+    // ambient read at night while staying clearly dimmer than noon (§3.2).
+    const envI = (isDay ? 0.4 + 0.6 * elev : 0.34 + 0.16 * elev) * 0.32;
+    (this.scene as unknown as { environmentIntensity: number }).environmentIntensity = envI;
+
+    // Sky dome gradient: deepened zenith over a hazy horizon that matches fog.
+    (this.skyMat.uniforms.uTop.value as THREE.Color).copy(sky).multiplyScalar(0.78);
+    (this.skyMat.uniforms.uBottom.value as THREE.Color).copy(fog);
+
     const r = 160;
     const sunY = Math.max(0.12, elev);
     this.sun.position.set(
@@ -500,6 +947,34 @@ export class GameScene {
       this.camTarget.z + Math.sin(az) * r * 0.4 - r * 0.3
     );
     this.sun.target.position.copy(this.camTarget);
+
+    // Rim light sits opposite the sun and stays cool; a touch stronger at night
+    // so silhouettes keep their moonlit edge.
+    this.rim.position.set(
+      this.camTarget.x - Math.cos(az) * r * 0.7,
+      r * 0.45,
+      this.camTarget.z - Math.sin(az) * r * 0.4 + r * 0.35
+    );
+    this.rim.target.position.copy(this.camTarget);
+    this.rim.intensity = isDay ? 0.28 + elev * 0.28 : 0.42;
+
+    // Drive the color-grade pass from biome + day/night (§3.1).
+    if (this.gradePass) {
+      const u = this.gradePass.uniforms;
+      const night = Math.min(0.9, Math.max(0, 1 - sunI / 1.0));
+      const bg = BIOME_GRADE[this.biome] ?? BIOME_GRADE.grass;
+      const lerp = (x: number, y: number) => x + (y - x) * night;
+      (u.uTint.value as THREE.Color).setRGB(
+        lerp(bg.tint[0], NIGHT_GRADE.tint[0]),
+        lerp(bg.tint[1], NIGHT_GRADE.tint[1]),
+        lerp(bg.tint[2], NIGHT_GRADE.tint[2])
+      );
+      u.uSaturation.value = lerp(bg.sat, NIGHT_GRADE.sat);
+      u.uContrast.value = lerp(bg.contrast, NIGHT_GRADE.contrast);
+      u.uBrightness.value = lerp(1.0, 0.92);
+      u.uVignette.value = lerp(0.82, 0.6);
+      u.uStrength.value = this.gradeScale;
+    }
   }
 
   /** Is it night for gameplay flags? */

@@ -1,4 +1,4 @@
-import type { UnitRig } from './models';
+import type { AuthoredActionName, UnitRig } from './models';
 import type { Unit } from '../core/unit';
 import type { AnimGesture } from '../core/types';
 
@@ -68,10 +68,147 @@ export interface AnimState {
   lungeFlash: number;
   deathT: number;        // 0..1 after death
   spinSpeed: number;     // blade fury style spin
+  clipLockUntil: number; // authored one-shot clip lockout, in sim time
+  lastWindupUntil: number;
+  lastCastUntil: number;
+  deathClipStarted: boolean;
 }
 
 export function newAnimState(): AnimState {
-  return { runPhase: 0, lastPos: { x: 0, y: 0 }, speedSmooth: 0, attackFlash: 0, castFlash: 0, hitFlash: 0, lungeFlash: 0, deathT: 0, spinSpeed: 0 };
+  return {
+    runPhase: 0,
+    lastPos: { x: 0, y: 0 },
+    speedSmooth: 0,
+    attackFlash: 0,
+    castFlash: 0,
+    hitFlash: 0,
+    lungeFlash: 0,
+    deathT: 0,
+    spinSpeed: 0,
+    clipLockUntil: 0,
+    lastWindupUntil: 0,
+    lastCastUntil: 0,
+    deathClipStarted: false
+  };
+}
+
+function switchAuthoredAction(rig: UnitRig, name: AuthoredActionName, fade = 0.12): void {
+  const next = rig.actions?.[name];
+  if (!next || rig.activeAction === name) return;
+  const prev = rig.activeAction ? rig.actions?.[rig.activeAction] : undefined;
+  next.enabled = true;
+  next.paused = false;
+  next.setEffectiveWeight(1);
+  if (name === 'attack' || name === 'cast' || name === 'death') next.reset();
+  next.play();
+  if (prev && prev !== next) next.crossFadeFrom(prev, fade, false);
+  rig.activeAction = name;
+}
+
+function playAuthoredOneShot(
+  rig: UnitRig,
+  name: AuthoredActionName,
+  desiredSec: number,
+  lockUntil: number
+): void {
+  const action = rig.actions?.[name];
+  if (!action) return;
+  const clipDur = action.getClip().duration || desiredSec || 0.4;
+  action.timeScale = clipDur / Math.max(0.05, desiredSec || clipDur);
+  switchAuthoredAction(rig, name, 0.06);
+  action.reset().play();
+  action.clampWhenFinished = true;
+  rig.activeAction = name;
+  void lockUntil;
+}
+
+function restoreAuthoredLoop(rig: UnitRig, moving: boolean, channeling: boolean): void {
+  if (channeling && rig.actions?.channel) switchAuthoredAction(rig, 'channel', 0.16);
+  else if (moving && rig.actions?.run) switchAuthoredAction(rig, 'run', 0.16);
+  else if (rig.actions?.idle) switchAuthoredAction(rig, 'idle', 0.18);
+  else if (rig.actions?.run) switchAuthoredAction(rig, 'run', 0.18);
+}
+
+function animateAuthoredRig(
+  rig: UnitRig,
+  unit: Unit,
+  st: AnimState,
+  dt: number,
+  time: number,
+  simTime: number,
+  moving: boolean,
+  bob: number
+): void {
+  const body = rig.body;
+
+  if (!unit.alive) {
+    st.deathT = Math.min(1, st.deathT + dt * 1.4);
+    if (!st.deathClipStarted && rig.actions?.death) {
+      playAuthoredOneShot(rig, 'death', 0.8, Infinity);
+      st.deathClipStarted = true;
+    } else if (!rig.actions?.death) {
+      body.rotation.z = (Math.PI / 2) * st.deathT;
+      body.position.y = -st.deathT * 0.4;
+    }
+    rig.mixer?.update(dt);
+    return;
+  }
+
+  st.deathT = 0;
+  st.deathClipStarted = false;
+  body.rotation.z = 0;
+  body.position.y = bob;
+  body.position.x = 0;
+  body.rotation.x = moving ? Math.min(0.14, st.speedSmooth / 3600) : 0;
+  body.rotation.y = 0;
+
+  if (unit.windupUntil > simTime && unit.windupUntil !== st.lastWindupUntil && rig.actions?.attack) {
+    const desired = Math.max(0.08, unit.stats.attackPoint || 0.35);
+    playAuthoredOneShot(rig, 'attack', desired, unit.windupUntil);
+    st.clipLockUntil = Math.max(st.clipLockUntil, unit.windupUntil);
+    st.lastWindupUntil = unit.windupUntil;
+    st.attackFlash = 1;
+  }
+
+  if (unit.castingUntil > simTime && unit.castingUntil !== st.lastCastUntil && (rig.actions?.cast || rig.actions?.channel)) {
+    const channeled = !!(unit.channel || unit.captureCh);
+    const name: AuthoredActionName = channeled && rig.actions?.channel ? 'channel' : rig.actions?.cast ? 'cast' : 'channel';
+    const desired = Math.max(0.12, unit.castingUntil - simTime);
+    playAuthoredOneShot(rig, name, desired, unit.castingUntil);
+    st.clipLockUntil = Math.max(st.clipLockUntil, unit.castingUntil);
+    st.lastCastUntil = unit.castingUntil;
+    st.castFlash = 1;
+  }
+
+  if (simTime >= st.clipLockUntil || !rig.activeAction || rig.activeAction === 'idle' || rig.activeAction === 'run' || rig.activeAction === 'channel') {
+    restoreAuthoredLoop(rig, moving, !!(unit.channel || unit.captureCh));
+  }
+
+  if (st.lungeFlash > 0) {
+    body.position.x += st.lungeFlash * 0.2;
+    st.lungeFlash = Math.max(0, st.lungeFlash - dt * 7);
+  }
+
+  const spinning =
+    unit.statuses.some((s) => s.tag.includes('blade-fury') || s.status === 'cyclone') ||
+    unit.summary.cycloned;
+  st.spinSpeed = spinning ? Math.min(22, st.spinSpeed + dt * 60) : Math.max(0, st.spinSpeed - dt * 40);
+  if (st.spinSpeed > 0.1) body.rotation.y = (time * st.spinSpeed) % (Math.PI * 2);
+  if (unit.summary.cycloned) body.position.y += 1.6 + Math.sin(time * 9) * 0.2;
+
+  if (st.hitFlash > 0) {
+    st.hitFlash = Math.max(0, st.hitFlash - dt * 6);
+    for (const m of rig.materials) m.emissive.setRGB(st.hitFlash * 0.7, st.hitFlash * 0.15, st.hitFlash * 0.1);
+  } else if (unit.summary.frozen || unit.summary.rooted) {
+    const p = 0.25 + Math.sin(time * 6) * 0.1;
+    for (const m of rig.materials) m.emissive.setRGB(p * 0.2, p * 0.45, p * 0.8);
+  } else {
+    for (const m of rig.materials) {
+      if (m.emissive.r !== 0 || m.emissive.g !== 0 || m.emissive.b !== 0) m.emissive.setRGB(0, 0, 0);
+    }
+  }
+
+  rig.mixer?.update(dt);
 }
 
 export function animateRig(rig: UnitRig, unit: Unit, st: AnimState, dt: number, time: number, simTime: number): void {
@@ -107,6 +244,11 @@ export function animateRig(rig: UnitRig, unit: Unit, st: AnimState, dt: number, 
   st.runPhase += dt * (4 + st.speedSmooth / 60);
   const swing = moving ? Math.sin(st.runPhase) * 0.7 : 0;
   const bob = moving ? Math.abs(Math.sin(st.runPhase)) * 0.08 : Math.sin(time * 1.8 + unit.uid) * 0.03;
+
+  if (rig.mixer && rig.actions && Object.keys(rig.actions).length > 0) {
+    animateAuthoredRig(rig, unit, st, dt, time, simTime, moving, bob);
+    return;
+  }
 
   body.position.y = bob;
   body.position.x = 0;

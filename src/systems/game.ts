@@ -191,6 +191,7 @@ export interface AudioLike {
   setSettings(settings: GameSave['settings']): void;
   handleEvent(ev: SimEvent): void;
   playStinger(id: StingerId): void;
+  update?(env: { biome: string; dayTime: number; inCombat: boolean; dt: number }): void;
 }
 
 /** No-op scene for headless (test/CI) runs — no WebGL, no DOM. */
@@ -206,6 +207,7 @@ export class HeadlessAudio implements AudioLike {
   setSettings(): void {}
   handleEvent(): void {}
   playStinger(): void {}
+  update(): void {}
 }
 
 export interface GameDeps {
@@ -740,6 +742,7 @@ export class Game {
       this.scene.pushEvent(ev, fight.sim);
       this.audio.handleEvent(ev);
     }
+    this.audio.update?.({ biome: this.region.biome, dayTime: 0.5, inCombat: true, dt });
     this.scene.update(fight.sim, fight.cameraFollow(), dt, 0.5);
     if (fight.done && fight.result) {
       const id = this.liveGymId!;
@@ -2837,6 +2840,7 @@ export class Game {
       if (!this.inCombat()) this.autosave('timer');
     }
 
+    this.audio.update?.({ biome: this.region.biome, dayTime: this.dayTime, inCombat: this.inCombat(), dt });
     this.scene.update(this.sim, this.activeUnit(), dt, this.dayTime);
   }
 }

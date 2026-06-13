@@ -1,8 +1,26 @@
-import type { GameSave, SimEvent, SoundArchetype, StingerId } from '../core/types';
+import type { DamageType, GameSave, SimEvent, SoundArchetype, StingerId } from '../core/types';
 import { TUNING } from '../data/tuning';
 
 type AudioSettings = GameSave['settings'];
-type Channel = 'sfx' | 'voice' | 'stinger';
+type Channel = 'sfx' | 'voice' | 'stinger' | 'music';
+
+export interface AudioEnvironment {
+  biome: string;
+  dayTime: number;
+  inCombat: boolean;
+  dt: number;
+}
+
+interface MusicNodes {
+  biome: string;
+  master: GainNode;
+  combat: GainNode;
+  ambient: GainNode;
+  ambientFilter: BiquadFilterNode;
+  oscillators: OscillatorNode[];
+  combatOscillators: OscillatorNode[];
+  ambientSource: AudioBufferSourceNode;
+}
 
 /**
  * Procedural WebAudio layer (Phase 6 §3.12). No asset files: every cue is
@@ -16,6 +34,18 @@ export class ProceduralAudio {
   private unlocked = false;
   private lastCoinAt = 0;
   private coinStreak = 0;
+
+  // Master bus + limiter (PRESENTATION_SPEC §2.1): a teamfight stacks many SFX,
+  // so every voice routes master → compressor → destination to stop hard clipping.
+  private master: GainNode | null = null;
+  private comp: DynamicsCompressorNode | null = null;
+  private reverb: ConvolverNode | null = null;
+  private reverbGain: GainNode | null = null;
+  private music: MusicNodes | null = null;
+  private combatHotUntil = 0;
+  // Damage-impact throttle (§2.4): cap how many hit sounds fire in a short window
+  // so a big AoE reads as one crunch instead of a machine-gun wall of mush.
+  private damageSoundTimes: number[] = [];
 
   // Voice pool (§3.12, §3.16): per-entity cast/bark voices, hard-capped.
   private voiceCap: number;
@@ -40,6 +70,7 @@ export class ProceduralAudio {
 
   /** Resume/allow synthesis (autoplay-policy unlock). Safe to call repeatedly + headless. */
   unlock(): void {
+    if (this.settings.audio.muted) return;
     this.ensure();
     if (this.ctx?.state === 'suspended') void this.ctx.resume();
     this.unlocked = true;
@@ -52,18 +83,25 @@ export class ProceduralAudio {
       window.removeEventListener('keydown', this.unlockHandler);
       this.unlockHandler = null;
     }
+    this.stopMusic();
     try {
       void this.ctx?.close();
     } catch {
       /* already closed / unsupported */
     }
     this.ctx = null;
+    this.master = null;
+    this.comp = null;
+    this.reverb = null;
+    this.reverbGain = null;
     this.unlocked = false;
     this.voiceEnds.length = 0;
+    this.damageSoundTimes.length = 0;
   }
 
   setSettings(settings: AudioSettings): void {
     this.settings = settings;
+    if (settings.audio.muted) this.stopMusic();
   }
 
   /** Live count of active pooled voices (for perf assertions). */
@@ -80,6 +118,7 @@ export class ProceduralAudio {
   }
 
   handleEvent(ev: SimEvent): void {
+    this.noteCombatEvent(ev);
     if (!this.unlocked || this.settings.audio.muted) return;
     switch (ev.t) {
       case 'cast':
@@ -89,11 +128,18 @@ export class ProceduralAudio {
         this.barkBlip(ev.uid);
         break;
       case 'attack-impact':
-        this.thump(0.055, 0.2, 520);
+        // Weapon-contact tick. The body of the hit comes from the `damage` event
+        // that fires alongside it, so a basic attack reads as clink + thud.
+        this.attackTick();
+        break;
+      case 'miss':
+        this.missWhoosh();
         break;
       case 'damage':
+        // Every hit on a unit is audible (§2.4 / §4.7): crits get the flourish,
+        // every other hit a damage-type-tinted impact scaled by the amount.
         if (ev.crit) this.critImpact(ev.amount);
-        else if (ev.amount > 80) this.thump(0.035, 0.08, 900);
+        else this.impactSound(ev.amount, ev.dtype);
         break;
       case 'gold':
         this.coin(ev.amount, ev.reason);
@@ -116,6 +162,49 @@ export class ProceduralAudio {
         break;
       case 'item-used':
         this.sweep(260, 520, 0.08, 'square', 0.14);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** Procedural score + ambient bed (GRAPHICS_SPEC §13.5 Phase 4).
+   *  Continuous, file-free, and cheap: a biome drone, a combat layer, filtered
+   *  noise ambience, and a generated reverb bus. */
+  update(env: AudioEnvironment): void {
+    if (!this.unlocked || this.settings.audio.muted) {
+      this.stopMusic();
+      return;
+    }
+    const ctx = this.ensure();
+    if (!ctx) return;
+    if (!this.music || this.music.biome !== env.biome) this.startMusic(env.biome);
+    if (!this.music) return;
+
+    const now = ctx.currentTime;
+    const night = env.dayTime >= 0.5;
+    const combat = env.inCombat || now < this.combatHotUntil;
+    const base = this.volume(0.11, 'music');
+    this.music.master.gain.setTargetAtTime(base * (night ? 0.78 : 1), now, 0.55);
+    this.music.combat.gain.setTargetAtTime(base * (combat ? 0.9 : 0.04), now, combat ? 0.08 : 0.9);
+    this.music.ambient.gain.setTargetAtTime(this.volume(night ? 0.055 : 0.038, 'music'), now, 0.8);
+
+    const filterTarget = ({ snow: 1700, desert: 900, wasteland: 720, forest: 1300, grass: 1250, coast: 1800 } as Record<string, number>)[env.biome] ?? 1200;
+    this.music.ambientFilter.frequency.setTargetAtTime(filterTarget * (night ? 0.72 : 1), now, 1.2);
+    if (this.reverbGain) this.reverbGain.gain.setTargetAtTime(this.volume(combat ? 0.08 : 0.13, 'music'), now, 0.8);
+    void env.dt;
+  }
+
+  private noteCombatEvent(ev: SimEvent): void {
+    switch (ev.t) {
+      case 'damage':
+      case 'attack-impact':
+      case 'attack-launch':
+      case 'projectile-spawn':
+      case 'projectile-hit':
+      case 'cast':
+      case 'death':
+        this.combatHotUntil = Math.max(this.combatHotUntil, this.now() + 5.5);
         break;
       default:
         break;
@@ -290,13 +379,138 @@ export class ProceduralAudio {
     if (this.ctx) return this.ctx;
     if (typeof AudioContext === 'undefined') return null; // headless / unsupported
     this.ctx = new AudioContext();
+    // Master bus → limiter → speakers. Per-sound gains already fold in the user
+    // volume; the compressor only tames stacked peaks so a flurry never clips.
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 1;
+    this.comp = this.ctx.createDynamicsCompressor();
+    this.comp.threshold.value = -10;
+    this.comp.knee.value = 8;
+    this.comp.ratio.value = 12;
+    this.comp.attack.value = 0.003;
+    this.comp.release.value = 0.25;
+    this.master.connect(this.comp).connect(this.ctx.destination);
+    this.reverb = this.ctx.createConvolver();
+    this.reverb.buffer = this.makeImpulse(1.15, 2.7);
+    this.reverbGain = this.ctx.createGain();
+    this.reverbGain.gain.value = 0.08;
+    this.reverb.connect(this.reverbGain).connect(this.master);
     return this.ctx;
+  }
+
+  private makeImpulse(seconds: number, decay: number): AudioBuffer {
+    const ctx = this.ctx!;
+    const len = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+    const buffer = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = buffer.getChannelData(ch);
+      for (let i = 0; i < len; i++) {
+        const t = i / len;
+        data[i] = (Math.random() * 2 - 1) * (1 - t) ** decay;
+      }
+    }
+    return buffer;
+  }
+
+  private musicProfile(biome: string): { root: number; color: OscillatorType; combat: OscillatorType; noise: BiquadFilterType } {
+    const table: Record<string, { root: number; color: OscillatorType; combat: OscillatorType; noise: BiquadFilterType }> = {
+      grass: { root: 110, color: 'triangle', combat: 'sawtooth', noise: 'lowpass' },
+      forest: { root: 98, color: 'sine', combat: 'sawtooth', noise: 'bandpass' },
+      snow: { root: 146.83, color: 'sine', combat: 'triangle', noise: 'highpass' },
+      desert: { root: 92.5, color: 'triangle', combat: 'square', noise: 'bandpass' },
+      wasteland: { root: 82.41, color: 'sawtooth', combat: 'sawtooth', noise: 'lowpass' },
+      coast: { root: 123.47, color: 'sine', combat: 'triangle', noise: 'lowpass' }
+    };
+    return table[biome] ?? table.grass;
+  }
+
+  private startMusic(biome: string): void {
+    this.stopMusic();
+    const ctx = this.ensure();
+    if (!ctx || !this.master) return;
+    const prof = this.musicProfile(biome);
+    const master = ctx.createGain();
+    const combat = ctx.createGain();
+    const ambient = ctx.createGain();
+    master.gain.value = 0;
+    combat.gain.value = 0;
+    ambient.gain.value = 0;
+    master.connect(this.master);
+    combat.connect(this.master);
+    ambient.connect(this.master);
+    if (this.reverb) {
+      const send = ctx.createGain();
+      send.gain.value = 0.18;
+      master.connect(send).connect(this.reverb);
+      const combatSend = ctx.createGain();
+      combatSend.gain.value = 0.08;
+      combat.connect(combatSend).connect(this.reverb);
+      const ambientSend = ctx.createGain();
+      ambientSend.gain.value = 0.22;
+      ambient.connect(ambientSend).connect(this.reverb);
+    }
+
+    const oscillators: OscillatorNode[] = [];
+    const combatOscillators: OscillatorNode[] = [];
+    for (const [mul, gainVal] of [[1, 0.42], [1.5, 0.18], [2, 0.12]] as const) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = prof.color;
+      osc.frequency.value = prof.root * mul;
+      gain.gain.value = gainVal;
+      osc.connect(gain).connect(master);
+      osc.start();
+      oscillators.push(osc);
+    }
+    for (const [mul, gainVal] of [[0.5, 0.32], [1, 0.2], [2.01, 0.08]] as const) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = prof.combat;
+      osc.frequency.value = prof.root * mul;
+      gain.gain.value = gainVal;
+      osc.connect(gain).connect(combat);
+      osc.start();
+      combatOscillators.push(osc);
+    }
+
+    const buffer = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.42;
+    const ambientSource = ctx.createBufferSource();
+    const ambientFilter = ctx.createBiquadFilter();
+    ambientSource.buffer = buffer;
+    ambientSource.loop = true;
+    ambientFilter.type = prof.noise;
+    ambientFilter.frequency.value = 1200;
+    ambientFilter.Q.value = 0.9;
+    ambientSource.connect(ambientFilter).connect(ambient);
+    ambientSource.start();
+
+    this.music = { biome, master, combat, ambient, ambientFilter, oscillators, combatOscillators, ambientSource };
+  }
+
+  private stopMusic(): void {
+    if (!this.music) return;
+    for (const osc of this.music.oscillators) {
+      try { osc.stop(); } catch { /* already stopped */ }
+      osc.disconnect();
+    }
+    for (const osc of this.music.combatOscillators) {
+      try { osc.stop(); } catch { /* already stopped */ }
+      osc.disconnect();
+    }
+    try { this.music.ambientSource.stop(); } catch { /* already stopped */ }
+    this.music.ambientSource.disconnect();
+    this.music.master.disconnect();
+    this.music.combat.disconnect();
+    this.music.ambient.disconnect();
+    this.music = null;
   }
 
   private channelGain(chan: Channel): number {
     const a = this.settings.audio;
     if (a.muted) return 0;
-    return a.master * (chan === 'voice' ? a.voice : chan === 'stinger' ? a.stinger : a.sfx);
+    return a.master * (chan === 'voice' ? a.voice : chan === 'stinger' || chan === 'music' ? a.stinger : a.sfx);
   }
 
   private volume(mult: number, chan: Channel): number {
@@ -312,7 +526,7 @@ export class ProceduralAudio {
     osc.frequency.setValueAtTime(freq, ctx.currentTime);
     gain.gain.setValueAtTime(this.volume(vol, chan), ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    osc.connect(gain).connect(ctx.destination);
+    osc.connect(gain).connect(this.master ?? ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + dur);
   }
@@ -327,7 +541,7 @@ export class ProceduralAudio {
     osc.frequency.exponentialRampToValueAtTime(Math.max(1, end), ctx.currentTime + dur);
     gain.gain.setValueAtTime(this.volume(vol, chan), ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    osc.connect(gain).connect(ctx.destination);
+    osc.connect(gain).connect(this.master ?? ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + dur);
   }
@@ -349,7 +563,7 @@ export class ProceduralAudio {
     src.buffer = buffer;
     gain.gain.setValueAtTime(this.volume(vol, 'sfx'), ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.connect(filter).connect(gain).connect(this.master ?? ctx.destination);
     src.start();
   }
 
@@ -364,7 +578,7 @@ export class ProceduralAudio {
     src.buffer = buffer;
     gain.gain.setValueAtTime(this.volume(vol, 'sfx'), ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    src.connect(gain).connect(ctx.destination);
+    src.connect(gain).connect(this.master ?? ctx.destination);
     src.start();
   }
 
@@ -423,10 +637,53 @@ export class ProceduralAudio {
       osc.stop(start + dur + 0.02);
     }
 
-    gain.connect(filter).connect(ctx.destination);
+    const out = this.master ?? ctx.destination;
+    gain.connect(filter).connect(out);
     filter.connect(delay);
     delay.connect(feedback).connect(delay);
-    delay.connect(ctx.destination);
+    delay.connect(out);
+  }
+
+  // ---------- per-hit impacts (every hit on a unit is audible) ----------
+
+  /** Light weapon-contact tick for a basic attack; the `damage` event layers the body. */
+  private attackTick(): void {
+    const j = 0.9 + Math.random() * 0.2;
+    this.tone(540 * j, 0.03, 'square', 0.06);
+    this.noise(0.02, 0.04);
+  }
+
+  /** Soft airy whiff so a missed swing still reads. */
+  private missWhoosh(): void {
+    const j = 0.9 + Math.random() * 0.2;
+    this.sweep(760 * j, 280 * j, 0.1, 'sine', 0.045);
+  }
+
+  /** Impact on a unit, tinted by damage type and scaled by amount (§2.4/§4.7).
+   *  Pitch-jittered per hit, and throttled so a wide AoE never machine-guns. */
+  private impactSound(amount: number, dtype: DamageType): void {
+    const t = this.now();
+    if (this.damageSoundTimes.length) {
+      this.damageSoundTimes = this.damageSoundTimes.filter((at) => t - at < 0.12);
+    }
+    if (this.damageSoundTimes.length >= 5) return; // window saturated; drop extras
+    this.damageSoundTimes.push(t);
+
+    const w = Math.min(1, Math.max(0.12, Math.log2(Math.max(2, amount)) / 9)); // 0.12..1
+    const j = 0.9 + Math.random() * 0.2; // pitch variation (§2.4)
+    switch (dtype) {
+      case 'magical':
+        this.sweep(320 * j, 150 * j, 0.12, 'sine', 0.05 + w * 0.12);
+        this.tone(900 * j, 0.05, 'sine', 0.03 + w * 0.04);
+        break;
+      case 'pure':
+        this.tone(1280 * j, 0.05, 'triangle', 0.05 + w * 0.07);
+        this.thump(0.04, 0.05 + w * 0.1, 700 * j);
+        break;
+      default: // physical: punchy body thud + a little grit on bigger hits
+        this.thump(0.045 + w * 0.03, 0.07 + w * 0.14, (520 - w * 200) * j);
+        if (w > 0.4) this.noise(0.03, 0.03 + w * 0.04);
+    }
   }
 
   private critImpact(amount: number): void {

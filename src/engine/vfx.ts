@@ -22,7 +22,12 @@ interface PooledProjectile {
   kind: ProjKind;
   core: THREE.MeshBasicMaterial;
   halo?: THREE.MeshBasicMaterial;
+  trail: THREE.Line;
+  trailPos: Float32Array;
+  trailCol: Float32Array;
 }
+
+const TRAIL_LEN = 12;
 
 const geometryCache = new Map<string, THREE.BufferGeometry>();
 
@@ -39,6 +44,53 @@ function sharedGeometry<T extends THREE.BufferGeometry>(geo: T): T {
 
 export function vfxGeometryCacheSize(): number {
   return geometryCache.size;
+}
+
+// Numerically-built sprite textures (GRAPHICS_SPEC §7). DataTexture needs no DOM
+// or GL context, so the headless VFX/perf tests keep working.
+let SOFT_SPRITE: THREE.DataTexture | null = null;
+function softSprite(): THREE.DataTexture {
+  if (SOFT_SPRITE) return SOFT_SPRITE;
+  const s = 32;
+  const data = new Uint8Array(s * s * 4);
+  const c = (s - 1) / 2;
+  for (let y = 0; y < s; y++) {
+    for (let x = 0; x < s; x++) {
+      const d = Math.hypot(x - c, y - c) / c;
+      const a = Math.max(0, 1 - d);
+      const i = (y * s + x) * 4;
+      data[i] = data[i + 1] = data[i + 2] = 255;
+      data[i + 3] = Math.floor(255 * a * a);
+    }
+  }
+  const tex = new THREE.DataTexture(data, s, s);
+  tex.needsUpdate = true;
+  return (SOFT_SPRITE = tex);
+}
+
+// Ground telegraph decal: faint filled disc with a bright rim ring — the Dota
+// AoE target read. White luminance; the material tints it.
+let TELEGRAPH_TEX: THREE.DataTexture | null = null;
+function telegraphTexture(): THREE.DataTexture {
+  if (TELEGRAPH_TEX) return TELEGRAPH_TEX;
+  const s = 64;
+  const data = new Uint8Array(s * s * 4);
+  const c = (s - 1) / 2;
+  for (let y = 0; y < s; y++) {
+    for (let x = 0; x < s; x++) {
+      const d = Math.min(1, Math.hypot(x - c, y - c) / c);
+      const fill = 0.16 * (1 - d * 0.6);
+      const rim = Math.max(0, 1 - Math.abs(d - 0.9) / 0.1) * 0.9;
+      const spoke = (Math.abs((Math.atan2(y - c, x - c) * 3) % 1) < 0.06 && d > 0.5) ? 0.25 : 0;
+      const a = Math.min(1, fill + rim + spoke) * (d < 1 ? 1 : 0);
+      const i = (y * s + x) * 4;
+      data[i] = data[i + 1] = data[i + 2] = 255;
+      data[i + 3] = Math.floor(255 * a);
+    }
+  }
+  const tex = new THREE.DataTexture(data, s, s);
+  tex.needsUpdate = true;
+  return (TELEGRAPH_TEX = tex);
 }
 
 export class VfxManager {
@@ -81,8 +133,10 @@ export class VfxManager {
     switch (ev.t) {
       case 'projectile-spawn': {
         const entry = this.acquireProjectile(ev.vfx);
-        entry.obj.position.copy(this.w(ev.from.x, ev.from.y, 1.2));
-        this.group.add(entry.obj);
+        const p = this.w(ev.from.x, ev.from.y, 1.2);
+        entry.obj.position.copy(p);
+        this.initTrail(entry, p);
+        this.group.add(entry.obj, entry.trail);
         this.projectiles.set(ev.pid, entry);
         break;
       }
@@ -133,6 +187,20 @@ export class VfxManager {
         if (p) this.burst(p.x, p.y, '#7adfc4', 2.2, 0.8, '#ffffff');
         break;
       }
+      case 'reaction': {
+        const p = unitPos(ev.uid);
+        if (p) {
+          const pal = this.reactionPalette(ev.reaction);
+          this.burst(p.x, p.y, pal[0], 1.25, 0.42, pal[1]);
+          this.pillar(p.x, p.y, pal[1], 0.34);
+        }
+        break;
+      }
+      case 'immune-block': {
+        const p = unitPos(ev.uid);
+        if (p) this.burst(p.x, p.y, '#ffffff', 0.65, 0.22, '#7adf6a');
+        break;
+      }
       case 'summon': {
         this.burst(ev.pos.x, ev.pos.y, '#b7ffd9', 1.2, 0.5);
         break;
@@ -163,6 +231,7 @@ export class VfxManager {
         const v = this.w(p.pos.x, p.pos.y, 1.2);
         entry.obj.position.lerp(v, 0.6);
         entry.obj.rotation.y += 0.2;
+        this.pushTrail(entry);
       }
     }
     for (const [pid, entry] of this.projectiles) {
@@ -234,35 +303,78 @@ export class VfxManager {
     entry.obj.visible = true;
     entry.core.color.set(vfx.color);
     if (entry.halo) entry.halo.color.set(vfx.color2 ?? vfx.color);
+    // Bake a head-bright → tail-black gradient so the additive trail fades out.
+    const col = new THREE.Color(vfx.color);
+    for (let i = 0; i < TRAIL_LEN; i++) {
+      const f = (i / (TRAIL_LEN - 1)) ** 1.6;
+      entry.trailCol[i * 3] = col.r * f;
+      entry.trailCol[i * 3 + 1] = col.g * f;
+      entry.trailCol[i * 3 + 2] = col.b * f;
+    }
+    entry.trail.geometry.attributes.color.needsUpdate = true;
     return entry;
   }
 
   /** Park a spent projectile back in the pool — no disposal, ready for reuse. */
   private releaseProjectile(entry: PooledProjectile): void {
-    this.group.remove(entry.obj);
+    this.group.remove(entry.obj, entry.trail);
     entry.obj.visible = false;
+    entry.trail.visible = false;
     this.projectilePool[entry.kind].push(entry);
   }
 
   private buildProjectile(kind: ProjKind): PooledProjectile {
     this.projAllocated++;
     const g = new THREE.Group();
+    const trailPos = new Float32Array(TRAIL_LEN * 3);
+    const trailCol = new Float32Array(TRAIL_LEN * 3);
+    const tg = new THREE.BufferGeometry();
+    tg.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
+    tg.setAttribute('color', new THREE.BufferAttribute(trailCol, 3));
+    const trail = new THREE.Line(
+      tg,
+      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    trail.frustumCulled = false;
     if (kind === 'hook') {
       const core = new THREE.MeshBasicMaterial({ color: '#ffffff' });
       g.add(new THREE.Mesh(sharedGeometry(new THREE.TorusGeometry(0.35, 0.1, 5, 8, Math.PI * 1.5)), core));
-      return { obj: g, kind, core };
+      return { obj: g, kind, core, trail, trailPos, trailCol };
     }
-    const core = new THREE.MeshBasicMaterial({ color: '#ffffff' });
-    const halo = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.35 });
-    g.add(new THREE.Mesh(sharedGeometry(new THREE.SphereGeometry(0.28, 6, 5)), core));
-    g.add(new THREE.Mesh(sharedGeometry(new THREE.SphereGeometry(0.42, 6, 5)), halo));
-    return { obj: g, kind, core, halo };
+    // Additive core + halo so the orb reads as a glowing magic projectile.
+    const core = new THREE.MeshBasicMaterial({ color: '#ffffff', blending: THREE.AdditiveBlending, depthWrite: false });
+    const halo = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
+    g.add(new THREE.Mesh(sharedGeometry(new THREE.SphereGeometry(0.26, 8, 6)), core));
+    g.add(new THREE.Mesh(sharedGeometry(new THREE.SphereGeometry(0.5, 8, 6)), halo));
+    return { obj: g, kind, core, halo, trail, trailPos, trailCol };
+  }
+
+  /** Reset a projectile's trail to a single point (call on spawn). */
+  private initTrail(entry: PooledProjectile, p: THREE.Vector3): void {
+    for (let i = 0; i < TRAIL_LEN; i++) {
+      entry.trailPos[i * 3] = p.x;
+      entry.trailPos[i * 3 + 1] = p.y;
+      entry.trailPos[i * 3 + 2] = p.z;
+    }
+    entry.trail.geometry.attributes.position.needsUpdate = true;
+    entry.trail.visible = true;
+  }
+
+  /** Slide the trail buffer one step and append the projectile's head pos. */
+  private pushTrail(entry: PooledProjectile): void {
+    const a = entry.trailPos;
+    a.copyWithin(0, 3);
+    const h = entry.obj.position;
+    a[(TRAIL_LEN - 1) * 3] = h.x;
+    a[(TRAIL_LEN - 1) * 3 + 1] = h.y;
+    a[(TRAIL_LEN - 1) * 3 + 2] = h.z;
+    entry.trail.geometry.attributes.position.needsUpdate = true;
   }
 
   private burst(x: number, y: number, color: string, radiusW: number, dur: number, color2?: string): void {
     const ring = new THREE.Mesh(
       sharedGeometry(new THREE.RingGeometry(0.1, 1, 20)),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
     );
     ring.rotation.x = -Math.PI / 2;
     ring.position.copy(this.w(x, y, 0.15));
@@ -277,7 +389,7 @@ export class VfxManager {
     const positions = new Float32Array(n * 3);
     const pts = new THREE.Points(
       new THREE.BufferGeometry(),
-      new THREE.PointsMaterial({ color: color2 ?? color, size: 0.22, transparent: true, opacity: 0.9 })
+      new THREE.PointsMaterial({ color: color2 ?? color, size: 0.32, map: softSprite(), transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
     );
     pts.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const base = this.w(x, y, 0.4);
@@ -302,7 +414,7 @@ export class VfxManager {
   private blinkMark(x: number, y: number): void {
     const pillar = new THREE.Mesh(
       sharedGeometry(new THREE.CylinderGeometry(0.12, 0.3, 3.2, 6, 1, true)),
-      new THREE.MeshBasicMaterial({ color: '#7adfff', transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: '#7adfff', transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
     );
     pillar.position.copy(this.w(x, y, 1.6));
     const mat = pillar.material as THREE.MeshBasicMaterial;
@@ -316,7 +428,7 @@ export class VfxManager {
   private pillar(x: number, y: number, color: string, dur: number): void {
     const beam = new THREE.Mesh(
       sharedGeometry(new THREE.CylinderGeometry(0.5, 0.7, 5, 8, 1, true)),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
     );
     beam.position.copy(this.w(x, y, 2.5));
     const mat = beam.material as THREE.MeshBasicMaterial;
@@ -334,7 +446,7 @@ export class VfxManager {
     }
     const flash = new THREE.Mesh(
       sharedGeometry(new THREE.SphereGeometry(0.5, 8, 6)),
-      new THREE.MeshBasicMaterial({ color: vfx.color, transparent: true, opacity: 0.7 })
+      new THREE.MeshBasicMaterial({ color: vfx.color, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending })
     );
     flash.position.copy(this.w(x, y, 1.6));
     const mat = flash.material as THREE.MeshBasicMaterial;
@@ -348,11 +460,25 @@ export class VfxManager {
     return Math.atan2(to.y - from.y, to.x - from.x);
   }
 
+  private reactionPalette(reaction: string): [string, string] {
+    const palette: Record<string, [string, string]> = {
+      vaporize: ['#7adfff', '#ff9a4f'],
+      melt: ['#ffb45a', '#bfeeff'],
+      overload: ['#ff6a3d', '#c882ff'],
+      superconduct: ['#8fe6ff', '#b88cff'],
+      freeze: ['#bfeeff', '#ffffff'],
+      swirl: ['#a8ffd8', '#ffffff'],
+      crystallize: ['#ffe27d', '#ffffff'],
+      burning: ['#ff7a3d', '#ffd27f']
+    };
+    return palette[reaction] ?? ['#ffffff', '#b88cff'];
+  }
+
   private cleaveSweep(from: Vec2, to: Vec2, visual: AttackVisualSpec): void {
     const scale = visual.scale ?? 1;
     const arc = new THREE.Mesh(
       sharedGeometry(new THREE.RingGeometry(0.55 * scale, 1.35 * scale, 28, 1, -0.55 * Math.PI, 1.1 * Math.PI)),
-      new THREE.MeshBasicMaterial({ color: visual.color, transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: visual.color, transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
     );
     arc.rotation.x = -Math.PI / 2;
     arc.rotation.z = -this.attackAngle(from, to);
@@ -370,7 +496,7 @@ export class VfxManager {
     const len = a.distanceTo(b);
     const beam = new THREE.Mesh(
       new THREE.CylinderGeometry(width * (visual.scale ?? 1), width * 0.5 * (visual.scale ?? 1), len, 6, 1, true),
-      new THREE.MeshBasicMaterial({ color: visual.color, transparent: true, opacity: 0.72, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: visual.color, transparent: true, opacity: 0.72, depthWrite: false, blending: THREE.AdditiveBlending })
     );
     beam.position.copy(a.clone().add(b).multiplyScalar(0.5));
     beam.lookAt(b);
@@ -399,7 +525,7 @@ export class VfxManager {
     const geom = new THREE.BufferGeometry().setFromPoints(points);
     const line = new THREE.Line(
       geom,
-      new THREE.LineBasicMaterial({ color: visual.color, transparent: true, opacity: 0.9 })
+      new THREE.LineBasicMaterial({ color: visual.color, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
     );
     const mat = line.material as THREE.LineBasicMaterial;
     this.push(line, 0.24, (_t, lifeT) => {
@@ -411,7 +537,7 @@ export class VfxManager {
   private critSlash(from: Vec2, to: Vec2, visual: AttackVisualSpec): void {
     const slash = new THREE.Mesh(
       sharedGeometry(new THREE.ConeGeometry(0.2 * (visual.scale ?? 1), 1.1 * (visual.scale ?? 1), 3)),
-      new THREE.MeshBasicMaterial({ color: visual.color, transparent: true, opacity: 0.7, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: visual.color, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending })
     );
     slash.position.copy(this.w(to.x, to.y, 1.0));
     slash.rotation.z = -this.attackAngle(from, to);
@@ -459,16 +585,36 @@ export class VfxManager {
     const g = new THREE.Group();
 
     if (spec.shape === 'line') {
-      // wall of jagged spikes (Fissure) or glowing line
       const lenW = spec.length / WORLD_SCALE;
+      const widthW = Math.max(0.35, spec.width / WORLD_SCALE);
+      // Shaped ground telegraph under wall/line zones. The stretched decal gives
+      // Fissure-style spells a clear "this line is dangerous" read before the
+      // authored spike wall silhouette finishes the effect.
+      const decal = new THREE.Mesh(
+        sharedGeometry(new THREE.PlaneGeometry(lenW, widthW)),
+        new THREE.MeshBasicMaterial({ color, map: telegraphTexture(), transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      decal.rotation.x = -Math.PI / 2;
+      decal.position.y = 0.11;
+      decal.userData.tele = true;
+      const rimA = new THREE.Mesh(
+        sharedGeometry(new THREE.PlaneGeometry(lenW, 0.08)),
+        new THREE.MeshBasicMaterial({ color: color2, transparent: true, opacity: 0.72, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
+      );
+      const rimB = rimA.clone();
+      rimA.position.set(0, 0.14, widthW * 0.5);
+      rimB.position.set(0, 0.14, -widthW * 0.5);
+      rimA.rotation.x = rimB.rotation.x = -Math.PI / 2;
+      g.add(decal, rimA, rimB);
+      // wall of jagged spikes (Fissure) or glowing line
       const n = Math.max(3, Math.floor(lenW / 0.9));
       for (let i = 0; i < n; i++) {
         const spike = new THREE.Mesh(
           sharedGeometry(new THREE.ConeGeometry(0.34 + ((i * 13) % 5) * 0.05, 1.1 + ((i * 7) % 4) * 0.3, 5)),
-          new THREE.MeshLambertMaterial({ color: spec.wall ? color : color2, flatShading: true })
+          new THREE.MeshBasicMaterial({ color: spec.wall ? color : color2, transparent: true, opacity: spec.wall ? 0.96 : 0.72, depthWrite: false, blending: spec.wall ? THREE.NormalBlending : THREE.AdditiveBlending })
         );
         const t = (i + 0.5) / n - 0.5;
-        spike.position.set(t * lenW, 0.4, ((i * 11) % 3 - 1) * 0.15);
+        spike.position.set(t * lenW, 0.42, ((i * 11) % 3 - 1) * Math.min(0.22, widthW * 0.28));
         spike.rotation.z = ((i * 17) % 7 - 3) * 0.06;
         g.add(spike);
       }
@@ -476,25 +622,29 @@ export class VfxManager {
       g.rotation.y = -spec.angle;
     } else {
       const rW = spec.radius / WORLD_SCALE;
+      // Textured ground telegraph: filled disc + bright rim + spokes, additive so it
+      // glows on dark ground and feeds bloom (GRAPHICS_SPEC §7 AoE read).
       const disc = new THREE.Mesh(
-        sharedGeometry(new THREE.CircleGeometry(rW, 28)),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false })
+        sharedGeometry(new THREE.PlaneGeometry(rW * 2, rW * 2)),
+        new THREE.MeshBasicMaterial({ color, map: telegraphTexture(), transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
       );
       disc.rotation.x = -Math.PI / 2;
       disc.position.y = 0.12;
+      disc.userData.tele = true;
       const rim = new THREE.Mesh(
-        sharedGeometry(new THREE.RingGeometry(rW * 0.93, rW, 28)),
-        new THREE.MeshBasicMaterial({ color: color2, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
+        sharedGeometry(new THREE.RingGeometry(rW * 0.93, rW, 40)),
+        new THREE.MeshBasicMaterial({ color: color2, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
       );
       rim.rotation.x = -Math.PI / 2;
       rim.position.y = 0.14;
+      rim.userData.rim = true;
       g.add(disc, rim);
       if (ev.vfx.archetype === 'storm') {
         // slow swirling shards over the area
         for (let i = 0; i < 8; i++) {
           const shard = new THREE.Mesh(
             sharedGeometry(new THREE.TetrahedronGeometry(0.22)),
-            new THREE.MeshBasicMaterial({ color: color2, transparent: true, opacity: 0.8 })
+            new THREE.MeshBasicMaterial({ color: color2, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending })
           );
           shard.userData.orbit = { r: rW * (0.3 + (i % 4) * 0.18), a: (i / 8) * Math.PI * 2, h: 0.6 + (i % 3) * 0.5 };
           g.add(shard);
@@ -513,6 +663,11 @@ export class VfxManager {
           if (orbit) {
             child.position.set(Math.cos(orbit.a + t * 2.2) * orbit.r, orbit.h + Math.sin(t * 3 + orbit.a) * 0.2, Math.sin(orbit.a + t * 2.2) * orbit.r);
             child.rotation.x = t * 3;
+          } else if (child.userData.tele) {
+            child.rotation.z = t * 0.5; // slow charge spin
+          } else if (child.userData.rim) {
+            const m = child as THREE.Mesh;
+            (m.material as THREE.MeshBasicMaterial).opacity = 0.45 + Math.sin(t * 4) * 0.2;
           }
         }
       }

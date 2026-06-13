@@ -20,7 +20,62 @@ export interface UnitRig {
   itemLayer: THREE.Group;
   height: number;
   scale: number;
-  materials: THREE.MeshLambertMaterial[];
+  materials: THREE.MeshStandardMaterial[];
+  mixer?: THREE.AnimationMixer;
+  actions?: Partial<Record<AuthoredActionName, THREE.AnimationAction>>;
+  activeAction?: AuthoredActionName;
+  authoredModel?: THREE.Object3D;
+}
+
+export type AuthoredActionName = 'idle' | 'run' | 'attack' | 'cast' | 'channel' | 'death';
+
+const ACTION_SYNONYMS: Record<AuthoredActionName, string[]> = {
+  idle: ['idle', 'idling', 'stand', 'standing', 'breath'],
+  run: ['run', 'running', 'walk', 'walking', 'move', 'locomotion'],
+  attack: ['attack', 'attack1', 'slash', 'hit', 'bite', 'claw', 'shoot', 'melee'],
+  cast: ['cast', 'spell', 'magic', 'ability', 'gesture'],
+  channel: ['channel', 'channeled', 'loop', 'chant'],
+  death: ['death', 'die', 'dying', 'dead']
+};
+
+function normClipName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function findClip(
+  clips: THREE.AnimationClip[],
+  action: AuthoredActionName,
+  names?: Partial<Record<AuthoredActionName, string>>
+): THREE.AnimationClip | null {
+  const requested = names?.[action];
+  const needles = [
+    ...(requested ? [requested] : []),
+    ...ACTION_SYNONYMS[action]
+  ].map(normClipName);
+  for (const needle of needles) {
+    const exact = clips.find((clip) => normClipName(clip.name) === needle);
+    if (exact) return exact;
+  }
+  for (const needle of needles) {
+    const fuzzy = clips.find((clip) => normClipName(clip.name).includes(needle));
+    if (fuzzy) return fuzzy;
+  }
+  return null;
+}
+
+function collectStandardMaterials(rig: UnitRig, model: THREE.Object3D): void {
+  const add = (mat: THREE.Material): void => {
+    if (mat instanceof THREE.MeshStandardMaterial && !rig.materials.includes(mat)) rig.materials.push(mat);
+  };
+  model.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    m.castShadow = true;
+    m.receiveShadow = true;
+    const mat = m.material;
+    if (Array.isArray(mat)) mat.forEach(add);
+    else if (mat) add(mat);
+  });
 }
 
 export interface HeroLikenessProfile {
@@ -36,13 +91,36 @@ export const HERO_LIKENESS_PROFILES: HeroLikenessProfile[] = [
   { heroId: 'earthshaker', readsAs: 'horned blue-brown totem bruiser', features: ['horns', 'massive totem', 'stone shoulders', 'beard'] },
   { heroId: 'sniper', readsAs: 'short bearded rifleman', features: ['wide helm', 'goggles', 'long rifle', 'dwarf beard'] },
   { heroId: 'lich', readsAs: 'skeletal frost king', features: ['skull face', 'ice crown', 'ragged cape', 'frost staff'] },
-  { heroId: 'luna', readsAs: 'silver-blue glaive rider', features: ['crescent helm', 'moon glaive', 'silver shoulders'] },
-  { heroId: 'sven', readsAs: 'masked heavy knight', features: ['horned helm', 'greatsword', 'broad pauldrons'] },
-  { heroId: 'axe', readsAs: 'red axe berserker', features: ['bald head', 'red body', 'two-handed axe'] }
+  { heroId: 'luna', readsAs: 'silver-blue glaive rider', features: ['crescent helm', 'moon glaive', 'silver shoulders', 'glowing eyes'] },
+  { heroId: 'sven', readsAs: 'masked heavy knight', features: ['winged helm', 'visor glow', 'greatsword', 'broad pauldrons'] },
+  { heroId: 'axe', readsAs: 'red axe berserker', features: ['black mohawk', 'red body', 'spiked pauldrons', 'two-handed axe'] },
+  { heroId: 'legion-commander', readsAs: 'red-gold duelist commander', features: ['crested helm', 'duel banner', 'gold chest plate', 'long sword'] },
+  { heroId: 'shadow-fiend', readsAs: 'black demon of red souls', features: ['horns', 'red soul core', 'shadow wings', 'clawed arms'] },
+  { heroId: 'lion', readsAs: 'purple demon witch', features: ['single horn', 'gold collar', 'monster hand', 'violet staff'] },
+  { heroId: 'doom', readsAs: 'red infernal demon', features: ['huge horns', 'burning chest', 'black wings', 'fiery blade'] },
+  { heroId: 'wraith-king', readsAs: 'green spectral skeleton king', features: ['crown', 'glowing skull', 'royal cape', 'green soul core'] },
+  { heroId: 'invoker', readsAs: 'gold arcane magus', features: ['high collar', 'orb triad', 'gold shoulders', 'arcane cape'] },
+  { heroId: 'medusa', readsAs: 'green serpent gorgon', features: ['snake crown', 'bow crest', 'stone-gaze eyes', 'scaled lower body'] },
+  { heroId: 'tidehunter', readsAs: 'huge sea leviathan', features: ['wide jaw', 'anchor', 'shell shoulders', 'sea-green bulk'] },
+  { heroId: 'tiny', readsAs: 'walking stone giant', features: ['rock crown', 'boulder shoulders', 'tree club', 'cracked core'] },
+  { heroId: 'storm-spirit', readsAs: 'round blue storm monk', features: ['wide hat', 'white moustache', 'lightning belt', 'electric orbs'] },
+  { heroId: 'kunkka', readsAs: 'blue admiral swordsman', features: ['captain hat', 'naval coat', 'ghost ship wheel', 'tide sword'] },
+  { heroId: 'natures-prophet', readsAs: 'green antlered forest prophet', features: ['antlers', 'leaf cape', 'treant seed orbs', 'wood staff'] }
 ];
 
-function lam(color: string | number, emissive = 0): THREE.MeshLambertMaterial {
-  return new THREE.MeshLambertMaterial({ color, flatShading: false, emissive });
+// PBR base material. Node-safe: MeshStandardMaterial constructs without a GL
+// context (no textures here), so model-cache / perf-harness tests still pass.
+// Picks up the scene env map at render time for Dota-style lit highlights.
+function lam(color: string | number, emissive = 0): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color,
+    emissive,
+    emissiveIntensity: emissive ? 1 : 0,
+    roughness: 0.74,
+    metalness: 0.12,
+    flatShading: false,
+    envMapIntensity: 0.55
+  });
 }
 
 const geometryCache = new Map<string, THREE.BufferGeometry>();
@@ -71,9 +149,18 @@ export function modelGeometryCacheSize(): number {
 
 export function buildUnitRig(sil: SilhouetteSpec, palette: [string, string, string]): UnitRig {
   const [primary, secondary, accent] = palette;
+  // Role-differentiated PBR: primary reads as cloth/skin, secondary as worked
+  // metal/armour, accent as polished gem/trim that catches the env map + bloom.
   const matP = lam(primary);
+  matP.roughness = 0.82;
+  matP.metalness = 0.06;
   const matS = lam(secondary);
+  matS.roughness = 0.44;
+  matS.metalness = 0.55;
   const matA = lam(accent);
+  matA.roughness = 0.28;
+  matA.metalness = 0.45;
+  matA.envMapIntensity = 0.95;
   const materials = [matP, matS, matA];
   const s = sil.scale;
 
@@ -334,6 +421,60 @@ export function buildUnitRig(sil: SilhouetteSpec, palette: [string, string, stri
   }
 }
 
+/**
+ * Swap a loaded glTF scene in for the procedural body (Phase 5 pluggable rig).
+ * Pure Object3D math — no GL context — so it is unit-testable headless. Procedural
+ * parts are hidden (not disposed) so a failed/again-absent load can fall back, and
+ * the itemLayer (on root) keeps driving item visuals over the authored model.
+ */
+export function mountHeroModel(
+  rig: UnitRig,
+  model: THREE.Object3D,
+  clips: THREE.AnimationClip[] = [],
+  clipNames?: Partial<Record<AuthoredActionName, string>>
+): void {
+  for (const child of rig.body.children) child.visible = false;
+  if (rig.authoredModel?.parent) rig.authoredModel.parent.remove(rig.authoredModel);
+
+  // Fit authored height to the procedural silhouette and seat feet on the ground.
+  const pre = new THREE.Box3().setFromObject(model);
+  const size = pre.getSize(new THREE.Vector3());
+  const k = rig.height / (size.y || 1);
+  model.scale.setScalar(k);
+  const post = new THREE.Box3().setFromObject(model);
+  model.position.y -= post.min.y;
+
+  collectStandardMaterials(rig, model);
+  model.userData.heroModel = true;
+  rig.body.add(model);
+  rig.authoredModel = model;
+
+  if (clips.length > 0) {
+    const mixer = new THREE.AnimationMixer(model);
+    const actions: Partial<Record<AuthoredActionName, THREE.AnimationAction>> = {};
+    for (const name of ['idle', 'run', 'attack', 'cast', 'channel', 'death'] as const) {
+      const clip = findClip(clips, name, clipNames);
+      if (!clip) continue;
+      const action = mixer.clipAction(clip);
+      if (name === 'attack' || name === 'cast' || name === 'death') {
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+      }
+      actions[name] = action;
+    }
+    rig.mixer = mixer;
+    rig.actions = actions;
+    const idle = actions.idle ?? actions.run ?? actions.channel;
+    if (idle) {
+      idle.reset();
+      idle.enabled = true;
+      idle.setEffectiveWeight(1);
+      idle.play();
+      rig.activeAction = actions.idle ? 'idle' : actions.run ? 'run' : 'channel';
+    }
+  }
+}
+
 export function applyHeroLikeness(rig: UnitRig, heroId: string): void {
   const s = rig.scale;
   const body = rig.body;
@@ -345,112 +486,389 @@ export function applyHeroLikeness(rig: UnitRig, heroId: string): void {
     mesh(new THREE.SphereGeometry(r * s, 14, 10), lam(color, emissive));
   const cone = (r: number, h: number, color: string | number, emissive = 0): THREE.Mesh =>
     mesh(new THREE.ConeGeometry(r * s, h * s, 10), lam(color, emissive));
+  const cyl = (rt: number, rb: number, h: number, color: string | number, emissive = 0): THREE.Mesh =>
+    mesh(new THREE.CylinderGeometry(rt * s, rb * s, h * s, 12), lam(color, emissive));
+  const torus = (r: number, tube: number, color: string | number, emissive = 0, arc = Math.PI * 2): THREE.Mesh =>
+    mesh(new THREE.TorusGeometry(r * s, tube * s, 8, 24, arc), lam(color, emissive));
+  // Paired glowing eyes — the single strongest "this is a hero" read at zoom.
+  const eyes = (fx: number, y: number, dz: number, r: number, color: string): THREE.Mesh[] => {
+    const eL = sphere(r, color, 0x222222);
+    eL.position.set(fx * s, y * s, dz * s);
+    const eR = eL.clone();
+    eR.position.z = -dz * s;
+    return [eL, eR];
+  };
 
   switch (heroId) {
     case 'juggernaut': {
-      const mask = box(0.08, 0.34, 0.28, '#f3e3c2');
+      // White Mask of the Yurnero: slit mask, teal eye-slit glow, fanned crest fins, red sash.
+      const mask = box(0.1, 0.36, 0.3, '#f3e3c2');
       mask.position.set(0.25 * s, 1.84 * s, 0);
-      const visor = box(0.09, 0.06, 0.22, '#7adfc4', 0x081817);
-      visor.position.set(0.3 * s, 1.88 * s, 0);
-      const crestA = cone(0.08, 0.36, '#c8742c');
-      crestA.rotation.z = -0.7;
-      crestA.position.set(-0.04 * s, 2.1 * s, 0.16 * s);
-      const crestB = crestA.clone();
-      crestB.position.z = -0.16 * s;
-      add(mask, visor, crestA, crestB);
+      const visor = box(0.1, 0.05, 0.24, '#7adfc4', 0x0c2a26);
+      visor.position.set(0.31 * s, 1.9 * s, 0);
+      const fins = new THREE.Group();
+      for (let i = 0; i < 3; i++) {
+        const fin = cone(0.07, 0.34 + i * 0.06, i === 1 ? '#e07d2c' : '#c8742c');
+        fin.rotation.z = -0.7 + (i - 1) * 0.18;
+        fin.position.set(-0.02 * s, 2.12 * s, (i - 1) * 0.16 * s);
+        fins.add(fin);
+      }
+      const sash = box(0.06, 0.18, 0.5, '#b8331f');
+      sash.position.set(0.18 * s, 0.7 * s, 0);
+      const padL = sphere(0.17, '#c8742c');
+      padL.scale.set(1.1, 0.7, 1);
+      padL.position.set(0, 1.5 * s, 0.46 * s);
+      const padR = padL.clone();
+      padR.position.z = -0.46 * s;
+      add(mask, visor, fins, sash, padL, padR);
       break;
     }
     case 'crystal-maiden': {
-      const fur = new THREE.Mesh(
-        new THREE.TorusGeometry(0.26 * s, 0.055 * s, 8, 24),
-        lam('#f4fbff')
-      );
+      // Rylai: fur hood ring, layered ice crown, frost cloak, chest gem, frosty breath glow.
+      const fur = torus(0.27, 0.06, '#f4fbff');
       fur.position.set(0, 1.76 * s, 0);
       fur.rotation.x = Math.PI / 2;
-      const crown = cone(0.12, 0.34, '#d8f4ff', 0x102438);
-      crown.position.set(0.02 * s, 2.1 * s, 0);
-      const robeL = box(0.05, 0.76, 0.18, '#d8f4ff');
-      robeL.position.set(0.34 * s, 0.82 * s, 0.18 * s);
+      const crownG = new THREE.Group();
+      for (let i = 0; i < 3; i++) {
+        const spike = cone(0.07, 0.3 + i * 0.08, '#d8f4ff', 0x163a52);
+        spike.position.set(0.04 * s, 2.06 * s, (i - 1) * 0.13 * s);
+        crownG.add(spike);
+      }
+      const gem = mesh(new THREE.OctahedronGeometry(0.12 * s), lam('#9fe6ff', 0x16465e));
+      gem.position.set(0.3 * s, 1.24 * s, 0);
+      const cloak = box(0.06, 1.0, 0.72, '#9fd0ec');
+      cloak.position.set(-0.32 * s, 0.92 * s, 0);
+      const robeL = box(0.05, 0.78, 0.2, '#d8f4ff');
+      robeL.position.set(0.32 * s, 0.8 * s, 0.2 * s);
       const robeR = robeL.clone();
-      robeR.position.z = -0.18 * s;
-      add(fur, crown, robeL, robeR);
+      robeR.position.z = -0.2 * s;
+      add(fur, crownG, gem, cloak, robeL, robeR, ...eyes(0.34, 1.86, 0.08, 0.04, '#bff0ff'));
       break;
     }
     case 'pudge': {
-      const belly = sphere(0.48, '#d8a39b');
-      belly.scale.set(1.1, 0.9, 0.8);
-      belly.position.set(0.12 * s, 1.0 * s, 0);
-      const scar = box(0.04, 0.54, 0.03, '#5b2118');
-      scar.position.set(0.55 * s, 1.0 * s, 0);
-      scar.rotation.z = 0.45;
-      const apron = box(0.08, 0.7, 0.42, '#5d2f21');
-      apron.position.set(0.52 * s, 0.86 * s, 0);
-      add(belly, scar, apron);
+      // The Butcher: bloated stitched belly, hook on the back, blood apron, sagging jaw.
+      const belly = sphere(0.52, '#9fae6a');
+      belly.scale.set(1.15, 0.92, 0.85);
+      belly.position.set(0.14 * s, 0.98 * s, 0);
+      const jaw = sphere(0.2, '#9fae6a');
+      jaw.scale.set(0.8, 0.6, 1);
+      jaw.position.set(0.22 * s, 1.62 * s, 0);
+      const scar = box(0.05, 0.56, 0.04, '#6b2a1f');
+      scar.position.set(0.6 * s, 0.98 * s, 0);
+      scar.rotation.z = 0.4;
+      const stitches = new THREE.Group();
+      for (let i = 0; i < 5; i++) {
+        const st = box(0.02, 0.02, 0.16, '#2c1410');
+        st.position.set(0.62 * s, (0.78 + i * 0.11) * s, 0);
+        st.rotation.z = 0.4;
+        stitches.add(st);
+      }
+      const apron = box(0.08, 0.74, 0.46, '#5d2f21');
+      apron.position.set(0.54 * s, 0.84 * s, 0);
+      const hookHaft = cyl(0.04, 0.04, 0.7, '#3a2a1c');
+      hookHaft.position.set(-0.42 * s, 1.4 * s, -0.1 * s);
+      hookHaft.rotation.z = 0.3;
+      const hook = torus(0.16, 0.05, '#b8b0a0', 0, Math.PI * 1.4);
+      hook.position.set(-0.5 * s, 1.05 * s, -0.1 * s);
+      add(belly, jaw, scar, stitches, apron, hookHaft, hook);
       break;
     }
     case 'earthshaker': {
-      const beard = cone(0.2, 0.42, '#e8b15c');
+      // Raigor: curved horns, golden beard, stone shoulder slabs, glowing totem rune.
+      const hornL = cone(0.07, 0.42, '#e8dcc0');
+      hornL.position.set(0.05 * s, 2.0 * s, 0.18 * s);
+      hornL.rotation.set(0.4, 0, 0.5);
+      const hornR = hornL.clone();
+      hornR.position.z = -0.18 * s;
+      hornR.rotation.set(-0.4, 0, 0.5);
+      const beard = cone(0.22, 0.46, '#e8b15c');
       beard.rotation.z = Math.PI;
-      beard.position.set(0.16 * s, 1.58 * s, 0);
-      const stoneL = sphere(0.25, '#5b8cc8');
-      stoneL.scale.set(1.15, 0.65, 0.9);
-      stoneL.position.set(0, 1.55 * s, 0.68 * s);
+      beard.position.set(0.16 * s, 1.56 * s, 0);
+      const stoneL = mesh(new THREE.DodecahedronGeometry(0.28 * s, 0), lam('#5b6b7c'));
+      stoneL.scale.set(1.15, 0.7, 0.95);
+      stoneL.position.set(0, 1.56 * s, 0.7 * s);
       const stoneR = stoneL.clone();
-      stoneR.position.z = -0.68 * s;
-      add(beard, stoneL, stoneR);
+      stoneR.position.z = -0.7 * s;
+      const rune = mesh(new THREE.OctahedronGeometry(0.12 * s), lam('#6fd0ff', 0x12506e));
+      rune.position.set(0.34 * s, 1.18 * s, 0);
+      add(hornL, hornR, beard, stoneL, stoneR, rune);
       break;
     }
     case 'sniper': {
-      const brim = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.34 * s, 0.34 * s, 0.05 * s, 18),
-        lam('#5c4a32')
-      );
-      brim.position.set(0, 1.96 * s, 0);
-      brim.rotation.x = Math.PI / 2;
-      const goggles = box(0.08, 0.08, 0.32, '#ffd27f', 0x201002);
+      // Kardel: wide brimmed hat, glowing amber goggles, dwarf beard, ammo pack + scope.
+      const brim = cyl(0.36, 0.36, 0.05, '#5c4a32');
+      brim.position.set(0, 1.95 * s, 0);
+      const dome = sphere(0.22, '#6b573a');
+      dome.scale.y = 0.8;
+      dome.position.set(0, 2.04 * s, 0);
+      const goggles = box(0.08, 0.1, 0.34, '#ffd27f', 0x4a3208);
       goggles.position.set(0.24 * s, 1.86 * s, 0);
-      const beard = cone(0.16, 0.36, '#d7b07a');
+      const beard = cone(0.17, 0.4, '#d7b07a');
       beard.rotation.z = Math.PI;
-      beard.position.set(0.15 * s, 1.56 * s, 0);
-      add(brim, goggles, beard);
+      beard.position.set(0.15 * s, 1.54 * s, 0);
+      const pack = box(0.26, 0.4, 0.36, '#46371f');
+      pack.position.set(-0.34 * s, 1.34 * s, 0);
+      const ammo = torus(0.16, 0.04, '#caa24a');
+      ammo.position.set(0.1 * s, 1.18 * s, 0);
+      ammo.rotation.x = 0.6;
+      add(brim, dome, goggles, beard, pack, ammo);
       break;
     }
     case 'lich': {
-      const jaw = box(0.16, 0.18, 0.18, '#e8e8d8');
-      jaw.position.set(0.12 * s, 1.6 * s, 0);
+      // Ethreain: bare skull, glowing eye sockets, jagged ice crown, ragged blue cape, ice shoulders.
+      const skull = sphere(0.24, '#e8e8d8');
+      skull.position.set(0.16 * s, 1.86 * s, 0);
+      const jaw = box(0.16, 0.16, 0.2, '#dcdcc8');
+      jaw.position.set(0.18 * s, 1.62 * s, 0);
       const crown = new THREE.Group();
       for (let i = 0; i < 5; i++) {
-        const spike = cone(0.045, 0.34 + i % 2 * 0.12, '#d8f4ff', 0x0d2838);
-        spike.position.set(0, (2.05 + (i % 2) * 0.04) * s, (i - 2) * 0.11 * s);
+        const spike = cone(0.05, 0.36 + (i % 2) * 0.16, '#cdeeff', 0x176084);
+        spike.position.set(0.04 * s, (2.06 + (i % 2) * 0.05) * s, (i - 2) * 0.11 * s);
         crown.add(spike);
       }
-      const cape = box(0.05, 1.16, 0.64, '#2c4a78');
-      cape.position.set(-0.34 * s, 1.05 * s, 0);
-      add(jaw, crown, cape);
+      const shL = mesh(new THREE.ConeGeometry(0.16 * s, 0.4 * s, 6), lam('#bfeaff', 0x12516e));
+      shL.position.set(0, 1.56 * s, 0.5 * s);
+      const shR = shL.clone();
+      shR.position.z = -0.5 * s;
+      const cape = box(0.05, 1.18, 0.66, '#28406e');
+      cape.position.set(-0.34 * s, 1.04 * s, 0);
+      add(skull, jaw, crown, shL, shR, cape, ...eyes(0.36, 1.9, 0.08, 0.04, '#8fe6ff'));
       break;
     }
     case 'luna': {
-      const crescent = new THREE.Mesh(new THREE.TorusGeometry(0.26 * s, 0.035 * s, 8, 24, Math.PI * 1.25), lam('#dce8ff'));
+      // Moon rider: crescent helm, silver pauldrons, glowing eyes, short cloak.
+      const crescent = torus(0.27, 0.04, '#dce8ff', 0x1a2a44, Math.PI * 1.25);
       crescent.rotation.z = Math.PI / 2;
-      crescent.position.set(0.03 * s, 2.05 * s, 0);
-      add(crescent);
+      crescent.position.set(0.03 * s, 2.06 * s, 0);
+      const padL = sphere(0.2, '#cfd8ee');
+      padL.scale.set(1.2, 0.6, 1);
+      padL.position.set(0, 1.52 * s, 0.5 * s);
+      const padR = padL.clone();
+      padR.position.z = -0.5 * s;
+      const cloak = box(0.05, 0.78, 0.6, '#2f3f6e');
+      cloak.position.set(-0.3 * s, 1.0 * s, 0);
+      add(crescent, padL, padR, cloak, ...eyes(0.3, 1.86, 0.08, 0.04, '#bfd4ff'));
       break;
     }
     case 'sven': {
+      // Rogue Knight: winged helm, slit visor glow, massive pauldrons, cape.
       const visor = box(0.1, 0.16, 0.34, '#d8dde8');
       visor.position.set(0.24 * s, 1.88 * s, 0);
-      const plume = cone(0.09, 0.5, '#3a5bd8');
-      plume.position.set(-0.08 * s, 2.16 * s, 0);
-      add(visor, plume);
+      const slit = box(0.06, 0.04, 0.26, '#6fd0ff', 0x123a52);
+      slit.position.set(0.31 * s, 1.9 * s, 0);
+      const wingL = box(0.04, 0.22, 0.12, '#aeb6c4');
+      wingL.position.set(0, 2.0 * s, 0.22 * s);
+      wingL.rotation.x = -0.5;
+      const wingR = wingL.clone();
+      wingR.position.z = -0.22 * s;
+      wingR.rotation.x = 0.5;
+      const padL = sphere(0.26, '#b8c0cf');
+      padL.scale.set(1.2, 0.8, 1.1);
+      padL.position.set(0, 1.52 * s, 0.56 * s);
+      const padR = padL.clone();
+      padR.position.z = -0.56 * s;
+      const cape = box(0.05, 1.0, 0.66, '#2a3a6e');
+      cape.position.set(-0.32 * s, 1.0 * s, 0);
+      add(visor, slit, wingL, wingR, padL, padR, cape);
       break;
     }
     case 'axe': {
-      const mohawk = box(0.08, 0.42, 0.12, '#b51f1f');
-      mohawk.position.set(0, 2.02 * s, 0);
-      const beard = cone(0.18, 0.34, '#5a160f');
+      // Mogul Khan: red skin, black mohawk, braided beard, spiked pauldrons.
+      const mohawk = box(0.09, 0.44, 0.13, '#1a1a1a');
+      mohawk.position.set(0, 2.04 * s, 0);
+      const beard = cone(0.19, 0.38, '#3a1410');
       beard.rotation.z = Math.PI;
-      beard.position.set(0.14 * s, 1.55 * s, 0);
-      add(mohawk, beard);
+      beard.position.set(0.14 * s, 1.54 * s, 0);
+      const spikeL = cone(0.16, 0.4, '#7c2218');
+      spikeL.position.set(0, 1.66 * s, 0.5 * s);
+      spikeL.rotation.z = -0.3;
+      const spikeR = spikeL.clone();
+      spikeR.position.z = -0.5 * s;
+      const plate = box(0.1, 0.5, 0.5, '#8c2a1e');
+      plate.position.set(0.32 * s, 1.1 * s, 0);
+      add(mohawk, beard, spikeL, spikeR, plate, ...eyes(0.26, 1.82, 0.09, 0.035, '#ffd27f'));
+      break;
+    }
+    case 'legion-commander': {
+      const crest = cone(0.12, 0.5, '#f0d48a');
+      crest.rotation.z = -0.2;
+      crest.position.set(0, 2.1 * s, 0);
+      const plate = box(0.1, 0.55, 0.56, '#f0d48a');
+      plate.position.set(0.31 * s, 1.15 * s, 0);
+      const banner = box(0.05, 0.8, 0.42, '#c23b2a');
+      banner.position.set(-0.42 * s, 1.38 * s, 0);
+      const sash = box(0.07, 0.2, 0.62, '#f0d48a');
+      sash.position.set(0.22 * s, 0.78 * s, 0);
+      add(crest, plate, banner, sash);
+      break;
+    }
+    case 'shadow-fiend': {
+      const core = sphere(0.18, '#d84a32', 0x3a0505);
+      core.position.set(0.34 * s, 1.18 * s, 0);
+      const hornL = cone(0.08, 0.42, '#1a0a0a');
+      hornL.position.set(0.02 * s, 2.0 * s, 0.2 * s);
+      hornL.rotation.x = 0.45;
+      const hornR = hornL.clone();
+      hornR.position.z = -0.2 * s;
+      hornR.rotation.x = -0.45;
+      const wingL = box(0.05, 0.8, 0.32, '#111111');
+      wingL.position.set(-0.42 * s, 1.28 * s, 0.42 * s);
+      wingL.rotation.z = 0.35;
+      const wingR = wingL.clone();
+      wingR.position.z = -0.42 * s;
+      wingR.rotation.z = 0.35;
+      add(core, hornL, hornR, wingL, wingR, ...eyes(0.3, 1.82, 0.09, 0.04, '#ff563d'));
+      break;
+    }
+    case 'lion': {
+      const horn = cone(0.09, 0.48, '#ffca66');
+      horn.position.set(0.05 * s, 2.08 * s, 0);
+      horn.rotation.z = -0.35;
+      const collar = torus(0.3, 0.045, '#ffca66');
+      collar.position.set(0.03 * s, 1.64 * s, 0);
+      collar.rotation.x = Math.PI / 2;
+      const claw = sphere(0.2, '#7d2cb8', 0x1c0824);
+      claw.scale.set(1.05, 1.35, 0.9);
+      claw.position.set(0.06 * s, 1.05 * s, 0.62 * s);
+      const rune = sphere(0.12, '#c882ff', 0x25043c);
+      rune.position.set(0.36 * s, 1.22 * s, 0);
+      add(horn, collar, claw, rune, ...eyes(0.3, 1.84, 0.08, 0.035, '#ffd27f'));
+      break;
+    }
+    case 'doom': {
+      const hornL = cone(0.11, 0.58, '#201010');
+      hornL.position.set(0.04 * s, 2.08 * s, 0.22 * s);
+      hornL.rotation.x = 0.55;
+      const hornR = hornL.clone();
+      hornR.position.z = -0.22 * s;
+      hornR.rotation.x = -0.55;
+      const chest = sphere(0.18, '#ff9a3a', 0x4a1604);
+      chest.position.set(0.36 * s, 1.2 * s, 0);
+      const wingL = box(0.06, 0.95, 0.36, '#201010');
+      wingL.position.set(-0.46 * s, 1.34 * s, 0.5 * s);
+      wingL.rotation.z = 0.42;
+      const wingR = wingL.clone();
+      wingR.position.z = -0.5 * s;
+      const flame = cone(0.12, 0.46, '#ff7a3d', 0x451004);
+      flame.position.set(0.46 * s, 1.78 * s, 0);
+      add(hornL, hornR, chest, wingL, wingR, flame);
+      break;
+    }
+    case 'wraith-king': {
+      const skull = sphere(0.24, '#d8ffd8', 0x0c2e16);
+      skull.position.set(0.15 * s, 1.86 * s, 0);
+      const crown = cyl(0.2, 0.26, 0.18, '#d8ffd8', 0x0c2e16);
+      crown.position.set(0.04 * s, 2.1 * s, 0);
+      const core = sphere(0.14, '#41d878', 0x0c3a18);
+      core.position.set(0.36 * s, 1.18 * s, 0);
+      const cape = box(0.05, 1.1, 0.7, '#143821');
+      cape.position.set(-0.34 * s, 1.02 * s, 0);
+      add(skull, crown, core, cape, ...eyes(0.34, 1.9, 0.08, 0.04, '#7aff9a'));
+      break;
+    }
+    case 'invoker': {
+      const collar = box(0.08, 0.62, 0.82, '#f8d36a');
+      collar.position.set(-0.22 * s, 1.42 * s, 0);
+      const cape = box(0.05, 1.12, 0.78, '#7a3cff');
+      cape.position.set(-0.38 * s, 1.02 * s, 0);
+      const orbs = [
+        ['#a8e8ff', 0.48, 1.55, 0.34],
+        ['#7a3cff', 0.48, 1.32, 0],
+        ['#f8d36a', 0.48, 1.55, -0.34]
+      ] as const;
+      add(collar, cape, ...orbs.map(([col, x, y, z]) => {
+        const o = sphere(0.1, col, 0x111111);
+        o.position.set(x * s, y * s, z * s);
+        return o;
+      }));
+      break;
+    }
+    case 'medusa': {
+      const snakes = new THREE.Group();
+      for (let i = 0; i < 5; i++) {
+        const snake = cone(0.045, 0.42, i % 2 ? '#2aa86b' : '#d8f5a2');
+        snake.position.set(0.02 * s, (2.0 + (i % 2) * 0.06) * s, (i - 2) * 0.1 * s);
+        snake.rotation.z = -0.5;
+        snakes.add(snake);
+      }
+      const scaledTail = cyl(0.16, 0.28, 0.75, '#2aa86b');
+      scaledTail.position.set(0.0, 0.48 * s, 0);
+      scaledTail.rotation.z = Math.PI / 2;
+      const bow = torus(0.28, 0.035, '#d8f5a2', 0, Math.PI * 1.6);
+      bow.position.set(0.52 * s, 1.2 * s, 0.44 * s);
+      bow.rotation.y = Math.PI / 2;
+      add(snakes, scaledTail, bow, ...eyes(0.3, 1.84, 0.08, 0.04, '#f0ffa8'));
+      break;
+    }
+    case 'tidehunter': {
+      const jaw = sphere(0.32, '#b4f0dd');
+      jaw.scale.set(1.2, 0.62, 1);
+      jaw.position.set(0.26 * s, 1.62 * s, 0);
+      const shellL = sphere(0.24, '#13453e');
+      shellL.scale.set(1.25, 0.65, 1);
+      shellL.position.set(0.0, 1.48 * s, 0.62 * s);
+      const shellR = shellL.clone();
+      shellR.position.z = -0.62 * s;
+      const anchor = torus(0.2, 0.045, '#b4f0dd', 0, Math.PI * 1.35);
+      anchor.position.set(-0.46 * s, 1.15 * s, 0);
+      add(jaw, shellL, shellR, anchor);
+      break;
+    }
+    case 'tiny': {
+      const crown = mesh(new THREE.DodecahedronGeometry(0.23 * s, 0), lam('#e0e0d0'));
+      crown.position.set(0.02 * s, 2.1 * s, 0);
+      const shL = mesh(new THREE.DodecahedronGeometry(0.34 * s, 0), lam('#9a9a8a'));
+      shL.position.set(0, 1.5 * s, 0.6 * s);
+      const shR = shL.clone();
+      shR.position.z = -0.6 * s;
+      const crack = box(0.05, 0.62, 0.04, '#e0e0d0', 0x202010);
+      crack.position.set(0.48 * s, 1.12 * s, 0);
+      crack.rotation.z = -0.18;
+      add(crown, shL, shR, crack);
+      break;
+    }
+    case 'storm-spirit': {
+      const hat = cyl(0.34, 0.34, 0.06, '#ffffff');
+      hat.position.set(0, 1.98 * s, 0);
+      const moustache = torus(0.18, 0.035, '#ffffff', 0, Math.PI);
+      moustache.position.set(0.23 * s, 1.72 * s, 0);
+      moustache.rotation.z = Math.PI / 2;
+      const belt = torus(0.34, 0.035, '#58a8ff', 0x0b2450);
+      belt.position.set(0.02 * s, 1.0 * s, 0);
+      belt.rotation.x = Math.PI / 2;
+      const orbL = sphere(0.1, '#7ddcff', 0x11385a);
+      orbL.position.set(0.18 * s, 1.42 * s, 0.42 * s);
+      const orbR = orbL.clone();
+      orbR.position.z = -0.42 * s;
+      add(hat, moustache, belt, orbL, orbR);
+      break;
+    }
+    case 'kunkka': {
+      const hat = cyl(0.28, 0.32, 0.12, '#112940');
+      hat.position.set(0, 1.98 * s, 0);
+      const coat = box(0.06, 1.02, 0.68, '#2a6d9a');
+      coat.position.set(-0.28 * s, 1.0 * s, 0);
+      const medal = sphere(0.08, '#e8d8a0', 0x202010);
+      medal.position.set(0.34 * s, 1.38 * s, 0);
+      const wheel = torus(0.2, 0.025, '#e8d8a0');
+      wheel.position.set(-0.42 * s, 1.45 * s, 0);
+      add(hat, coat, medal, wheel);
+      break;
+    }
+    case 'natures-prophet': {
+      const antlerL = cone(0.05, 0.48, '#8b5a2b');
+      antlerL.position.set(0, 2.1 * s, 0.18 * s);
+      antlerL.rotation.x = 0.52;
+      const antlerR = antlerL.clone();
+      antlerR.position.z = -0.18 * s;
+      antlerR.rotation.x = -0.52;
+      const leafCape = box(0.05, 1.0, 0.68, '#4dbd62');
+      leafCape.position.set(-0.36 * s, 1.0 * s, 0);
+      const seedL = sphere(0.09, '#d8ffd8', 0x103a16);
+      seedL.position.set(0.42 * s, 1.4 * s, 0.34 * s);
+      const seedR = seedL.clone();
+      seedR.position.z = -0.34 * s;
+      add(antlerL, antlerR, leafCape, seedL, seedR);
       break;
     }
   }
@@ -459,8 +877,8 @@ export function applyHeroLikeness(rig: UnitRig, heroId: string): void {
 export function buildWeapon(
   kind: SilhouetteSpec['weapon'] | ItemWeaponVisualKind,
   s: number,
-  matS: THREE.MeshLambertMaterial,
-  matA: THREE.MeshLambertMaterial
+  matS: THREE.MeshStandardMaterial,
+  matA: THREE.MeshStandardMaterial
 ): THREE.Group | null {
   if (!kind || kind === 'none') return null;
   const g = new THREE.Group();
