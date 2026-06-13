@@ -9,6 +9,7 @@ import { applyStatus, execEffects, type EffectCtx } from './effects';
 import { abilityCtx, breakInvis, emitBark, fireCast, updateUnitActions } from './actions';
 import { soundForAbility } from './gestures';
 import { thinkUnit } from './controllers';
+import { computeTeamMind } from './utility';
 import { itemReady } from './items';
 import { makeCreepUnit, makeSummonUnit, Unit, type ItemState } from './unit';
 import { abilityMaxLevel, levelArr } from './values';
@@ -99,6 +100,19 @@ export interface Repeater {
   point?: Vec2;
 }
 
+/**
+ * Per-team coordination state (AI_OVERHAUL §1, Layer 1). Computed once per team
+ * per decision window and read by the gambit controller so allies converge on a
+ * shared focus and sequence their commit instead of fighting as five soloists.
+ */
+export interface TeamMind {
+  focusUid: number | null;  // the target the team should converge on
+  focusScore: number;
+  engaged: boolean;         // an ally is in the fight; safe to commit / burst
+  spread: boolean;          // enemy area damage is on allies; hold spacing
+  computedTick: number;
+}
+
 export class Sim {
   time = 0;
   tickCount = 0;
@@ -122,6 +136,7 @@ export class Sim {
   private pidSeq = 1;
   private zidSeq = 1;
   private auraNextAt = 0;
+  private teamMinds = new Map<Team, TeamMind>();
 
   constructor(opts: SimOptions) {
     this.rng = new Rng(opts.seed);
@@ -179,6 +194,19 @@ export class Sim {
 
   private ensureSpatial(): void {
     if (this.spatialDirty) this.rebuildSpatial();
+  }
+
+  /**
+   * Shared coordination state for a team, recomputed at most once per
+   * TUNING.ai.teamFocusReassessTicks. Cheap: one pass over the unit list per
+   * team per interval, reused by every ally that thinks inside that interval.
+   */
+  teamMind(team: Team): TeamMind {
+    const prev = this.teamMinds.get(team);
+    if (prev && this.tickCount - prev.computedTick < TUNING.ai.teamFocusReassessTicks) return prev;
+    const tm = computeTeamMind(this, team, prev ?? null);
+    this.teamMinds.set(team, tm);
+    return tm;
   }
 
   // ---------- spawning ----------

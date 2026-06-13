@@ -75,6 +75,11 @@ export interface RaidEncounterResult extends MacroResult {
   fired: RaidMechanicFired[];
 }
 
+export interface RaidMechanicRunner {
+  fired: RaidMechanicFired[];
+  tick(sim: Sim): void;
+}
+
 interface BattleHooks {
   /** Fires once per tick (after the sim steps) so raid mechanics can execute in the sim. */
   onTick?: (sim: Sim) => void;
@@ -143,7 +148,8 @@ export function setupRaidSim(setup: RaidSetup): Sim {
   }, {
     kind: 'boss',
     threat: {},
-    homePos: { x: TUNING.arenaWidth - TUNING.macroTeamXInset, y: centerY }
+    homePos: { x: TUNING.arenaWidth - TUNING.macroTeamXInset, y: centerY },
+    boss: { depth: setup.boss.aiDepth ?? TUNING.ai.bossAiDepth }
   }, bossLevel, bossBuild);
   const hpScale = setup.boss.hpScale ?? TUNING.raidBossHpScale;
   const damageScale = setup.boss.damageScale ?? TUNING.raidBossDamageScale;
@@ -330,7 +336,15 @@ export function runRaidEncounter(setup: RaidEncounterSetup): RaidEncounterResult
   const sim = setupRaidSim({ seed: rs.seed, party: rs.party, boss: rs.boss, maxSec });
   if (setup.captureEvents) sim.events.captureAll = true;
   const boss = sim.unitsArr.find((u) => u.team === 1 && u.ctrl.kind === 'boss')!;
+  // arm the boss phase-FSM with the encounter's enrage timer (AI_OVERHAUL §5)
+  if (boss.ctrl.boss) boss.ctrl.boss.enrageSec = def.enrageSec;
+  const mechanics = createRaidMechanicRunner(def, sim, boss);
 
+  const base = runBattleToResult(sim, maxSec, { onTick: mechanics.tick, aegisTeam: setup.aegis ? 0 : undefined });
+  return { ...base, cleared: base.winner === 0, fired: mechanics.fired };
+}
+
+export function createRaidMechanicRunner(def: RaidDef, sim: Sim, boss: Unit): RaidMechanicRunner {
   // One unique mechanic instance per scripted beat (dup summon ids stay distinct).
   const mechs: RaidMech[] = [
     ...def.addWaves.map((w, i) => ({ key: `wave-${i}`, kind: 'add-wave' as const, atHpPct: w.atHpPct, wave: { summon: w.summon, count: w.count } })),
@@ -354,7 +368,7 @@ export function runRaidEncounter(setup: RaidEncounterSetup): RaidEncounterResult
     sim.addZone({ caster: boss, ctx, spec, duration: zoneNum(spec.duration, 8), pos: { ...at }, radius: zoneNum(spec.radius, 320) * radiusMul });
   };
 
-  const onTick = (s: Sim) => {
+  const tick = (s: Sim) => {
     if (!boss.alive) return;
     const hpPct = 100 * boss.hp / Math.max(1, boss.stats.maxHp);
     for (const m of mechs) {
@@ -391,8 +405,7 @@ export function runRaidEncounter(setup: RaidEncounterSetup): RaidEncounterResult
     }
   };
 
-  const base = runBattleToResult(sim, maxSec, { onTick, aegisTeam: setup.aegis ? 0 : undefined });
-  return { ...base, cleared: base.winner === 0, fired };
+  return { fired, tick };
 }
 
 const SIGNATURE_ZONE: ZoneSpec = {

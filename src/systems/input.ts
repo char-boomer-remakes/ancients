@@ -76,7 +76,7 @@ export class InputController {
   /** re-pick at the current mouse position (also called on mousedown so
    *  clicks use exact click coords, not last frame's cached hover) */
   private refreshPick(): void {
-    const pick = this.game.scene.pick(this.mouseX, this.mouseY, this.game.sim);
+    const pick = this.game.scene.pick(this.mouseX, this.mouseY, this.game.inputSim());
     this.hoverUid = pick.uid ?? -1;
     this.hoverGround = pick.ground ?? null;
   }
@@ -113,20 +113,26 @@ export class InputController {
 
   private rightClick(): void {
     const g = this.game;
+    const sim = g.inputSim();
+    const driver = g.controlledUnit();
     if (this.hoverUid >= 0) {
-      const target = g.sim.unit(this.hoverUid);
+      const target = sim.unit(this.hoverUid);
       if (!target) return;
+      if (g.liveGym && target.team === 0) {
+        g.selectLiveGymUnit(target.uid);
+        return;
+      }
       // npc hero -> recruit
-      if (g.npcAt(this.hoverUid)) {
+      if (!g.liveGym && g.npcAt(this.hoverUid)) {
         g.tryRecruit(this.hoverUid);
         return;
       }
-      if (target.team !== 0 && target.alive) {
+      if (driver && target.team !== 0 && target.alive) {
         g.orderAttack(this.hoverUid, this.clickQueued);
         return;
       }
     }
-    if (this.hoverGround) g.orderMove(this.hoverGround, this.clickQueued);
+    if (driver && this.hoverGround) g.orderMove(this.hoverGround, this.clickQueued);
   }
 
   private leftClick(): void {
@@ -134,7 +140,7 @@ export class InputController {
     if (this.attackMovePending) {
       this.attackMovePending = false;
       if (this.hoverUid >= 0) {
-        const target = g.sim.unit(this.hoverUid);
+        const target = g.inputSim().unit(this.hoverUid);
         if (target && target.team !== 0 && target.alive) g.orderAttack(this.hoverUid, this.clickQueued);
       } else if (this.hoverGround) {
         g.orderAttackMove(this.hoverGround, this.clickQueued);
@@ -149,16 +155,17 @@ export class InputController {
     }
     // select hovered unit (info only; control stays on the hero)
     if (this.hoverUid >= 0) {
+      if (g.liveGym) g.selectLiveGymUnit(this.hoverUid);
       g.scene.selectedUid = this.hoverUid;
     } else {
-      const u = g.activeUnit();
+      const u = g.controlledUnit() ?? g.activeUnit();
       if (u) g.scene.selectedUid = u.uid;
     }
   }
 
   private fire(t: TargetingState): void {
     const g = this.game;
-    const u = g.activeUnit();
+    const u = g.controlledUnit();
     if (!u || t.kind === 'none') return;
     const opts = {
       uid: this.hoverUid >= 0 ? this.hoverUid : undefined,
@@ -182,14 +189,6 @@ export class InputController {
       this.onToggleMenu();
       return;
     }
-    // live gym fight (§3.5): Space spends a Captain Call; other overworld keys are inert
-    if (this.game.liveGym) {
-      if (key === ' ' || key === 'spacebar') {
-        e.preventDefault();
-        this.game.liveGymPlayerCall();
-      }
-      return;
-    }
     if (this.uiModalOpen) {
       if (key === 'tab' || key === 'b') {
         e.preventDefault();
@@ -200,7 +199,7 @@ export class InputController {
     }
 
     const g = this.game;
-    const u = g.activeUnit();
+    const u = g.controlledUnit();
     const queued = e.shiftKey;
 
     // hero swap
@@ -251,16 +250,22 @@ export class InputController {
 
     switch (key) {
       case 't': {
+        if (g.liveGym || g.liveRaid) return;
         // capture hovered (or selected) creep
         const uid = this.hoverUid >= 0 ? this.hoverUid : g.scene.selectedUid;
         if (uid >= 0) g.tryCapture(uid);
         return;
       }
       case 'a':
+        if (!g.controlledUnit()) {
+          if (g.liveGym) g.msg('Spend a Captain Call to issue orders', 'info');
+          return;
+        }
         this.attackMovePending = true;
         g.msg('Attack-move: click a point or enemy', 'info');
         return;
       case 'g':
+        if (g.liveGym || g.liveRaid) return;
         g.tryInteract();
         return;
       case 's':
@@ -269,6 +274,10 @@ export class InputController {
       case ' ':
       case 'spacebar':
         e.preventDefault();
+        if (g.liveGym) {
+          if (!g.controlledUnit()) g.liveGymPlayerCall(this.hoverUid >= 0 ? this.hoverUid : undefined);
+          return;
+        }
         g.tryDash(this.hoverGround ?? undefined);
         return;
       case 'm':
@@ -279,12 +288,15 @@ export class InputController {
         this.onToggleParty();
         return;
       case 'b':
+        if (g.liveGym || g.liveRaid) return;
         this.onToggleShop();
         return;
       case 'y':
+        if (g.liveGym || g.liveRaid) return;
         this.onToggleServices();
         return;
       case 'n':
+        if (g.liveGym || g.liveRaid) return;
         g.useNeutralActive();
         return;
       case 'f5':
@@ -302,7 +314,7 @@ export class InputController {
 
   private fireAbilityQuick(slot: number, queued = false): void {
     const g = this.game;
-    const u = g.activeUnit();
+    const u = g.controlledUnit();
     if (!u) return;
     const a = u.abilities[slot];
     const targeting = a.def.targeting;
@@ -318,7 +330,7 @@ export class InputController {
         g.msg('No target point', 'bad');
         return;
       }
-      const target = this.hoverUid >= 0 ? g.sim.unit(this.hoverUid) : null;
+      const target = this.hoverUid >= 0 ? g.inputSim().unit(this.hoverUid) : null;
       const point = target ? { ...target.pos } : this.hoverGround!;
       g.castAbility(slot, { point, uid: this.hoverUid >= 0 ? this.hoverUid : undefined, queued });
     }

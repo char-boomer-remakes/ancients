@@ -176,6 +176,24 @@ function fullPartySave(regionId = 'tranquil-vale'): GameSave {
   return save;
 }
 
+describe('live raid control context', () => {
+  it('starts a live raid, swaps drivers, and routes orders into the raid sim', () => {
+    const g = Game.headless(fullPartySave());
+    expect(g.startLiveRaid('roshan-pit', 'normal')).toBe(true);
+    const raid = g.liveRaid!;
+    const targetUid = raid.partyUids[1];
+    const target = raid.sim.unit(targetUid)!;
+
+    expect(g.trySwap(1)).toBe(true);
+    expect(g.controlledUnit()?.uid).toBe(targetUid);
+
+    const point = { x: target.pos.x + 160, y: target.pos.y + 20 };
+    g.orderMove(point);
+
+    expect(raid.sim.unit(targetUid)?.order).toEqual({ kind: 'move', point });
+  });
+});
+
 // A dominant scripted draft for the Elite gauntlet (3 strong items each vs the
 // enemy's 2), so a winning seed is found quickly and deterministically.
 const SUPER: MacroHeroSetup[] = [

@@ -4,8 +4,11 @@ import type {
   BossDef,
   CreepTier,
   DifficultyTier,
+  DropEntry,
   DraftDef,
   GameSave,
+  ItemDropTable,
+  ItemQuality,
   ItemSave,
   LootTable,
   MacroHeroSetup,
@@ -21,16 +24,96 @@ export interface LootRoll {
   pityUsed: boolean;
 }
 
-export function rollLoot(table: LootTable, tier: DifficultyTier, dryStreak: number, seed: number): LootRoll {
-  const rng = new Rng(seed);
-  const pityUsed = dryStreak + 1 >= table.pity;
-  const hit = table.assembledPool.length > 0 && (pityUsed || rng.chance(table.dropPct[tier]));
-  const assembled = hit ? { id: rng.pick(table.assembledPool) } : undefined;
+export interface ItemDropRoll {
+  items: ItemSave[];
+  dryStreaks: Record<string, number>;
+  pityUsed: boolean;
+}
+
+const QUALITY_ORDER: ItemQuality[] = ['unusual', 'corrupted', 'frozen', 'genuine', 'inscribed'];
+
+function pickWeighted(pool: DropEntry[], rng: Rng): DropEntry {
+  const total = pool.reduce((sum, entry) => sum + Math.max(0, entry.weight), 0);
+  if (total <= 0) return rng.pick(pool);
+  const draw = rng.range(0, total);
+  let acc = 0;
+  for (const entry of pool) {
+    acc += Math.max(0, entry.weight);
+    if (draw < acc) return entry;
+  }
+  return pool[pool.length - 1];
+}
+
+function rollQuality(entry: DropEntry, table: ItemDropTable['slots'][number], rng: Rng): ItemQuality | undefined {
+  if (entry.quality) return entry.quality === 'standard' ? undefined : entry.quality;
+  const odds = table.qualityOdds;
+  if (!odds) return undefined;
+  const total = QUALITY_ORDER.reduce((sum, q) => sum + Math.max(0, odds[q] ?? 0), 0);
+  if (total <= 0) return undefined;
+  const draw = rng.range(0, total);
+  let acc = 0;
+  for (const q of QUALITY_ORDER) {
+    acc += Math.max(0, odds[q] ?? 0);
+    if (draw < acc) return q === 'standard' ? undefined : q;
+  }
+  return undefined;
+}
+
+export function lootTableToDropTable(table: LootTable): ItemDropTable {
   return {
-    guaranteed: table.guaranteed.map((id) => ({ id })),
+    guaranteed: [...table.guaranteed],
+    slots: [
+      {
+        id: 'assembled',
+        rarity: 'legendary',
+        rolls: 1,
+        chance: table.dropPct,
+        pool: table.assembledPool.map((id) => ({ id, weight: 1 })),
+        pity: table.pity
+      }
+    ]
+  };
+}
+
+export function rollItemDrops(table: ItemDropTable, tier: DifficultyTier, dryStreaks: Record<string, number>, rng: Rng): ItemDropRoll {
+  const items: ItemSave[] = table.guaranteed.map((id) => ({ id }));
+  const nextDry = { ...dryStreaks };
+  let pityUsed = false;
+
+  for (const slot of table.slots) {
+    const key = slot.id ?? slot.rarity;
+    let dry = nextDry[key] ?? 0;
+    const rolls = Math.max(0, Math.floor(slot.rolls));
+    for (let i = 0; i < rolls; i++) {
+      const pity = !!slot.pity && dry + 1 >= slot.pity;
+      const hit = slot.pool.length > 0 && (pity || rng.chance(slot.chance[tier]));
+      if (!hit) {
+        dry += 1;
+        continue;
+      }
+      const entry = pickWeighted(slot.pool, rng);
+      const quality = rollQuality(entry, slot, rng);
+      const item: ItemSave = { id: entry.id };
+      if (quality) item.quality = quality;
+      items.push(item);
+      dry = 0;
+      pityUsed = pityUsed || pity;
+    }
+    nextDry[key] = dry;
+  }
+
+  return { items, dryStreaks: nextDry, pityUsed };
+}
+
+export function rollLoot(table: LootTable, tier: DifficultyTier, dryStreak: number, seed: number): LootRoll {
+  const roll = rollItemDrops(lootTableToDropTable(table), tier, { assembled: dryStreak }, new Rng(seed));
+  const guaranteed = roll.items.slice(0, table.guaranteed.length);
+  const assembled = roll.items[table.guaranteed.length];
+  return {
+    guaranteed,
     assembled,
-    dryStreak: assembled ? 0 : dryStreak + 1,
-    pityUsed: !!assembled && pityUsed
+    dryStreak: roll.dryStreaks.assembled ?? dryStreak,
+    pityUsed: !!assembled && roll.pityUsed
   };
 }
 

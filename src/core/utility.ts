@@ -1,0 +1,592 @@
+import { TUNING } from '../data/tuning';
+import { add, dist, dist2, norm, scale, sub, v2 } from './math2d';
+import { combatProfile, type CombatProfile } from './combat-profile';
+import { abilityVal } from './values';
+import { itemReady } from './items';
+import { isDisabled } from './status';
+import { REG } from './registry';
+import type { AbilityDef, EffectNode, Order, StatusId, Team, Vec2 } from './types';
+import type { Sim, TeamMind } from './sim';
+import type { Unit } from './unit';
+
+// ============================================================
+// Utility scorer (AI_OVERHAUL §1, Layer 2). Given a unit and a
+// focus, enumerate candidate actions and score each from cheap
+// considerations weighted by the unit's CombatProfile. The best
+// action becomes an Order. One scorer serves creeps, bosses, and
+// the gambit fallback. Pure and deterministic; ties break by slot
+// then uid.
+// ============================================================
+
+const HARD_DISABLES: ReadonlySet<StatusId> = new Set<StatusId>([
+  'stun', 'root', 'hex', 'fear', 'sleep', 'frozen', 'cyclone'
+]);
+const SOFT_DISABLES: ReadonlySet<StatusId> = new Set<StatusId>([
+  'silence', 'slow', 'disarm', 'blind', 'break'
+]);
+
+interface AbilityIntent {
+  offensive: boolean;
+  aoe: boolean;
+  hardControl: boolean;
+  softControl: boolean;
+  heal: boolean;
+  buff: boolean;
+  escape: boolean;
+  affectsAlly: boolean;
+  radius: number;        // representative aoe radius at this level (0 = single)
+}
+
+const INTENT_CACHE = new WeakMap<AbilityDef, Omit<AbilityIntent, 'radius'>>();
+
+/** Classify what an ability is *for*, independent of level (radius resolved separately). */
+function classify(def: AbilityDef): Omit<AbilityIntent, 'radius'> {
+  const cached = INTENT_CACHE.get(def);
+  if (cached) return cached;
+  const out = {
+    offensive: false,
+    aoe: false,
+    hardControl: false,
+    softControl: false,
+    heal: false,
+    buff: false,
+    escape: false,
+    affectsAlly: def.affects === 'ally'
+  };
+  scan(def.effects, out);
+  if (def.channel?.tick) scan(def.channel.tick.effects, out);
+  if (def.channel?.onEnd) scan(def.channel.onEnd, out);
+  if (def.toggle) scan(def.toggle.effects, out);
+  // a unit-target ability that affects allies is support intent even if effects are thin
+  if (def.affects === 'ally' && !out.heal && !out.buff) out.buff = true;
+  INTENT_CACHE.set(def, out);
+  return out;
+}
+
+function scan(nodes: EffectNode[] | undefined, out: Omit<AbilityIntent, 'radius'>): void {
+  if (!nodes) return;
+  for (const n of nodes) {
+    switch (n.kind) {
+      case 'damage':
+        out.offensive = true;
+        if (n.radius !== undefined) out.aoe = true;
+        break;
+      case 'heal':
+        out.heal = true;
+        if (n.radius !== undefined) out.aoe = true;
+        break;
+      case 'mana':
+        if (n.op === 'burn') out.offensive = true;
+        break;
+      case 'status':
+        if (HARD_DISABLES.has(n.status)) out.hardControl = true;
+        else if (SOFT_DISABLES.has(n.status)) out.softControl = true;
+        else if (n.status === 'buff') out.buff = true;
+        if (n.radius !== undefined) out.aoe = true;
+        break;
+      case 'displace':
+        if (n.mode === 'blink' || n.toward === 'away-from-caster') out.escape = true;
+        else { out.offensive = true; out.hardControl = true; }
+        break;
+      case 'statmod':
+        out.buff = true;
+        break;
+      case 'summon':
+        out.offensive = true;
+        break;
+      case 'zone':
+        out.aoe = true;
+        if (n.zone.tick) scan(n.zone.tick.effects, out);
+        if (n.zone.onEnter) scan(n.zone.onEnter.effects, out);
+        break;
+      case 'projectile':
+        scan(n.proj.onHit, out);
+        break;
+      case 'repeat':
+        scan(n.effects, out);
+        break;
+      case 'purge':
+        break;
+      case 'exotic':
+        out.offensive = true;
+        break;
+    }
+  }
+}
+
+function intentOf(def: AbilityDef, level: number): AbilityIntent {
+  const base = classify(def);
+  let radius = 0;
+  if (base.aoe) radius = representativeRadius(def, level);
+  return { ...base, radius };
+}
+
+function representativeRadius(def: AbilityDef, level: number): number {
+  let r = 0;
+  const visit = (nodes?: EffectNode[]) => {
+    if (!nodes) return;
+    for (const n of nodes) {
+      const nr = (n as { radius?: number | string }).radius;
+      if (nr !== undefined) r = Math.max(r, abilityVal(def, nr, level));
+      if (n.kind === 'zone') {
+        if (n.zone.radius !== undefined) r = Math.max(r, abilityVal(def, n.zone.radius, level));
+        if (n.zone.tick) visit(n.zone.tick.effects);
+      }
+      if (n.kind === 'projectile') { visit(n.proj.onHit); if (n.proj.width !== undefined) r = Math.max(r, abilityVal(def, n.proj.width, level)); }
+      if (n.kind === 'repeat') visit(n.effects);
+    }
+  };
+  visit(def.effects);
+  if (def.channel?.tick) visit(def.channel.tick.effects);
+  return r > 0 ? r : 300;
+}
+
+// ---------- reactive reads (AI_OVERHAUL §2) ----------
+
+export type CastCategory = 'blink' | 'ult' | 'channel' | 'any';
+
+function defHasBlink(def: AbilityDef): boolean {
+  const visit = (nodes?: EffectNode[]): boolean => {
+    if (!nodes) return false;
+    for (const n of nodes) {
+      if (n.kind === 'displace' && n.mode === 'blink') return true;
+      if (n.kind === 'repeat' && visit(n.effects)) return true;
+    }
+    return false;
+  };
+  return visit(def.effects);
+}
+
+/** The ability/item def a unit is currently casting or channeling, if any. */
+function currentCastDef(u: Unit): { def: AbilityDef; channeling: boolean } | null {
+  const cs = u.cast;
+  if (cs) {
+    if (cs.source === 'ability') {
+      const def = u.abilities[cs.slot]?.def;
+      return def ? { def, channeling: false } : null;
+    }
+    const idef = REG.items.get(u.items[cs.slot]?.defId ?? '')?.active;
+    return idef ? { def: idef, channeling: false } : null;
+  }
+  const ch = u.channel;
+  if (ch) {
+    if (ch.source === 'ability') {
+      const def = u.abilities[ch.slot]?.def;
+      return def ? { def, channeling: true } : null;
+    }
+    const idef = REG.items.get(u.items[ch.slot]?.defId ?? '')?.active;
+    return idef ? { def: idef, channeling: true } : null;
+  }
+  return null;
+}
+
+function castMatches(def: AbilityDef, channeling: boolean, category: CastCategory): boolean {
+  switch (category) {
+    case 'any': return true;
+    case 'ult': return def.ult === true;
+    case 'channel': return channeling || !!def.channel;
+    case 'blink': return defHasBlink(def);
+  }
+}
+
+/** An enemy within range is casting/channeling something of the given category. */
+export function enemyCastSeen(sim: Sim, u: Unit, category: CastCategory, radius = 1500): boolean {
+  let seen = false;
+  sim.forEachNearbyUnit(u.pos, radius + 80, (o) => {
+    if (seen || !enemyCandidate(sim, u, o)) return;
+    if (dist2(o.pos, u.pos) > radius * radius) return;
+    const cur = currentCastDef(o);
+    if (cur && castMatches(cur.def, cur.channeling, category)) seen = true;
+  });
+  return seen;
+}
+
+/** An enemy within range is mid-cast of a hard disable that may land on the team. */
+export function incomingDisable(sim: Sim, u: Unit, radius = 1200): boolean {
+  let inc = false;
+  sim.forEachNearbyUnit(u.pos, radius + 80, (o) => {
+    if (inc || !enemyCandidate(sim, u, o)) return;
+    if (dist2(o.pos, u.pos) > radius * radius) return;
+    const cur = currentCastDef(o);
+    if (cur && classify(cur.def).hardControl) inc = true;
+  });
+  return inc;
+}
+
+// ---------- candidate predicates ----------
+
+function enemyCandidate(sim: Sim, u: Unit, o: Unit): boolean {
+  return o.alive && o.team !== u.team && o.kind !== 'npc' && !o.summary.untargetable && o.isVisibleTo(u.team, sim.time);
+}
+
+function dangerScore(o: Unit): number {
+  const attackDps = o.stats.damage / Math.max(0.2, o.stats.attackInterval);
+  const casterBias = o.abilities.some((a) => a.level > 0 && a.cooldownUntil <= 0 && a.def.targeting !== 'passive' && a.def.targeting !== 'aura') ? 120 : 0;
+  const heroBias = o.kind === 'hero' ? 150 : 0;
+  const lowHpPenalty = (1 - o.hp / Math.max(1, o.stats.maxHp)) * 80;
+  return attackDps + casterBias + heroBias - lowHpPenalty;
+}
+
+function dangerNorm(o: Unit): number {
+  return Math.max(0, Math.min(1, dangerScore(o) / TUNING.ai.dangerNorm));
+}
+
+/** A target is worth committing to by how killable and how dangerous it is. */
+function targetValue(o: Unit): number {
+  const hpPct = o.hp / Math.max(1, o.stats.maxHp);
+  return 0.5 + (1 - hpPct) * 0.8 + dangerNorm(o) * 0.6;
+}
+
+function castRangeOf(def: AbilityDef, u: Unit, level: number): number {
+  const base = def.castRange !== undefined ? abilityVal(def, def.castRange, level) : 600;
+  return base + u.stats.castRangeBonus;
+}
+
+// ---------- target acquisition ----------
+
+function lowestWoundedAlly(sim: Sim, u: Unit, range: number, savePct: number): Unit | null {
+  let best: Unit | null = null;
+  let bestPct = Infinity;
+  sim.forEachNearbyUnit(u.pos, range + 80, (o) => {
+    if (!o.alive || o.team !== u.team || o.kind === 'npc') return;
+    if (dist2(o.pos, u.pos) > range * range) return;
+    const pct = o.hp / Math.max(1, o.stats.maxHp);
+    if (pct >= savePct) return;
+    if (pct < bestPct) { bestPct = pct; best = o; }
+  });
+  return best;
+}
+
+function woundedAlliesNear(sim: Sim, u: Unit, range: number, pct: number): number {
+  let n = 0;
+  sim.forEachNearbyUnit(u.pos, range + 80, (o) => {
+    if (!o.alive || o.team !== u.team || o.kind === 'npc') return;
+    if (dist2(o.pos, u.pos) > range * range) return;
+    if (o.hp / Math.max(1, o.stats.maxHp) < pct) n++;
+  });
+  return n;
+}
+
+function enemyChannelingInRange(sim: Sim, u: Unit, range: number): Unit | null {
+  let best: Unit | null = null;
+  sim.forEachNearbyUnit(u.pos, range + 80, (o) => {
+    if (!enemyCandidate(sim, u, o)) return;
+    if (dist2(o.pos, u.pos) > range * range) return;
+    const casting = o.castingUntil > sim.time || (o.channel != null && o.channel.until > sim.time);
+    if (casting && (best === null || o.uid < best.uid)) best = o;
+  });
+  return best;
+}
+
+function bestOffensiveTarget(sim: Sim, u: Unit, focus: Unit | null, range: number): Unit | null {
+  // prefer the focus when it is a valid enemy in range, so casts reinforce the team's commit
+  if (focus && enemyCandidate(sim, u, focus) && dist2(u.pos, focus.pos) <= range * range) return focus;
+  let best: Unit | null = null;
+  let bestScore = -Infinity;
+  sim.forEachNearbyUnit(u.pos, range + 80, (o) => {
+    if (!enemyCandidate(sim, u, o)) return;
+    if (dist2(o.pos, u.pos) > range * range) return;
+    const score = targetValue(o);
+    if (score > bestScore || (score === bestScore && (best === null || o.uid < best.uid))) {
+      bestScore = score;
+      best = o;
+    }
+  });
+  return best;
+}
+
+/** Best cluster center among enemies in cast range, with how many it would catch. */
+function bestCluster(sim: Sim, u: Unit, range: number, radius: number): { point: Vec2; count: number } | null {
+  const inRange = sim.unitsInRadius(u.pos, range, (o) => enemyCandidate(sim, u, o));
+  if (inRange.length === 0) return null;
+  let bestPoint: Vec2 | null = null;
+  let bestCount = 0;
+  for (const c of inRange) {
+    let count = 0;
+    for (const o of inRange) {
+      if (dist2(o.pos, c.pos) <= radius * radius) count++;
+    }
+    if (count > bestCount) { bestCount = count; bestPoint = { ...c.pos }; }
+  }
+  return bestPoint ? { point: bestPoint, count: bestCount } : null;
+}
+
+function enemiesNear(sim: Sim, u: Unit, radius: number): number {
+  let n = 0;
+  sim.forEachNearbyUnit(u.pos, radius + 80, (o) => {
+    if (enemyCandidate(sim, u, o) && dist2(o.pos, u.pos) <= radius * radius) n++;
+  });
+  return n;
+}
+
+interface Scored { score: number; order: Order; slot: number }
+
+function scoreAbility(sim: Sim, u: Unit, slot: number, focus: Unit | null, profile: CombatProfile): Scored | null {
+  const a = u.abilities[slot];
+  if (!a || a.level <= 0) return null;
+  const t = a.def.targeting;
+  if (t === 'passive' || t === 'aura' || t === 'attack-modifier') return null;
+  if (!u.abilityReady(slot, sim.time).ok) return null;
+
+  // toggle: switch on once enemies are close
+  if (t === 'toggle') {
+    if (a.toggled) return null;
+    if (enemiesNear(sim, u, u.stats.attackRange + 320) === 0) return null;
+    return { score: 0.7 * profile.weights.aggression, order: { kind: 'cast', slot }, slot };
+  }
+
+  const intent = intentOf(a.def, a.level);
+  const w = profile.weights;
+  const range = castRangeOf(a.def, u, a.level) * 1.1;
+
+  // protective casts on a wounded ally (heal, shield, save buff)
+  if (intent.affectsAlly && (intent.heal || intent.buff)) {
+    const ally = lowestWoundedAlly(sim, u, range, TUNING.ai.saveAllyHpPct);
+    if (!ally) return null;
+    const need = 1 - ally.hp / Math.max(1, ally.stats.maxHp);
+    let s = w.saveAllies * (0.5 + need);
+    if (sim.time - ally.lastEnemyDamageAt < 1.5) s += 0.4; // actively under fire
+    if (t === 'no-target') return { score: s, order: { kind: 'cast', slot }, slot };
+    return { score: s, order: { kind: 'cast', slot, uid: ally.uid }, slot };
+  }
+
+  // self / no-target steroid (BKB-style, Warcry): cast when a fight is on
+  if (t === 'no-target' && intent.buff && !intent.offensive) {
+    if (enemiesNear(sim, u, u.stats.attackRange + 320) === 0) return null;
+    return { score: 0.75 * w.aggression, order: { kind: 'cast', slot }, slot };
+  }
+
+  if (!intent.offensive && !intent.hardControl && !intent.softControl) return null;
+
+  const controlW = intent.hardControl ? w.control : intent.softControl ? w.control * 0.6 : 0;
+
+  // area effect: value the cluster it catches
+  if (intent.aoe || t === 'ground-aoe') {
+    if (t === 'no-target') {
+      const count = enemiesNear(sim, u, intent.radius || 300);
+      if (count === 0) return null;
+      const s = (w.aoe * (0.4 + count)) + controlW * 0.4 * count;
+      return { score: s, order: { kind: 'cast', slot }, slot };
+    }
+    const cluster = bestCluster(sim, u, range, intent.radius || 300);
+    if (!cluster || cluster.count === 0) return null;
+    const s = (w.aoe * (0.4 + cluster.count)) + controlW * 0.4 * cluster.count;
+    if (t === 'unit-target') {
+      const tgt = bestOffensiveTarget(sim, u, focus, range);
+      if (!tgt) return null;
+      return { score: s, order: { kind: 'cast', slot, uid: tgt.uid }, slot };
+    }
+    return { score: s, order: { kind: 'cast', slot, point: cluster.point }, slot };
+  }
+
+  // single-target nuke / disable
+  const target = bestOffensiveTarget(sim, u, focus, range);
+  if (!target) return null;
+  const value = targetValue(target);
+  let s = (intent.offensive ? w.burst * value : 0) + controlW * (0.6 + dangerNorm(target));
+  // interrupting a channel or mid-cast is high value
+  const interrupting = (intent.hardControl || a.def.piercesImmunity) && (target.castingUntil > sim.time || (target.channel && target.channel.until > sim.time));
+  if (interrupting) s += 0.8;
+  if (t === 'unit-target') return { score: s, order: { kind: 'cast', slot, uid: target.uid }, slot };
+  return { score: s, order: { kind: 'cast', slot, point: { ...target.pos } }, slot };
+}
+
+// ---------- item actives (AI_OVERHAUL §2) ----------
+// Consider functions for the active items the AI knows how to value, mirroring
+// the per-item desire functions a Dota bot runs. Unknown actives are left to
+// authored use-item rules.
+
+function scoreItemActive(sim: Sim, u: Unit, slot: number, focus: Unit | null, profile: CombatProfile): Scored | null {
+  const it = u.items[slot];
+  if (!it) return null;
+  const def = REG.items.get(it.defId);
+  if (!def?.active) return null;
+  if (!itemReady(it, def, u, sim.time).ok) return null;
+  const w = profile.weights;
+  const ITEM = 1000 + slot; // tie-break bucket so items lose tie with same-score abilities
+
+  switch (it.defId) {
+    case 'black-king-bar': {
+      // pop magic immunity when a hard disable is landing or an enemy ult/channel is up nearby
+      const fighting = enemiesNear(sim, u, u.stats.attackRange + 360) > 0;
+      if (!fighting) return null;
+      const threatened = incomingDisable(sim, u, 1000) || enemyCastSeen(sim, u, 'ult', 1100) || enemyCastSeen(sim, u, 'channel', 1100);
+      if (!threatened) return null;
+      return { score: 1.5 * Math.max(0.9, w.survival), order: { kind: 'item', invSlot: slot }, slot: ITEM };
+    }
+    case 'force-staff': {
+      // self-peel out of a melee crush when low
+      if (u.hp / Math.max(1, u.stats.maxHp) > profile.retreatHpPct) return null;
+      if (enemiesNear(sim, u, 360) === 0) return null;
+      return { score: 1.4 * Math.max(0.9, w.survival), order: { kind: 'item', invSlot: slot, uid: u.uid }, slot: ITEM };
+    }
+    case 'glimmer-cape': {
+      const ally = lowestWoundedAlly(sim, u, 800 + u.stats.castRangeBonus, TUNING.ai.saveAllyHpPct);
+      if (!ally) return null;
+      const need = 1 - ally.hp / Math.max(1, ally.stats.maxHp);
+      const underFire = sim.time - ally.lastEnemyDamageAt < 1.5 ? 0.5 : 0;
+      return { score: w.saveAllies * (0.6 + need) + underFire, order: { kind: 'item', invSlot: slot, uid: ally.uid }, slot: ITEM };
+    }
+    case 'mekansm': {
+      const wounded = woundedAlliesNear(sim, u, 750, 0.7);
+      if (wounded < 2) return null;
+      return { score: w.saveAllies * (0.5 + wounded * 0.5), order: { kind: 'item', invSlot: slot }, slot: ITEM };
+    }
+    case 'euls-scepter': {
+      const range = 575 + u.stats.castRangeBonus;
+      const channeling = enemyChannelingInRange(sim, u, range);
+      const target = channeling ?? bestOffensiveTarget(sim, u, focus, range);
+      if (!target) return null;
+      let s = w.control * (0.6 + dangerNorm(target));
+      if (channeling) s += 0.8; // interrupt
+      return { score: s, order: { kind: 'item', invSlot: slot, uid: target.uid }, slot: ITEM };
+    }
+  }
+  return null;
+}
+
+/**
+ * Choose the best combat order for a unit that has acquired `focus`.
+ * Returns the order, or null to let the caller fall back (e.g. attack-focus).
+ */
+export function chooseUtilityOrder(sim: Sim, u: Unit, focus: Unit | null): Order | null {
+  const profile = combatProfile(u);
+  let best: Scored | null = null;
+  for (let slot = 0; slot < u.abilities.length; slot++) {
+    const cand = scoreAbility(sim, u, slot, focus, profile);
+    if (!cand) continue;
+    if (!best || cand.score > best.score) best = cand; // lower slot wins ties (scanned first)
+  }
+  // item actives: only gambit-driven heroes (party / autobattler); bosses get
+  // deliberate item use from the boss brain (A5), creeps carry none.
+  if (u.ctrl.kind === 'gambit') {
+    for (let slot = 0; slot < u.items.length; slot++) {
+      const cand = scoreItemActive(sim, u, slot, focus, profile);
+      if (!cand) continue;
+      if (!best || cand.score > best.score) best = cand;
+    }
+  }
+  if (best && best.score >= TUNING.ai.castScoreFloor) return best.order;
+
+  if (!focus) return null;
+
+  // ranged kiters keep spacing when an enemy crowds them, but still trade
+  if (profile.kiteDistance > 0) {
+    const d = dist(u.pos, focus.pos);
+    if (d < profile.kiteDistance * 0.7) {
+      const away = norm(sub(u.pos, focus.pos));
+      const dir = away.x === 0 && away.y === 0 ? v2(-1, 0) : away;
+      return { kind: 'move', point: add(u.pos, scale(dir, profile.kiteDistance - d + 120)) };
+    }
+  }
+  return { kind: 'attack-unit', uid: focus.uid };
+}
+
+// ---------- team-mind (AI_OVERHAUL §1, Layer 1) ----------
+
+/** How good a single target is for the *whole team* to converge on. */
+function teamFocusScore(target: Unit, allies: Unit[]): number {
+  let sumDist = 0;
+  let near = 0;
+  for (const a of allies) {
+    const d = dist(a.pos, target.pos);
+    sumDist += d;
+    if (d < 1100) near++;
+  }
+  const avgDistNorm = allies.length > 0 ? sumDist / allies.length / 4000 : 1;
+  const hpPct = target.hp / Math.max(1, target.stats.maxHp);
+  const heroBias = target.kind === 'hero' ? 0.5 : 0;
+  return (1 - hpPct) * 1.0 + dangerNorm(target) * 0.9 + heroBias + near * 0.15 - avgDistNorm * 0.5;
+}
+
+function enemyAoeOnTeam(sim: Sim, team: Team, allies: Unit[]): boolean {
+  for (const z of sim.zones) {
+    if (z.team === team || !z.tickEffects) continue;
+    const harms = z.tickEffects.some((e) => e.kind === 'damage') && z.tickAffects !== 'allies';
+    if (!harms) continue;
+    const r = (z.radius ?? 0) + 220;
+    for (const a of allies) {
+      const c = z.pos ?? a.pos;
+      if (dist2(a.pos, c) <= r * r) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Compute a team's shared focus, engage state, and spread flag. Sticky: the held
+ * focus survives unless a challenger beats it by TUNING.ai.focusStickiness, which
+ * stops the whole team jittering between targets tick to tick.
+ */
+export function computeTeamMind(sim: Sim, team: Team, prev: TeamMind | null): TeamMind {
+  const allies: Unit[] = [];
+  const enemies: Unit[] = [];
+  for (const u of sim.unitsArr) {
+    if (!u.alive || u.kind === 'npc' || u.kind === 'ward') continue;
+    if (u.team === team) allies.push(u);
+    else enemies.push(u);
+  }
+
+  let best: Unit | null = null;
+  let bestScore = -Infinity;
+  for (const e of enemies) {
+    if (!enemyCandidate(sim, allies[0] ?? e, e) || e.team === team) continue;
+    if (!e.isVisibleTo(team, sim.time)) continue;
+    const score = teamFocusScore(e, allies);
+    if (score > bestScore || (score === bestScore && (best === null || e.uid < best.uid))) {
+      bestScore = score;
+      best = e;
+    }
+  }
+
+  // stickiness: keep the previously held focus unless clearly out-valued
+  if (prev && prev.focusUid !== null) {
+    const held = sim.unit(prev.focusUid);
+    if (held && held.alive && held.team !== team && !held.summary.untargetable && held.isVisibleTo(team, sim.time)) {
+      const heldScore = teamFocusScore(held, allies);
+      if (!best || (best.uid !== held.uid && bestScore < heldScore * TUNING.ai.focusStickiness)) {
+        best = held;
+        bestScore = heldScore;
+      }
+    }
+  }
+
+  let engaged = false;
+  if (best) {
+    for (const a of allies) {
+      if (dist(a.pos, best.pos) < a.stats.attackRange + 260) { engaged = true; break; }
+      if (sim.time - a.lastDealtDamageAt < 1.5 || sim.time - a.lastEnemyDamageAt < 1.5) { engaged = true; break; }
+    }
+  }
+
+  return {
+    focusUid: best ? best.uid : null,
+    focusScore: best ? bestScore : -Infinity,
+    engaged,
+    spread: enemyAoeOnTeam(sim, team, allies),
+    computedTick: sim.tickCount
+  };
+}
+
+/**
+ * Per-unit focus pick (AI_OVERHAUL §0/§3): threat-, value-, and distance-aware,
+ * replacing the old low-hp-and-near heuristic. The team-mind (A1) layers a shared
+ * focus on top of this.
+ */
+export function pickUtilityFocus(sim: Sim, u: Unit, leashOk?: (o: Unit) => boolean): Unit | null {
+  let best: Unit | null = null;
+  let bestScore = -Infinity;
+  for (const o of sim.unitsArr) {
+    if (!enemyCandidate(sim, u, o)) continue;
+    if (leashOk && !leashOk(o)) continue;
+    const hpPct = o.hp / Math.max(1, o.stats.maxHp);
+    const distNorm = dist(o.pos, u.pos) / 4000;
+    const heroBias = o.kind === 'hero' ? 0.5 : 0;
+    const score = (1 - hpPct) * 1.0 + dangerNorm(o) * 0.8 + heroBias - distNorm * 0.7;
+    if (score > bestScore || (score === bestScore && (best === null || o.uid < best.uid))) {
+      bestScore = score;
+      best = o;
+    }
+  }
+  return best;
+}

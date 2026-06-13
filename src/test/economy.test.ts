@@ -204,6 +204,23 @@ describe('neutral-items-live (test 11)', () => {
     expect(got.dropFromTier).toBe('ancient');
   });
 
+  it('drops consumables and components from wild creeps into the Armory stash', () => {
+    const g = Game.headless(soloSave('juggernaut', 12));
+    g.sim.events.captureAll = true;
+    const small = creepOfTier('small');
+    const large = creepOfTier('large');
+
+    for (let i = 0; i < 80 && !g.inventoryStash.some((it) => REG.item(it.id).tier === 'consumable'); i++) {
+      killWildCreep(g, small);
+    }
+    expect(g.inventoryStash.some((it) => REG.item(it.id).tier === 'consumable')).toBe(true);
+
+    for (let i = 0; i < 80 && !g.inventoryStash.some((it) => REG.item(it.id).tier === 'component'); i++) {
+      killWildCreep(g, large);
+    }
+    expect(g.inventoryStash.some((it) => REG.item(it.id).tier === 'component')).toBe(true);
+  });
+
   it('slots a neutral into the dedicated slot, keeps it unsellable, and reclaims to the stash', () => {
     const save = soloSave('juggernaut', 20);
     save.neutralStash = [{ id: 'trusty-shovel', count: 1 }];
@@ -250,6 +267,44 @@ describe('neutral-items-live (test 11)', () => {
     expect(REG.neutralItem(enchanted!.id).tier).toBe(original.tier + 1);
     expect(g2.neutralStash.find((s) => s.id === 'trusty-shovel')).toBeUndefined();
     expect(g2.neutralStash.find((s) => s.id === enchanted!.id)?.count).toBe(1);
+  });
+});
+
+describe('Armory and bound loot', () => {
+  it('equips a bound drop, returns it to the Armory instead of selling, and preserves save state', () => {
+    const save = soloSave('juggernaut', 20);
+    save.inventoryStash = [{ id: 'butterfly', bound: true }];
+    const g = Game.headless(save);
+
+    expect(g.equipArmoryItem(0, 0)).toBe(true);
+    const hero = g.activeUnit()!;
+    const slot = hero.items.findIndex((it) => it?.defId === 'butterfly');
+    expect(slot).toBeGreaterThanOrEqual(0);
+    expect(hero.items[slot]?.bound).toBe(true);
+    expect(g.inventoryStash).toEqual([]);
+
+    const goldBefore = g.gold;
+    g.sellItem(slot);
+    expect(g.gold).toBe(goldBefore);
+    expect(hero.items.some((it) => it?.defId === 'butterfly')).toBe(false);
+    expect(g.inventoryStash).toContainEqual({ id: 'butterfly', bound: true });
+
+    const roundTrip = g.buildSave();
+    expect(roundTrip.inventoryStash).toContainEqual({ id: 'butterfly', bound: true });
+  });
+
+  it('still sells liquid components for gold', () => {
+    const save = soloSave('juggernaut', 20);
+    save.roster[0].items[0] = { id: 'broadsword' };
+    const g = Game.headless(save);
+    const hero = g.activeUnit()!;
+    const slot = hero.items.findIndex((it) => it?.defId === 'broadsword');
+    const goldBefore = g.gold;
+
+    g.sellItem(slot);
+
+    expect(g.gold - goldBefore).toBe(Math.round(REG.item('broadsword').cost * TUNING.sellRatio));
+    expect(hero.items.some((it) => it?.defId === 'broadsword')).toBe(false);
   });
 });
 

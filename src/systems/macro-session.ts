@@ -112,6 +112,7 @@ export class LiveGymFight {
     });
     this.playerCaptain = new CaptainCallController(0, TUNING.captainCallsPerFight);
     this.enemyCaptain = new CaptainCallController(1, TUNING.captainCallsPerFight + (this.gym.enemyBonusCaptainCalls ?? 0));
+    this.sim.playerActiveUid = heroesAlive(this.sim, 0)[0]?.uid ?? -1;
     this.maxTicks = Math.round(TUNING.macroMaxSec / this.sim.dt);
   }
 
@@ -143,6 +144,17 @@ export class LiveGymFight {
     return caller ? this.playerCaptain.activate(this.sim, caller.uid) : false;
   }
 
+  /** Player-side heroes still alive in the current round, in party/spawn order. */
+  playerHeroes(): Unit[] {
+    return heroesAlive(this.sim, 0);
+  }
+
+  /** Unit currently driven by live input during a real Captain's Call. */
+  playerDrivenUnit(): Unit | null {
+    if (this.playerCaptain.activeUid === null) return null;
+    return this.sim.unit(this.playerCaptain.activeUid) ?? null;
+  }
+
   /** The unit the camera should track: an active player caller, else a player hero. */
   cameraFollow(): Unit | null {
     if (this.playerCaptain.activeUid !== null) {
@@ -164,7 +176,7 @@ export class LiveGymFight {
     this.autoCall(this.enemyCaptain, b);
     if (this.autoPlayer) this.autoCall(this.playerCaptain, a);
     this.steer(this.enemyCaptain, a);
-    this.steer(this.playerCaptain, b);
+    if (this.autoPlayer) this.steer(this.playerCaptain, b);
     this.sim.tick();
     this.playerCaptain.tick(this.sim);
     this.enemyCaptain.tick(this.sim);

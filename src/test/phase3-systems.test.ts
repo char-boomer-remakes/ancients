@@ -15,12 +15,15 @@ import {
   rerollNeutralItem,
   raidMechanicTimeline,
   raidSetupFromDef,
+  lootTableToDropTable,
+  rollItemDrops,
   rollLoot,
   rollNeutralDrop,
   scaledBounty,
   tomePurchase,
   visionRadius
 } from '../core/phase3';
+import { Rng } from '../core/rng';
 import { runRaidBattle } from '../core/macro';
 import { Game, newGameSave, SAVE_VERSION } from '../systems/game';
 
@@ -51,6 +54,19 @@ describe('Phase 3 difficulty, loot, and reward economy', () => {
     expect(pity.assembled).toBeDefined();
     expect(pity.dryStreak).toBe(0);
     expect(pity.pityUsed).toBe(true);
+  });
+
+  it('keeps the generalized item drop table compatible with legacy boss loot', () => {
+    const boss = REG.boss('boss-phantom-assassin');
+    for (const dryStreak of [0, boss.loot.pity - 1]) {
+      const seed = bossLootSeed(boss, 'hell', dryStreak + 10);
+      const legacy = rollLoot(boss.loot, 'hell', dryStreak, seed);
+      const generalized = rollItemDrops(lootTableToDropTable(boss.loot), 'hell', { assembled: dryStreak }, new Rng(seed));
+      expect(generalized.items.slice(0, legacy.guaranteed.length)).toEqual(legacy.guaranteed);
+      expect(generalized.items[legacy.guaranteed.length]).toEqual(legacy.assembled);
+      expect(generalized.dryStreaks.assembled).toBe(legacy.dryStreak);
+      expect(generalized.pityUsed).toBe(legacy.pityUsed);
+    }
   });
 
   it('gates Hell behind a cleared Nightmare rerun', () => {

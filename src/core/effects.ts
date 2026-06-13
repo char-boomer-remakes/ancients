@@ -106,7 +106,7 @@ function execNode(sim: Sim, caster: Unit, ctx: EffectCtx, node: EffectNode, prim
       for (const u of units) {
         let amount = node.pctMaxHp ? u.stats.maxHp * (V(ctx, node.amount) / 100) : V(ctx, node.amount);
         if (node.perCharge) amount *= ctx.chargeCount ?? 0;
-        healUnit(sim, u, amount);
+        healUnit(sim, u, amount, caster);
       }
       break;
     }

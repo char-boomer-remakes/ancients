@@ -1,10 +1,16 @@
 import { TUNING } from '../data/tuning';
-import { dist, dist2, v2 } from './math2d';
+import { add, closestOnSeg, dist, dist2, norm, pointSegDist, scale, sub, v2 } from './math2d';
 import { nearestEnemy } from './actions';
 import { REG } from './registry';
+import { chooseUtilityOrder, enemyCastSeen, incomingDisable, pickUtilityFocus } from './utility';
+import { dominantRole } from './combat-profile';
+import { tauntToTop } from './threat';
+import { pickBossFocus } from './boss-brain';
+import { isDisabled } from './status';
 import type { Unit } from './unit';
 import type { GambitAction, GambitCondition, GambitRule, GambitTargetMode, Vec2 } from './types';
 import type { Sim } from './sim';
+import type { Zone } from './sim';
 
 // -----------------------------------------------------------------
 // Controllers are swappable per unit (SPEC §1.1):
@@ -42,8 +48,7 @@ function thinkCreep(sim: Sim, u: Unit): void {
     }
     const enemy = nearestEnemyOf(sim, u, owner.pos, TUNING.entourageGuardRadius) ?? nearestEnemyOf(sim, u, u.pos, TUNING.entourageChaseRadius);
     if (enemy) {
-      maybeCastBasicAbility(sim, u, enemy);
-      if (u.order.kind !== 'cast') u.order = { kind: 'attack-unit', uid: enemy.uid };
+      u.order = chooseUtilityOrder(sim, u, enemy) ?? { kind: 'attack-unit', uid: enemy.uid };
     } else if (dist2(u.pos, owner.pos) > TUNING.entourageFollowStart * TUNING.entourageFollowStart) {
       u.order = { kind: 'follow', uid: owner.uid };
     } else if (u.order.kind === 'follow' && dist2(u.pos, owner.pos) <= TUNING.entourageFollowStop * TUNING.entourageFollowStop) {
@@ -75,8 +80,7 @@ function thinkCreep(sim: Sim, u: Unit): void {
   const aggroR = u.aggroRadius ?? TUNING.creepAggroRadius;
   const enemy = nearestEnemy(sim, u, aggroR);
   if (enemy) {
-    maybeCastBasicAbility(sim, u, enemy);
-    if (u.order.kind !== 'cast') u.order = { kind: 'attack-unit', uid: enemy.uid };
+    u.order = chooseUtilityOrder(sim, u, enemy) ?? { kind: 'attack-unit', uid: enemy.uid };
     return;
   }
 
@@ -100,92 +104,28 @@ function nearestEnemyOf(sim: Sim, u: Unit, around: Vec2, radius: number): Unit |
   );
 }
 
-function maybeCastBasicAbility(sim: Sim, u: Unit, enemy: Unit): void {
-  for (let slot = 0; slot < u.abilities.length; slot++) {
-    const a = u.abilities[slot];
-    if (a.level <= 0) continue;
-    const t = a.def.targeting;
-    if (t === 'passive' || t === 'aura' || t === 'attack-modifier') continue;
-    if (!u.abilityReady(slot, sim.time).ok) continue;
-    if (t === 'toggle') {
-      if (!a.toggled) u.order = { kind: 'cast', slot };
-      return;
-    }
-    const range = typeof a.def.castRange === 'number' ? a.def.castRange : 500;
-    const castRange = range * 1.1;
-    if (dist2(u.pos, enemy.pos) > castRange * castRange) continue;
-    if (t === 'unit-target') {
-      const affects = a.def.affects ?? 'enemy';
-      if (affects === 'ally') {
-        // heal-type: lowest hp ally nearby
-        let bestUid = -1;
-        let bestHpPct = Infinity;
-        sim.forEachNearbyUnit(u.pos, range + 64, (o) => {
-          if (!o.alive || o.team !== u.team) return;
-          if (dist2(o.pos, u.pos) > range * range) return;
-          const hpPct = o.hp / o.stats.maxHp;
-          if (hpPct >= 0.8) return;
-          if (hpPct < bestHpPct) {
-            bestHpPct = hpPct;
-            bestUid = o.uid;
-          }
-        });
-        if (bestUid >= 0) {
-          u.order = { kind: 'cast', slot, uid: bestUid };
-          return;
-        }
-        continue;
-      }
-      u.order = { kind: 'cast', slot, uid: enemy.uid };
-      return;
-    }
-    if (t === 'point-target' || t === 'ground-aoe' || t === 'skillshot') {
-      u.order = { kind: 'cast', slot, point: { ...enemy.pos } };
-      return;
-    }
-    if (t === 'no-target') {
-      u.order = { kind: 'cast', slot };
-      return;
-    }
-  }
-}
-
 function thinkBoss(sim: Sim, u: Unit): void {
+  // Taunt forces basic attacks on the taunter (Dota rule + raid taunt redirect tests),
+  // and lifts the taunter to the top of the threat table so it stays the target after
+  // the taunt expires (AI_OVERHAUL §4, WoW taunt-to-top).
   const taunter = u.summary.taunted !== null ? sim.unit(u.summary.taunted) : undefined;
-  let focus = taunter && taunter.alive && taunter.team !== u.team && !taunter.summary.untargetable
-    ? taunter
-    : pickThreatTarget(sim, u) ?? pickFocus(sim, u) ?? undefined;
+  if (taunter && taunter.alive && taunter.team !== u.team && !taunter.summary.untargetable && taunter.isVisibleTo(u.team, sim.time)) {
+    if (u.ctrl.threat) tauntToTop(u.ctrl.threat, taunter.uid);
+    u.ctrl.focusUid = taunter.uid;
+    u.order = { kind: 'attack-unit', uid: taunter.uid };
+    return;
+  }
+
+  // phase-FSM (AI_OVERHAUL §5) picks the posture target; the scorer turns it into an action
+  let focus = pickBossFocus(sim, u) ?? pickUtilityFocus(sim, u) ?? undefined;
   if (focus && !focus.isVisibleTo(u.team, sim.time)) focus = undefined;
   u.ctrl.focusUid = focus?.uid;
 
   if (focus) {
-    maybeCastBasicAbility(sim, u, focus);
-    if (u.order.kind !== 'cast') u.order = { kind: 'attack-unit', uid: focus.uid };
+    u.order = chooseUtilityOrder(sim, u, focus) ?? { kind: 'attack-unit', uid: focus.uid };
   } else {
     u.order = { kind: 'stop' };
   }
-}
-
-function pickThreatTarget(sim: Sim, u: Unit): Unit | null {
-  const table = u.ctrl.threat;
-  if (!table) return null;
-
-  let best: Unit | null = null;
-  let bestThreat = 0;
-  for (const key of Object.keys(table)) {
-    const uid = Number(key);
-    const target = sim.unit(uid);
-    if (!target || !target.alive || target.team === u.team || target.summary.untargetable || !target.isVisibleTo(u.team, sim.time)) {
-      delete table[uid];
-      continue;
-    }
-    const threat = table[uid];
-    if (threat > bestThreat || (threat === bestThreat && best && dist2(target.pos, u.pos) < dist2(best.pos, u.pos))) {
-      bestThreat = threat;
-      best = target;
-    }
-  }
-  return best;
 }
 
 // ---------- gambit controller (SPEC §7) ----------
@@ -214,19 +154,29 @@ export function thinkGambit(sim: Sim, u: Unit): void {
     }
   }
 
-  // maintain focus target
-  let focus = c.focusUid !== undefined ? sim.unit(c.focusUid) : undefined;
-  if (!focus || !focus.alive || focus.summary.untargetable || !focus.isVisibleTo(u.team, sim.time) || !withinLeash(u, focus)) {
-    focus = pickFocus(sim, u) ?? undefined;
-    c.focusUid = focus?.uid;
+  // maintain focus target: converge on the team-mind's shared focus when it is
+  // reachable (AI_OVERHAUL §1, Layer 1), else keep a valid current focus or pick locally.
+  const tm = sim.teamMind(u.team);
+  const shared = tm.focusUid !== null ? sim.unit(tm.focusUid) : undefined;
+  let focus: Unit | undefined;
+  if (shared && shared.alive && !shared.summary.untargetable && shared.isVisibleTo(u.team, sim.time) && withinLeash(u, shared)) {
+    focus = shared;
+  } else {
+    focus = c.focusUid !== undefined ? sim.unit(c.focusUid) : undefined;
+    if (!focus || !focus.alive || focus.summary.untargetable || !focus.isVisibleTo(u.team, sim.time) || !withinLeash(u, focus)) {
+      focus = pickUtilityFocus(sim, u, (o) => withinLeash(u, o)) ?? undefined;
+    }
   }
+  c.focusUid = focus?.uid;
 
   for (const rule of rules) {
     if (!rule.if.every((cond) => evalCondition(sim, u, cond, focus))) continue;
     if (applyAction(sim, u, rule.then, focus)) return;
   }
-  // default: attack focus
-  if (focus) u.order = { kind: 'attack-unit', uid: focus.uid };
+  // no authored rule fired: let the utility scorer decide, else hold the focus
+  const auto = focus ? chooseUtilityOrder(sim, u, focus) : null;
+  if (auto) u.order = auto;
+  else if (focus) u.order = { kind: 'attack-unit', uid: focus.uid };
   else u.order = { kind: 'stop' };
 }
 
@@ -237,23 +187,51 @@ function withinLeash(u: Unit, target: Unit): boolean {
   return dist2(target.pos, c.homePos) <= c.leashRadius * c.leashRadius;
 }
 
-function pickFocus(sim: Sim, u: Unit): Unit | null {
-  let best: Unit | null = null;
-  let bestScore = Infinity;
-  for (const o of sim.unitsArr) {
-    if (!o.alive || o.team === u.team || o.kind === 'npc') continue;
-    if (o.summary.untargetable || !o.isVisibleTo(u.team, sim.time)) continue;
-    if (!withinLeash(u, o)) continue;
-    const hpScore = o.hp / o.stats.maxHp;
-    const distScore = dist(o.pos, u.pos) / 4000;
-    const heroBias = o.kind === 'hero' ? 0 : 0.5;
-    const score = hpScore + distScore * 0.3 + heroBias;
-    if (score < bestScore) {
-      bestScore = score;
-      best = o;
-    }
+function enemyCandidate(sim: Sim, u: Unit, o: Unit): boolean {
+  return o.alive && o.team !== u.team && o.kind !== 'npc' && !o.summary.untargetable && o.isVisibleTo(u.team, sim.time) && withinLeash(u, o);
+}
+
+function dangerousScore(o: Unit): number {
+  const attackDps = o.stats.damage / Math.max(0.2, o.stats.attackInterval);
+  const casterBias = o.abilities.some((a) => a.level > 0 && a.cooldownUntil <= 0 && a.def.targeting !== 'passive' && a.def.targeting !== 'aura') ? 120 : 0;
+  const heroBias = o.kind === 'hero' ? 150 : 0;
+  const lowHpPenalty = (1 - o.hp / Math.max(1, o.stats.maxHp)) * 80;
+  return attackDps + casterBias + heroBias - lowHpPenalty;
+}
+
+function zoneContainsUnit(z: Zone, u: Unit): boolean {
+  if (z.shape === 'circle') {
+    if (!z.pos) return false;
+    const r = (z.radius ?? 0) + u.radius * 0.5;
+    return dist2(u.pos, z.pos) <= r * r;
   }
-  return best;
+  return z.a !== undefined && z.b !== undefined && pointSegDist(u.pos, z.a, z.b) <= z.width / 2 + u.radius * 0.5;
+}
+
+function zoneThreatensUnit(z: Zone, u: Unit): boolean {
+  if (z.team === u.team) return false;
+  const tickThreat = z.tickEffects && (z.tickAffects === undefined || z.tickAffects === 'enemies' || z.tickAffects === 'all');
+  const enterThreat = z.onEnter && (z.onEnter.affects === 'enemies');
+  const auraThreat = z.auraMods && z.auraMods.affects === 'enemies';
+  return !!(tickThreat || enterThreat || auraThreat);
+}
+
+function hostileZoneContaining(sim: Sim, u: Unit): Zone | undefined {
+  return sim.zones.find((z) => zoneThreatensUnit(z, u) && zoneContainsUnit(z, u));
+}
+
+function zoneEscapePoint(z: Zone, u: Unit): Vec2 | null {
+  if (z.shape === 'circle') {
+    if (!z.pos) return null;
+    const dir = norm(sub(u.pos, z.pos));
+    const safeDir = dir.x === 0 && dir.y === 0 ? v2(1, 0) : dir;
+    return add(z.pos, scale(safeDir, (z.radius ?? 0) + u.radius + 180));
+  }
+  if (!z.a || !z.b) return null;
+  const closest = closestOnSeg(u.pos, z.a, z.b);
+  const dir = norm(sub(u.pos, closest));
+  const safeDir = dir.x === 0 && dir.y === 0 ? v2(1, 0) : dir;
+  return add(closest, scale(safeDir, z.width / 2 + u.radius + 180));
 }
 
 function evalCondition(sim: Sim, u: Unit, cond: GambitCondition, focus: Unit | undefined): boolean {
@@ -288,10 +266,20 @@ function evalCondition(sim: Sim, u: Unit, cond: GambitCondition, focus: Unit | u
       return u.abilityReady(cond.slot, sim.time).ok;
     case 'fight-time-gt':
       return sim.time > cond.sec;
+    case 'standing-in-zone':
+      return hostileZoneContaining(sim, u) !== undefined;
+    case 'focus-is-role':
+      return focus?.heroId ? REG.hero(focus.heroId).roles.includes(cond.role) : false;
     case 'distance-to-focus-gt':
       return focus ? dist2(u.pos, focus.pos) > cond.dist * cond.dist : false;
     case 'distance-to-focus-lt':
       return focus ? dist2(u.pos, focus.pos) < cond.dist * cond.dist : false;
+    case 'enemy-cast-seen':
+      return enemyCastSeen(sim, u, cond.category);
+    case 'self-disabled':
+      return isDisabled(u.summary);
+    case 'incoming-disable':
+      return incomingDisable(sim, u);
   }
 }
 
@@ -304,9 +292,58 @@ function resolveGambitTarget(sim: Sim, u: Unit, mode: GambitTargetMode, focus: U
     case 'lowest-hp-enemy': {
       let best: Unit | undefined;
       for (const o of sim.unitsArr) {
-        if (!o.alive || o.team === u.team || o.kind === 'npc' || o.summary.untargetable) continue;
-        if (!o.isVisibleTo(u.team, sim.time)) continue;
+        if (!enemyCandidate(sim, u, o)) continue;
         if (!best || o.hp / o.stats.maxHp < best.hp / best.stats.maxHp) best = o;
+      }
+      return best ? { unit: best, point: { ...best.pos } } : {};
+    }
+    case 'lowest-hp-in-range': {
+      let best: Unit | undefined;
+      const range = Math.max(300, u.stats.attackRange + 150);
+      for (const o of sim.unitsArr) {
+        if (!enemyCandidate(sim, u, o)) continue;
+        if (dist2(o.pos, u.pos) > range * range) continue;
+        if (!best || o.hp / o.stats.maxHp < best.hp / best.stats.maxHp) best = o;
+      }
+      return best ? { unit: best, point: { ...best.pos } } : {};
+    }
+    case 'nearest-enemy': {
+      let best: Unit | undefined;
+      let bestD = Infinity;
+      for (const o of sim.unitsArr) {
+        if (!enemyCandidate(sim, u, o)) continue;
+        const d = dist2(o.pos, u.pos);
+        if (d < bestD) {
+          bestD = d;
+          best = o;
+        }
+      }
+      return best ? { unit: best, point: { ...best.pos } } : {};
+    }
+    case 'enemy-casting': {
+      let best: Unit | undefined;
+      let bestUntil = -Infinity;
+      for (const o of sim.unitsArr) {
+        if (!enemyCandidate(sim, u, o)) continue;
+        const until = Math.max(o.castingUntil, o.channel?.until ?? -Infinity);
+        if (until <= sim.time) continue;
+        if (until > bestUntil) {
+          bestUntil = until;
+          best = o;
+        }
+      }
+      return best ? { unit: best, point: { ...best.pos } } : {};
+    }
+    case 'most-dangerous': {
+      let best: Unit | undefined;
+      let bestScore = -Infinity;
+      for (const o of sim.unitsArr) {
+        if (!enemyCandidate(sim, u, o)) continue;
+        const score = dangerousScore(o);
+        if (score > bestScore) {
+          bestScore = score;
+          best = o;
+        }
       }
       return best ? { unit: best, point: { ...best.pos } } : {};
     }
@@ -324,7 +361,7 @@ function resolveGambitTarget(sim: Sim, u: Unit, mode: GambitTargetMode, focus: U
       let bestCount = 0;
       let bestUnit: Unit | undefined;
       for (const o of sim.unitsArr) {
-        if (!o.alive || o.team === u.team || o.kind === 'npc') continue;
+        if (!enemyCandidate(sim, u, o)) continue;
         const count = sim.unitsInRadius(o.pos, 360, (x) => x.team !== u.team && x.kind !== 'npc').length;
         if (count > bestCount) {
           bestCount = count;
@@ -375,6 +412,34 @@ function applyAction(sim: Sim, u: Unit, action: GambitAction, focus: Unit | unde
       u.order = { kind: 'attack-unit', uid: focus.uid };
       return true;
     }
+    case 'focus-fire': {
+      const tgt = resolveGambitTarget(sim, u, action.targetMode ?? 'focus', focus);
+      if (!tgt.unit || tgt.unit.team === u.team) return false;
+      u.ctrl.focusUid = tgt.unit.uid;
+      u.order = { kind: 'attack-unit', uid: tgt.unit.uid };
+      return true;
+    }
+    case 'kite': {
+      if (!focus) return false;
+      const desired = action.distance ?? Math.max(320, Math.min(900, u.stats.attackRange * 0.85));
+      const d = dist(u.pos, focus.pos);
+      if (d < desired) {
+        const away = norm(sub(u.pos, focus.pos));
+        const dir = away.x === 0 && away.y === 0 ? v2(-1, 0) : away;
+        u.order = { kind: 'move', point: add(u.pos, scale(dir, desired - d + 160)) };
+        return true;
+      }
+      u.order = { kind: 'attack-unit', uid: focus.uid };
+      return true;
+    }
+    case 'dodge-zones': {
+      const z = hostileZoneContaining(sim, u);
+      if (!z) return false;
+      const point = zoneEscapePoint(z, u);
+      if (!point) return false;
+      u.order = { kind: 'move', point };
+      return true;
+    }
     case 'retreat': {
       const home = u.ctrl.homePos ?? u.pos;
       if (dist2(u.pos, home) < 100 * 100) return false;
@@ -388,22 +453,41 @@ function applyAction(sim: Sim, u: Unit, action: GambitAction, focus: Unit | unde
   }
 }
 
-/** Sensible default gambits derived from role tags; the P2 editor replaces these per-hero. */
+/**
+ * Role-true default gambits (AI_OVERHAUL §3). The old defaults fired abilities by
+ * fixed slot index (0..3) and ended in an unconditional `focus-fire`, which both
+ * assumed a kit layout and suppressed the scorer entirely. These defaults instead
+ * author only what the Layer 2 scorer should *not* override — zone-dodging and a
+ * little role-shaped self-preservation — and leave the "what now" (which ability,
+ * which item, kite vs commit, save an ally) to `chooseUtilityOrder`, which is
+ * kit-aware and role-weighted via CombatProfile. The editor still replaces these.
+ */
 export function buildDefaultGambit(roles: string[]): GambitRule[] {
+  const role = dominantRole(roles);
   const rules: GambitRule[] = [];
-  const isSupport = roles.includes('support');
-  if (isSupport) {
-    rules.push({ if: [{ k: 'ally-hp-below', pct: 45 }, { k: 'ability-ready', slot: 3 }], then: { k: 'cast', slot: 3, targetMode: 'lowest-hp-ally' } });
-  } else {
-    rules.push({ if: [{ k: 'enemies-within', radius: 700, count: 2 }, { k: 'ability-ready', slot: 3 }], then: { k: 'cast', slot: 3, targetMode: 'most-clustered' } });
-    rules.push({ if: [{ k: 'enemy-hp-below', pct: 99 }, { k: 'ability-ready', slot: 3 }, { k: 'fight-time-gt', sec: 8 }], then: { k: 'cast', slot: 3, targetMode: 'lowest-hp-enemy' } });
+
+  // Universal: never sit in a telegraphed area effect.
+  rules.push({ if: [{ k: 'standing-in-zone' }], then: { k: 'dodge-zones' } });
+
+  switch (role) {
+    case 'support':
+      // peel out when focused; the scorer already saves allies by weight
+      rules.push({ if: [{ k: 'self-hp-below', pct: 42 }], then: { k: 'retreat' } });
+      break;
+    case 'escape':
+      rules.push({ if: [{ k: 'self-hp-below', pct: 36 }], then: { k: 'retreat' } });
+      break;
+    case 'carry':
+      // protect the investment: disengage low rather than feed (ranged kite, melee fall back)
+      rules.push({ if: [{ k: 'self-hp-below', pct: 26 }], then: { k: 'kite' } });
+      break;
+    case 'nuker':
+      rules.push({ if: [{ k: 'self-hp-below', pct: 30 }], then: { k: 'kite' } });
+      break;
+    // initiator / durable / disabler / generalist hold the line and commit
   }
-  rules.push({ if: [{ k: 'ability-ready', slot: 0 }, { k: 'distance-to-focus-lt', dist: 900 }], then: { k: 'cast', slot: 0, targetMode: 'focus' } });
-  rules.push({ if: [{ k: 'ability-ready', slot: 1 }, { k: 'enemies-within', radius: 600, count: 1 }], then: { k: 'cast', slot: 1, targetMode: isSupport ? 'lowest-hp-enemy' : 'most-clustered' } });
-  rules.push({ if: [{ k: 'ability-ready', slot: 2 }, { k: 'enemies-within', radius: 500, count: 1 }], then: { k: 'cast', slot: 2, targetMode: 'focus' } });
-  if (isSupport) {
-    rules.push({ if: [{ k: 'self-hp-below', pct: 30 }], then: { k: 'retreat' } });
-  }
-  rules.push({ if: [{ k: 'always' }], then: { k: 'attack-focus' } });
+
+  // No unconditional catch-all: the utility scorer drives offense, item use, and
+  // spacing, so the action stays role-true and kit-true without authored slots.
   return rules;
 }

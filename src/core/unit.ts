@@ -8,6 +8,7 @@ import {
   type StatusInstance,
   type StatusSummary
 } from './status';
+import type { BossState } from './boss-brain';
 import type {
   AbilityDef,
   AnimGesture,
@@ -45,6 +46,7 @@ export interface ItemState {
   defId: string;
   charges: number;           // -1 = n/a
   cooldownUntil: number;
+  bound?: boolean;
 }
 
 export interface CastState {
@@ -96,6 +98,8 @@ export interface ControllerRef {
   leashed?: boolean;
   /** Optional tether for gambit units (overworld echoes); macro/raid units leave it unset. */
   leashRadius?: number;
+  /** Boss phase-FSM state (AI_OVERHAUL §5); set on raid bosses. */
+  boss?: BossState;
 }
 
 export interface TriggerRuntime {

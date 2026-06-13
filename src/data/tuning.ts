@@ -41,6 +41,31 @@ export const TUNING = {
   gambitThinkTicks: 5,
   bossThinkTicks: 4,
 
+  // --- AI brain (AI_OVERHAUL): utility scorer + team-mind + threat ---
+  ai: {
+    rangedThreshold: 350,       // attackRange >= this counts as ranged (kiting, backline)
+    castScoreFloor: 0.55,       // a scored cast must clear this to beat attacking
+    saveAllyHpPct: 0.55,        // an ally below this is a save/heal candidate
+    dangerNorm: 420,            // dangerousScore that maps to ~1.0 priority
+    teamFocusReassessTicks: 10, // recompute the shared team focus this often
+    focusStickiness: 1.18,      // a challenger must beat the held focus score by this to flip it
+    engageRangeMult: 1.25,      // initiator engages once the shared focus is this * castRange away
+    bossAiDepth: 0.5,           // default boss-brain opportunism (A6 dials this per tier)
+  },
+
+  // --- threat (AI_OVERHAUL §4, WoW-grounded): generalized past boss-only ---
+  threat: {
+    attackMult: 1.0,            // auto-attack damage -> threat
+    spellMult: 1.0,             // spell damage -> threat
+    healMult: 0.5,              // effective healing -> threat, credited to the healer (SPEC §4)
+    tankMult: 1.55,             // durable role generates extra threat so it holds aggro
+    initiatorMult: 1.2,         // initiators want to be looked at too
+    supportMult: 0.9,           // squishy supports shed a little threat
+    meleePull: 1.1,             // a melee challenger must reach 110% of the held target's threat to pull
+    rangedPull: 1.3,            // a ranged challenger must reach 130% (the WoW aggro ceiling)
+    healLeash: 2600,            // healing threat only reaches enemies within this range of the healer
+  },
+
   // --- xp / gold (trainer-level wallet) ---
   startingGold: 2600,
   xpCurve: [0, 0, 230, 600, 1080, 1660, 2260, 2980, 3730, 4620, 5550, 6520, 7530, 8580, 9805, 11055, 12330, 13630, 14955, 16455, 18045, 19645, 21495, 23595, 25945, 28545, 31395, 34495, 37845, 41445, 45295],

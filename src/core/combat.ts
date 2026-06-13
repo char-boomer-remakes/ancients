@@ -3,6 +3,7 @@ import { dist2 } from './math2d';
 import { REG } from './registry';
 import { elementForItemHit, isActiveElement, reactionFor, type ActiveElement } from './resonance';
 import { armorMultiplier } from './stats';
+import { creditDamageThreat, creditHealingThreat } from './threat';
 import type { Unit } from './unit';
 import type { DamageType } from './types';
 import { resolveVal } from './values';
@@ -64,10 +65,8 @@ export function applyDamage(
   if (isEnemy && source) {
     victim.lastEnemyDamageAt = sim.time;
     source.lastDealtDamageAt = sim.time;
-    if (victim.ctrl.kind === 'boss') {
-      const threat = victim.ctrl.threat ?? (victim.ctrl.threat = {});
-      threat[source.uid] = (threat[source.uid] ?? 0) + amount;
-    }
+    // threat: any unit that keeps a table accrues it (boss now, elite packs later)
+    creditDamageThreat(victim, source, amount, !!opts.fromAttack);
     victim.recentDamagers = victim.recentDamagers.filter((r) => sim.time - r.at < TUNING.participantWindowSec);
     const existing = victim.recentDamagers.find((r) => r.uid === source.uid);
     if (existing) existing.at = sim.time;
@@ -154,12 +153,15 @@ export function applyElementAura(sim: Sim, source: Unit, target: Unit, element: 
   return { damageMultiplier };
 }
 
-export function healUnit(sim: Sim, target: Unit, amount: number): number {
+export function healUnit(sim: Sim, target: Unit, amount: number, healer?: Unit): number {
   if (!target.alive || amount <= 0) return 0;
   const before = target.hp;
   target.hp = Math.min(target.stats.maxHp, target.hp + amount);
   const healed = target.hp - before;
   if (healed > 0.5) sim.events.emit({ t: 'heal', uid: target.uid, amount: Math.round(healed) });
+  // healing threat (AI_OVERHAUL §4): effective (non-overheal) healing is credited to
+  // the healer on every engaged enemy's threat table.
+  if (healer && healer.team === target.team && healed > 0) creditHealingThreat(sim, healer, healed);
   return healed;
 }
 

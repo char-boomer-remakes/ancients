@@ -5,7 +5,8 @@ import { ALL_GYMS } from '../data/gyms';
 import { LiveGymFight, runGymMatch, type GymMatchHero } from '../systems/macro-session';
 import { TUNING } from '../data/tuning';
 import { heroesAlive } from '../core/macro';
-import type { GambitRule } from '../core/types';
+import { Game, newGameSave } from '../systems/game';
+import type { GambitRule, GameSave } from '../core/types';
 
 beforeAll(() => registerAllContent());
 
@@ -66,6 +67,27 @@ const EVEN_TEAM: GymMatchHero[] = [
   { heroId: 'crystal-maiden', level: 14, items: ['glimmer-cape'], gambits: AGGRO }
 ];
 
+function rosterItems(ids: string[]): GameSave['roster'][number]['items'] {
+  const slots: GameSave['roster'][number]['items'] = [null, null, null, null, null, null];
+  ids.slice(0, 6).forEach((id, i) => (slots[i] = { id }));
+  return slots;
+}
+
+function saveForGymTeam(team: GymMatchHero[]): GameSave {
+  const save = newGameSave(team[0].heroId);
+  const template = structuredClone(save.roster[0]);
+  save.party = team.map((h) => h.heroId);
+  save.recruited = team.map((h) => h.heroId);
+  save.roster = team.map((h) => ({
+    ...structuredClone(template),
+    heroId: h.heroId,
+    level: h.level,
+    items: rosterItems(h.items ?? []),
+    gambits: h.gambits ?? AGGRO
+  }));
+  return save;
+}
+
 describe('Phase 6 captain-call-live (test 7)', () => {
   it('a player Captain Call attaches to a live gym hero, reverts after the window, and decrements', () => {
     const gym = REG.gym('lunar-gym');
@@ -115,5 +137,37 @@ describe('Phase 6 captain-call-live (test 7)', () => {
     expect(fight.done).toBe(true);
     expect(fight.result).not.toBeNull();
     expect(fight.enemyCaptain.used).toBeGreaterThan(0);
+  });
+
+  it('does not auto-steer a live player Captain Call', () => {
+    const gym = REG.gym('lunar-gym');
+    const fight = new LiveGymFight(gym, EVEN_TEAM, SEED, { autoPlayer: false });
+    fight.step(2);
+
+    const caller = heroesAlive(fight.sim, 0)[0]!;
+    expect(fight.playerCaptainCall(caller.uid)).toBe(true);
+    caller.order = { kind: 'stop' };
+
+    fight.step(0.25);
+
+    expect(fight.playerCaptain.activeUid).toBe(caller.uid);
+    expect(caller.ctrl.kind).toBe('player');
+    expect(caller.order.kind).toBe('stop');
+  });
+
+  it('routes Game orders to the seized live gym hero', () => {
+    const game = Game.headless(saveForGymTeam(EVEN_TEAM));
+    expect(game.startLiveGym('lunar-gym')).toBe(true);
+    const fight = game.liveGym!;
+    const target = fight.playerHeroes()[1]!;
+
+    expect(game.selectLiveGymHero(1)).toBe(true);
+    expect(game.liveGymPlayerCall()).toBe(true);
+    expect(game.controlledUnit()?.uid).toBe(target.uid);
+
+    const point = { x: target.pos.x + 120, y: target.pos.y + 40 };
+    game.orderMove(point);
+
+    expect(fight.sim.unit(target.uid)?.order).toEqual({ kind: 'move', point });
   });
 });

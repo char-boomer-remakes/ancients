@@ -834,23 +834,37 @@ export class Hud {
 
   // --- gambit editor (§3.5): an ordered, reorderable ≤8-rule dropdown builder ---
 
-  private static readonly COND_KINDS = [
-    'always', 'self-hp-below', 'ally-hp-below', 'enemy-hp-below', 'self-mana-above', 'self-mana-below',
-    'enemies-within', 'allies-alive', 'ability-ready', 'fight-time-gt', 'distance-to-focus-gt', 'distance-to-focus-lt'
+  // Conditions, grouped by category so the growing grammar stays scannable (AI_OVERHAUL §2/§7).
+  private static readonly COND_GROUPS: { label: string; kinds: string[] }[] = [
+    { label: 'General', kinds: ['always', 'fight-time-gt', 'allies-alive'] },
+    { label: 'My state', kinds: ['self-hp-below', 'self-mana-above', 'self-mana-below', 'self-disabled', 'standing-in-zone'] },
+    { label: 'Allies', kinds: ['ally-hp-below'] },
+    { label: 'Enemies', kinds: ['enemy-hp-below', 'enemies-within', 'focus-is-role', 'distance-to-focus-gt', 'distance-to-focus-lt'] },
+    { label: 'Reactions', kinds: ['enemy-cast-seen', 'incoming-disable'] },
+    { label: 'Abilities', kinds: ['ability-ready'] }
   ];
+  private static readonly COND_KINDS = Hud.COND_GROUPS.flatMap((g) => g.kinds);
   private static readonly COND_LABEL: Record<string, string> = {
     'always': 'Always', 'self-hp-below': 'My HP <', 'ally-hp-below': 'Ally HP <', 'enemy-hp-below': 'Enemy HP <',
     'self-mana-above': 'My mana >', 'self-mana-below': 'My mana <', 'enemies-within': 'Enemies within',
     'allies-alive': 'Allies alive ≥', 'ability-ready': 'Ability ready', 'fight-time-gt': 'Fight time >',
-    'distance-to-focus-gt': 'Focus farther than', 'distance-to-focus-lt': 'Focus closer than'
+    'standing-in-zone': 'Standing in zone', 'focus-is-role': 'Focus role is',
+    'distance-to-focus-gt': 'Focus farther than', 'distance-to-focus-lt': 'Focus closer than',
+    'enemy-cast-seen': 'Enemy casting', 'self-disabled': "I'm disabled", 'incoming-disable': 'Disable incoming'
   };
-  private static readonly ACT_KINDS = ['cast', 'use-item', 'attack-focus', 'retreat', 'hold'];
+  private static readonly ACT_KINDS = ['cast', 'use-item', 'attack-focus', 'focus-fire', 'kite', 'dodge-zones', 'retreat', 'hold'];
   private static readonly ACT_LABEL: Record<string, string> = {
-    'cast': 'Cast ability', 'use-item': 'Use item', 'attack-focus': 'Attack focus', 'retreat': 'Retreat', 'hold': 'Hold'
+    'cast': 'Cast ability', 'use-item': 'Use item', 'attack-focus': 'Attack focus', 'focus-fire': 'Focus-fire',
+    'kite': 'Kite', 'dodge-zones': 'Dodge zones', 'retreat': 'Retreat', 'hold': 'Hold'
   };
-  private static readonly TARGET_MODES = ['focus', 'lowest-hp-enemy', 'most-clustered', 'lowest-hp-ally', 'self'];
+  private static readonly TARGET_MODES = [
+    'focus', 'lowest-hp-enemy', 'lowest-hp-in-range', 'most-clustered', 'most-dangerous',
+    'enemy-casting', 'nearest-enemy', 'lowest-hp-ally', 'self'
+  ];
   private static readonly TARGET_LABEL: Record<string, string> = {
-    'focus': 'focus', 'lowest-hp-enemy': 'lowest-HP enemy', 'most-clustered': 'most clustered', 'lowest-hp-ally': 'lowest-HP ally', 'self': 'self'
+    'focus': 'focus', 'lowest-hp-enemy': 'lowest-HP enemy', 'lowest-hp-in-range': 'lowest HP in range',
+    'most-clustered': 'most clustered', 'most-dangerous': 'most dangerous', 'enemy-casting': 'enemy casting',
+    'nearest-enemy': 'nearest enemy', 'lowest-hp-ally': 'lowest-HP ally', 'self': 'self'
   };
   private static readonly SLOT_LABEL = ['Q', 'W', 'E', 'R'];
 
@@ -888,8 +902,13 @@ export class Hud {
       case 'allies-alive': return { k: 'allies-alive', count: 3 };
       case 'ability-ready': return { k: 'ability-ready', slot: 3 };
       case 'fight-time-gt': return { k: 'fight-time-gt', sec: 5 };
+      case 'standing-in-zone': return { k: 'standing-in-zone' };
+      case 'focus-is-role': return { k: 'focus-is-role', role: 'carry' };
       case 'distance-to-focus-gt': return { k: 'distance-to-focus-gt', dist: 700 };
       case 'distance-to-focus-lt': return { k: 'distance-to-focus-lt', dist: 500 };
+      case 'enemy-cast-seen': return { k: 'enemy-cast-seen', category: 'ult' };
+      case 'self-disabled': return { k: 'self-disabled' };
+      case 'incoming-disable': return { k: 'incoming-disable' };
       default: return { k: 'always' };
     }
   }
@@ -898,6 +917,9 @@ export class Hud {
     switch (kind) {
       case 'cast': return { k: 'cast', slot: 0, targetMode: 'focus' };
       case 'use-item': return { k: 'use-item', itemId: itemId ?? '', targetMode: 'focus' };
+      case 'focus-fire': return { k: 'focus-fire', targetMode: 'focus' };
+      case 'kite': return { k: 'kite', distance: 500 };
+      case 'dodge-zones': return { k: 'dodge-zones' };
       case 'retreat': return { k: 'retreat' };
       case 'hold': return { k: 'hold' };
       default: return { k: 'attack-focus' };
@@ -912,7 +934,9 @@ export class Hud {
       case 'allies-alive': return [{ key: 'count', label: 'count' }];
       case 'ability-ready': return [{ key: 'slot', label: 'slot 0-3' }];
       case 'fight-time-gt': return [{ key: 'sec', label: 'sec' }];
+      case 'focus-is-role': return [{ key: 'role', label: 'role' }];
       case 'distance-to-focus-gt': case 'distance-to-focus-lt': return [{ key: 'dist', label: 'dist' }];
+      case 'enemy-cast-seen': return [{ key: 'category', label: 'blink/ult/channel/any' }];
       default: return [];
     }
   }
@@ -925,6 +949,13 @@ export class Hud {
 
   private opts(values: string[], labels: Record<string, string>, selected: string): string {
     return values.map((v) => `<option value="${v}" ${v === selected ? 'selected' : ''}>${labels[v] ?? v}</option>`).join('');
+  }
+
+  /** Condition dropdown, grouped by category (AI_OVERHAUL §2) so the list stays readable. */
+  private condOpts(selected: string): string {
+    return Hud.COND_GROUPS.map((g) =>
+      `<optgroup label="${g.label}">${this.opts(g.kinds, Hud.COND_LABEL, selected)}</optgroup>`
+    ).join('');
   }
 
   private renderGambitModal(): void {
@@ -941,12 +972,13 @@ export class Hud {
       const conds = rule.if.length > 0 ? rule.if : [{ k: 'always' } as GambitCondition];
       const condChips = conds.map((c, ci) => {
         const params = this.condParams(c.k).map((p) => {
-          const val = (c as unknown as Record<string, number>)[p.key] ?? 0;
-          return `<input class="ge-num" type="number" data-r="${ri}" data-ci="${ci}" data-field="cond-param" data-param="${p.key}" value="${val}" title="${p.label}">`;
+          const val = (c as unknown as Record<string, string | number>)[p.key] ?? (p.key === 'role' ? '' : 0);
+          const type = p.key === 'role' || p.key === 'category' ? 'text' : 'number';
+          return `<input class="ge-num" type="${type}" data-r="${ri}" data-ci="${ci}" data-field="cond-param" data-param="${p.key}" value="${val}" title="${p.label}">`;
         }).join('');
         const del = conds.length > 1 ? `<button class="ge-x" data-r="${ri}" data-ci="${ci}" data-act="cond-del" title="remove condition">×</button>` : '';
         return `<span class="ge-chip">
-          <select class="ge-sel" data-r="${ri}" data-ci="${ci}" data-field="cond-kind">${this.opts(Hud.COND_KINDS, Hud.COND_LABEL, c.k)}</select>
+          <select class="ge-sel" data-r="${ri}" data-ci="${ci}" data-field="cond-kind">${this.condOpts(c.k)}</select>
           ${params}${del}</span>`;
       }).join('<span class="ge-and">AND</span>');
 
@@ -960,6 +992,10 @@ export class Hud {
           ? items.map((id) => `<option value="${id}" ${id === act.itemId ? 'selected' : ''}>${REG.item(id).name}</option>`).join('')
           : '<option value="">(no items)</option>';
         actExtra = `<select class="ge-sel" data-r="${ri}" data-field="act-item">${itemOpts}</select><span class="ge-at">@</span><select class="ge-sel" data-r="${ri}" data-field="act-target">${this.opts(Hud.TARGET_MODES, Hud.TARGET_LABEL, act.targetMode)}</select>`;
+      } else if (act.k === 'focus-fire') {
+        actExtra = `<span class="ge-at">@</span><select class="ge-sel" data-r="${ri}" data-field="act-target">${this.opts(Hud.TARGET_MODES, Hud.TARGET_LABEL, act.targetMode ?? 'focus')}</select>`;
+      } else if (act.k === 'kite') {
+        actExtra = `<input class="ge-num" type="number" data-r="${ri}" data-field="act-distance" value="${act.distance ?? 500}" title="distance">`;
       }
 
       return `<div class="ge-rule">
@@ -1013,15 +1049,21 @@ export class Hud {
           rule.if[Number(el.dataset.ci)] = this.defaultCondition(value);
         } else if (field === 'cond-param') {
           const cond = rule.if[Number(el.dataset.ci)];
-          if (cond) (cond as unknown as Record<string, number>)[el.dataset.param!] = Number(value);
+          if (cond) {
+            const param = el.dataset.param!;
+            const textParam = param === 'role' || param === 'category';
+            (cond as unknown as Record<string, string | number>)[param] = textParam ? value : Number(value);
+          }
         } else if (field === 'act-kind') {
           rule.then = this.defaultAction(value, this.heroItemIds(this.gambitEditRec)[0]);
         } else if (field === 'act-slot' && rule.then.k === 'cast') {
           rule.then.slot = Number(value);
-        } else if (field === 'act-target' && (rule.then.k === 'cast' || rule.then.k === 'use-item')) {
+        } else if (field === 'act-target' && (rule.then.k === 'cast' || rule.then.k === 'use-item' || rule.then.k === 'focus-fire')) {
           rule.then.targetMode = value as GambitTargetMode;
         } else if (field === 'act-item' && rule.then.k === 'use-item') {
           rule.then.itemId = value;
+        } else if (field === 'act-distance' && rule.then.k === 'kite') {
+          rule.then.distance = Number(value);
         }
         rerender();
       });
@@ -1097,7 +1139,7 @@ export class Hud {
       `${gym.name} — ${gym.leader}`,
       `<div class="prefight">
         <p class="pf-theme">${gym.theme}</p>
-        <p class="dim">Best of ${gym.bestOf}. You hold <b>${TUNING.captainCallsPerFight} Captain Calls</b>; ${gym.leader}'s side gets <b>${enemyCalls}</b>. Spend a call (Space or the button) to seize an ult-ready hero for ${TUNING.captainCallSec}s.</p>
+        <p class="dim">Best of ${gym.bestOf}. You hold <b>${TUNING.captainCallsPerFight} Captain Calls</b>; ${gym.leader}'s side gets <b>${enemyCalls}</b>. In live fights, select a hero with 1–5 or a click, then spend a call (Space or the button) to fully control them for ${TUNING.captainCallSec}s.</p>
         <h3>Your five</h3>
         <div class="pf-roster">${roster}</div>
         <h3>Opposition</h3>
@@ -1180,12 +1222,37 @@ export class Hud {
       </div>`;
     }).join('');
 
+    // Armory: boss/raid/chest/creep drops that are waiting to be assigned.
+    const armoryHtml = g.inventoryStash.length === 0
+      ? `<p class="dim">No stashed items yet. Bosses, raids, chests, and wild creeps can stock the Armory.</p>`
+      : g.inventoryStash.map((it, i) => {
+          const def = REG.item(it.id);
+          const flags = [def.tier, it.bound ? 'bound' : 'liquid', it.quality].filter(Boolean).join(' · ');
+          return `<div class="svc-row">
+            <div class="svc-main"><b>${def.name}</b> <em>${flags}</em><div class="rr-sub">${def.lore}</div></div>
+            <div class="svc-actions"><button class="btn small" data-arm-eq="${i}">Equip → ${activeName}</button></div>
+          </div>`;
+        }).join('');
+    const armorySlotsHtml = g.party.map((rec, i) => {
+      const bound = rec.items
+        .map((it, slot) => (it?.bound ? { it, slot } : null))
+        .filter((x): x is { it: NonNullable<typeof rec.items[number]>; slot: number } => !!x);
+      const rows = bound.length === 0
+        ? `<div class="rr-sub">no bound main-slot items</div>`
+        : bound.map(({ it, slot }) => `<button class="btn small" data-arm-rec="${i}:${slot}">Reclaim ${REG.item(it.id).name}</button>`).join('');
+      return `<div class="svc-row">
+        <div class="svc-main"><b>${REG.hero(rec.heroId).name}</b></div>
+        <div class="svc-actions">${rows}</div>
+      </div>`;
+    }).join('');
+
     // Raids, executed (§3.9): scripted 5v1 with mechanics firing in the sim
     const aegisTag = g.aegisReady() ? ` <span class="gold">Aegis held</span>` : '';
     let raidHtml = '';
     for (const { def, ready, reason } of g.availableRaids()) {
       const tiers = (['normal', 'nightmare', 'hell'] as const).map((t) =>
-        `<button class="btn small tier-${t}" data-raid="${def.id}:${t}" ${ready ? '' : 'disabled'}>${cap(t)}</button>`
+        `<button class="btn small tier-${t}" data-raid-live="${def.id}:${t}" ${ready ? '' : 'disabled'}>Live ${cap(t)}</button>
+         <button class="btn small tier-${t}" data-raid="${def.id}:${t}" ${ready ? '' : 'disabled'}>Auto ${cap(t)}</button>`
       ).join('');
       const clears = g.raidProgress[def.id]?.clears ?? 0;
       raidHtml += `<div class="svc-row">
@@ -1237,6 +1304,10 @@ export class Hud {
           ${stashHtml}
           <div class="svc-sub">Neutral slots</div>${slotHtml}
         </section>
+        <section><h3>Armory</h3>
+          ${armoryHtml}
+          <div class="svc-sub">Bound items</div>${armorySlotsHtml}
+        </section>
         <section><h3>Recovery &amp; Growth</h3>
           <div class="svc-row"><div class="svc-main">Rest at the inn — full HP/mana</div>
             <div class="svc-actions">
@@ -1259,12 +1330,23 @@ export class Hud {
       g.runRaid(id, tier as 'normal' | 'nightmare' | 'hell');
       rerender();
     }));
+    this.modal.querySelectorAll<HTMLElement>('[data-raid-live]').forEach((el) => el.addEventListener('click', () => {
+      const [id, tier] = el.dataset.raidLive!.split(':');
+      this.closeModal();
+      g.startLiveRaid(id, tier as 'normal' | 'nightmare' | 'hell');
+    }));
     this.modal.querySelector<HTMLElement>('[data-elite]')?.addEventListener('click', () => { g.runEliteMatch(); rerender(); });
     this.modal.querySelector<HTMLElement>('[data-champion]')?.addEventListener('click', () => { g.runChampion(); rerender(); });
     this.modal.querySelectorAll<HTMLElement>('[data-neq]').forEach((el) => el.addEventListener('click', () => { g.equipNeutral(g.activeIdx, el.dataset.neq!); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-nrr]').forEach((el) => el.addEventListener('click', () => { g.tinkerReroll(el.dataset.nrr!); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-nen]').forEach((el) => el.addEventListener('click', () => { g.tinkerEnchant(el.dataset.nen!); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-nrec]').forEach((el) => el.addEventListener('click', () => { g.reclaimNeutral(Number(el.dataset.nrec)); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-eq]').forEach((el) => el.addEventListener('click', () => { g.equipArmoryItem(g.activeIdx, Number(el.dataset.armEq)); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-rec]').forEach((el) => el.addEventListener('click', () => {
+      const [recIdx, slot] = el.dataset.armRec!.split(':').map(Number);
+      g.reclaimArmoryItem(recIdx, slot);
+      rerender();
+    }));
     this.modal.querySelectorAll<HTMLElement>('[data-tome]').forEach((el) => el.addEventListener('click', () => { g.buyTome(Number(el.dataset.tome)); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-respec]').forEach((el) => el.addEventListener('click', () => { g.respec(Number(el.dataset.respec)); rerender(); }));
     this.modal.querySelector<HTMLElement>('[data-heal]')?.addEventListener('click', () => { g.healParty(); rerender(); });
@@ -1285,7 +1367,9 @@ export class Hud {
     const pc = fight.playerCaptain;
     const ec = fight.enemyCaptain;
     const active = pc.activeUid !== null;
-    const key = `${fight.gym.id}|${fight.round}|${fight.playerWins}-${fight.enemyWins}|${pc.remaining}|${active}|${ec.remaining}`;
+    const selected = fight.sim.unit(this.game.scene.selectedUid);
+    const selectedName = selected && selected.team === 0 ? selected.name : 'select 1–5';
+    const key = `${fight.gym.id}|${fight.round}|${fight.playerWins}-${fight.enemyWins}|${pc.remaining}|${active}|${ec.remaining}|${this.game.scene.selectedUid}`;
     if (key === this.lastLiveGymKey) return;
     this.lastLiveGymKey = key;
     const dots = (remaining: number, total: number) => '●'.repeat(Math.max(0, remaining)) + '○'.repeat(Math.max(0, total - remaining));
@@ -1294,6 +1378,7 @@ export class Hud {
     const canCall = pc.remaining > 0 && !active;
     this.liveGymBar.innerHTML = `
       <div class="lg-score"><b>${fight.gym.name}</b> · Round ${fight.round} · <span class="lg-w">${fight.playerWins}</span>–<span class="lg-l">${fight.enemyWins}</span></div>
+      <div class="lg-calls">Selected <b>${selectedName}</b></div>
       <div class="lg-calls">You <span class="lg-dots">${dots(pc.remaining, pcTotal)}</span></div>
       <div class="lg-calls">Foe <span class="lg-dots foe">${dots(ec.remaining, ecTotal)}</span></div>
       <button class="btn accent" data-livegym="call" ${canCall ? '' : 'disabled'}>${active ? 'Call active…' : 'Captain Call (Space)'}</button>`;

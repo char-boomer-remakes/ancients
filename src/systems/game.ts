@@ -1,4 +1,5 @@
 import { TUNING } from '../data/tuning';
+import { DEFAULT_CREEP_DROP_TABLES } from '../data/creep-drops';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { Unit } from '../core/unit';
@@ -21,6 +22,7 @@ import {
   rerollNeutralItem,
   respecCost,
   rollLoot,
+  rollItemDrops,
   rollNeutralDrop,
   scaledBounty,
   stableContentSeed,
@@ -28,6 +30,7 @@ import {
   tomePurchase,
   type LootRoll
 } from '../core/phase3';
+import { Rng } from '../core/rng';
 import { defaultAudioSettings, defaultGraphicsSettings, defaultPhase4SaveFields } from '../core/phase4';
 import { defaultPhase5SaveFields, migratePhase5Save } from '../core/phase5';
 import { type QualityTier } from '../engine/performance';
@@ -42,6 +45,7 @@ import type { ActiveElement, BossDef, CreepTier, CreepInstanceSave, DifficultyTi
 import { ProceduralAudio } from '../engine/audio';
 import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
+import { LiveRaid } from './raid-session';
 
 /** The Roshan raid — the only one that yields the Aegis, respawns on a timer, and re-drops cheese (§3.9). */
 const ROSHAN_RAID_ID = 'roshan-pit';
@@ -51,6 +55,15 @@ export const GATED_TOP_TIER: ReadonlySet<string> = new Set([
   'divine-rapier', 'butterfly', 'scythe-of-vyse', 'heart-of-tarrasque', 'eye-of-skadi',
   'refresher-orb', 'aghanims-scepter', 'aegis-of-the-immortal', 'refresher-shard', 'cheese'
 ]);
+
+function shouldBindDroppedItem(id: string): boolean {
+  const def = REG.item(id);
+  return GATED_TOP_TIER.has(id) || def.tier === 'core';
+}
+
+function bindIfNeeded(item: ItemSave): ItemSave {
+  return shouldBindDroppedItem(item.id) ? { ...item, bound: true } : { ...item };
+}
 
 // ------------------------------------------------------------------
 // Overworld orchestration (SPEC layout: /src/systems/): party, swap,
@@ -179,6 +192,7 @@ export interface SceneLike {
   terrain: { obstacles: { pos: Vec2; radius: number }[] };
   pushEvent(ev: SimEvent, sim: Sim): void;
   update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number): void;
+  resetUnitViews?(): void;
   /** Optional (real GameScene only): live graphics-settings hooks (§6). */
   setQuality?(tier: QualityTier): void;
   setGraphics?(g: { exposure?: number; grade?: number; reducedMotion?: boolean }): void;
@@ -202,6 +216,7 @@ export class HeadlessScene implements SceneLike {
   terrain = { obstacles: [] as { pos: Vec2; radius: number }[] };
   pushEvent(): void {}
   update(): void {}
+  resetUnitViews(): void {}
 }
 
 /** No-op audio for headless runs. */
@@ -291,6 +306,11 @@ export class Game {
   /** Active live gym fight (§3.5): when set, update() steps + renders it instead of the overworld. */
   liveGym: LiveGymFight | null = null;
   private liveGymId: string | null = null;
+  liveRaid: LiveRaid | null = null;
+  private liveRaidId: string | null = null;
+  private liveRaidTier: DifficultyTier = 'normal';
+  private liveRaidClears = 0;
+  private liveRaidAegis = false;
   /** HUD hook: open the gym pre-fight screen (§3.5). Null in headless. */
   onOpenGymPrefight: ((gymId: string) => void) | null = null;
 
@@ -412,6 +432,54 @@ export class Game {
 
   activeUnit(): Unit | null {
     return this.party[this.activeIdx]?.unit ?? null;
+  }
+
+  /** Sim currently receiving player input: overworld by default, live sub-sim during live fights. */
+  inputSim(): Sim {
+    return this.liveGym?.sim ?? this.liveRaid?.sim ?? this.sim;
+  }
+
+  /** Unit currently driven by player input. Null in a live gym until a Captain's Call is active. */
+  controlledUnit(): Unit | null {
+    if (this.liveGym) return this.liveGym.playerDrivenUnit();
+    if (this.liveRaid) return this.liveRaid.drivenUnit();
+    return this.activeUnit();
+  }
+
+  /** Select a player-side gym hero by party slot for the next Captain's Call. */
+  selectLiveGymHero(idx: number): boolean {
+    if (!this.liveGym) return false;
+    if (this.liveGym.playerCaptain.activeUid !== null) {
+      this.msg('Captain Call already active', 'bad');
+      return false;
+    }
+    const hero = this.liveGym.playerHeroes()[idx];
+    if (!hero || !hero.alive) return false;
+    this.scene.selectedUid = hero.uid;
+    this.liveGym.sim.playerActiveUid = hero.uid;
+    this.msg(`${hero.name} primed for Captain Call`, 'info');
+    return true;
+  }
+
+  /** Select a specific player-side gym unit for the next Captain's Call. */
+  selectLiveGymUnit(uid: number): boolean {
+    if (!this.liveGym) return false;
+    const u = this.liveGym.sim.unit(uid);
+    if (!u || !u.alive || u.team !== 0) return false;
+    this.scene.selectedUid = u.uid;
+    this.liveGym.sim.playerActiveUid = u.uid;
+    return true;
+  }
+
+  selectLiveRaidHero(idx: number): boolean {
+    if (!this.liveRaid) return false;
+    const ok = this.liveRaid.selectDriver(idx);
+    const u = this.liveRaid.drivenUnit();
+    if (ok && u) {
+      this.scene.selectedUid = u.uid;
+      this.msg(`Driving ${u.name}`, 'info');
+    }
+    return ok;
   }
 
   setSprintHeld(held: boolean): void {
@@ -728,16 +796,25 @@ export class Game {
     const gym = REG.gym(gymId);
     this.liveGym = new LiveGymFight(gym, this.gymPlayerTeam(), this.region.seed + Math.round(this.playtime));
     this.liveGymId = gymId;
+    this.queuedOrders = [];
     this.scene.resetUnitViews(); // gym sim uids must not alias overworld views
-    this.msg(`${gym.name}: best of ${gym.bestOf}. Spend Captain Calls (Space) to seize a hero.`, 'info');
+    const first = this.liveGym.playerHeroes()[0];
+    if (first) this.scene.selectedUid = first.uid;
+    this.msg(`${gym.name}: best of ${gym.bestOf}. Select 1–5, then spend Captain Calls (Space) to seize a hero.`, 'info');
     return true;
   }
 
   /** Player spends a Captain Call on an ult-ready hero in the live gym fight. */
-  liveGymPlayerCall(): boolean {
+  liveGymPlayerCall(preferUid?: number): boolean {
     if (!this.liveGym) return false;
-    const ok = this.liveGym.playerCaptainCall();
+    const selected = preferUid ?? this.scene.selectedUid;
+    const ok = this.liveGym.playerCaptainCall(selected);
     if (!ok) this.msg('No Captain Call available', 'bad');
+    else {
+      const u = this.liveGym.playerDrivenUnit();
+      if (u) this.scene.selectedUid = u.uid;
+      this.queuedOrders = [];
+    }
     return ok;
   }
 
@@ -745,7 +822,9 @@ export class Game {
     const fight = this.liveGym;
     if (!fight) return;
     if (!this.paused) fight.step(Math.min(dt, 0.1));
-    for (const ev of fight.sim.events.drain()) {
+    this.advanceQueuedOrder();
+    this.frameEvents = fight.sim.events.drain();
+    for (const ev of this.frameEvents) {
       this.scene.pushEvent(ev, fight.sim);
       this.audio.handleEvent(ev);
     }
@@ -762,7 +841,10 @@ export class Game {
   private endLiveGym(): void {
     this.liveGym = null;
     this.liveGymId = null;
+    this.queuedOrders = [];
     this.scene.resetUnitViews(); // drop gym views so the overworld re-syncs cleanly
+    const u = this.activeUnit();
+    if (u) this.scene.selectedUid = u.uid;
   }
 
   private applyGymResult(gymId: string, result: GymMatchResult): boolean {
@@ -848,9 +930,9 @@ export class Game {
   }
 
   private deliverLoot(loot: LootRoll): void {
-    for (const it of loot.guaranteed) this.inventoryStash.push({ ...it });
+    for (const it of loot.guaranteed) this.inventoryStash.push(bindIfNeeded(it));
     if (loot.assembled) {
-      this.inventoryStash.push({ ...loot.assembled });
+      this.inventoryStash.push(bindIfNeeded(loot.assembled));
       if (!this.heldUniques.includes(loot.assembled.id)) this.heldUniques.push(loot.assembled.id);
     }
   }
@@ -923,6 +1005,83 @@ export class Game {
     return { won: true, result };
   }
 
+  startLiveRaid(raidId: string, tier: DifficultyTier = 'normal'): boolean {
+    if (this.liveGym || this.liveRaid) return false;
+    const def = REG.raid(raidId);
+    if (this.party.length < 5) {
+      this.msg('A raid needs a full party of 5 heroes', 'bad');
+      return false;
+    }
+    if (def.id === ROSHAN_RAID_ID) {
+      const at = this.raidProgress[def.id]?.roshanRespawnAt ?? 0;
+      if (at > this.playtime) {
+        this.msg(`Roshan is dead — he claws back in ${Math.ceil(at - this.playtime)}s`, 'bad');
+        return false;
+      }
+    }
+    const prog = this.raidProgress[raidId];
+    this.liveRaidId = raidId;
+    this.liveRaidTier = tier;
+    this.liveRaidClears = prog?.clears ?? 0;
+    this.liveRaidAegis = this.aegisReady();
+    this.liveRaid = new LiveRaid(def, this.gymPlayerTeam(), tier, stableContentSeed(`${raidId}:${tier}`, this.liveRaidClears) + Math.round(this.playtime), { aegis: this.liveRaidAegis });
+    this.queuedOrders = [];
+    this.scene.resetUnitViews();
+    const u = this.liveRaid.drivenUnit();
+    if (u) this.scene.selectedUid = u.uid;
+    this.msg(`${def.name}: live raid started. Use 1–5 to switch drivers.`, 'info');
+    return true;
+  }
+
+  private updateLiveRaid(dt: number): void {
+    const raid = this.liveRaid;
+    if (!raid) return;
+    if (!this.paused) raid.step(Math.min(dt, 0.1));
+    this.advanceQueuedOrder();
+    this.frameEvents = raid.sim.events.drain();
+    for (const ev of this.frameEvents) {
+      this.scene.pushEvent(ev, raid.sim);
+      this.audio.handleEvent(ev);
+    }
+    this.scene.update(raid.sim, raid.cameraFollow(), dt, 0.5);
+    if (raid.done && raid.result) {
+      const id = this.liveRaidId!;
+      const tier = this.liveRaidTier;
+      const clears = this.liveRaidClears;
+      const aegis = this.liveRaidAegis;
+      const result = raid.result;
+      this.endLiveRaid();
+      this.applyLiveRaidResult(id, tier, clears, aegis, result);
+    }
+  }
+
+  private endLiveRaid(): void {
+    this.liveRaid = null;
+    this.liveRaidId = null;
+    this.queuedOrders = [];
+    this.scene.resetUnitViews();
+    const u = this.activeUnit();
+    if (u) this.scene.selectedUid = u.uid;
+  }
+
+  private applyLiveRaidResult(raidId: string, tier: DifficultyTier, clears: number, aegis: boolean, result: RaidEncounterResult): void {
+    const def = REG.raid(raidId);
+    if (aegis && result.aegisConsumed) {
+      this.consumeAegisFlag();
+      this.msg('The Aegis stands a fallen hero back up — and is spent.', 'info');
+    }
+    if (!result.cleared) {
+      this.msg(`${def.name} holds the deep. Regroup and return.`, 'bad');
+      this.autosave('raid');
+      return;
+    }
+    this.deliverRaidLoot(def, tier, raidId, clears);
+    this.codexUnlock('raid:' + raidId);
+    this.msg(`${def.name} cleared! (clear #${clears + 1})`, 'good');
+    this.audio.playStinger('raid-clear');
+    this.autosave('raid');
+  }
+
   /** Deliver a raid clear's loot + pity; Roshan also grants the Aegis, sets the respawn timer, and re-drops cheese. */
   private deliverRaidLoot(def: RaidDef, tier: DifficultyTier, raidId: string, clears: number): void {
     const dryStreak = this.raidProgress[raidId]?.dryStreak ?? 0;
@@ -932,10 +1091,10 @@ export class Game {
     next.dryStreak = loot.dryStreak;
     for (const it of loot.guaranteed) {
       if (it.id === 'aegis-of-the-immortal') next.aegisHeld = true; // the held one-use charge
-      else this.inventoryStash.push({ ...it });
+      else this.inventoryStash.push(bindIfNeeded(it));
     }
     if (loot.assembled) {
-      this.inventoryStash.push({ ...loot.assembled });
+      this.inventoryStash.push(bindIfNeeded(loot.assembled));
       if (!this.heldUniques.includes(loot.assembled.id)) this.heldUniques.push(loot.assembled.id);
       this.msg(`Raid drop: ${REG.item(loot.assembled.id).name}${loot.pityUsed ? ' (pity!)' : ''}`, 'good');
     }
@@ -944,8 +1103,8 @@ export class Game {
       next.roshanRespawnAt = this.playtime + TUNING.roshanRespawnSec;
       this.msg('Roshan falls — the Aegis of the Immortal is yours.', 'good');
       if (next.clears >= TUNING.roshanRepeatDropFromClear) {
-        this.inventoryStash.push({ id: 'refresher-shard' });
-        this.inventoryStash.push({ id: 'cheese', charges: 1 });
+        this.inventoryStash.push(bindIfNeeded({ id: 'refresher-shard' }));
+        this.inventoryStash.push(bindIfNeeded({ id: 'cheese', charges: 1 }));
         this.msg('A repeat kill spills a Refresher Shard and a Cheese.', 'good');
       }
     }
@@ -1134,6 +1293,20 @@ export class Game {
     this.msg(`Neutral drop: ${drop.name} (→ stash)`, 'good');
   }
 
+  private rollItemDropsForCreep(creepId: string | undefined, tier: CreepTier, salt: number): void {
+    const table = (creepId ? REG.creep(creepId).drops : undefined) ?? DEFAULT_CREEP_DROP_TABLES[tier];
+    const seed = stableContentSeed(`${this.region.id}:creep-drops:${tier}`, Math.round(this.sim.time * 1000) + salt);
+    const roll = rollItemDrops(table, 'normal', {}, new Rng(seed));
+    if (roll.items.length === 0) return;
+    for (const it of roll.items) {
+      const drop = bindIfNeeded(it);
+      this.inventoryStash.push(drop);
+      this.codexUnlock('item:' + drop.id);
+    }
+    const names = roll.items.map((it) => REG.item(it.id).name).join(', ');
+    this.msg(`Creep drop: ${names} (→ stash)`, 'good');
+  }
+
   private addNeutral(id: string, n = 1): void {
     const slot = this.neutralStash.find((s) => s.id === id);
     if (slot) slot.count += n;
@@ -1205,6 +1378,77 @@ export class Game {
     rec.neutralSlot = null;
     this.applyNeutralToUnit(rec);
     this.msg(`Reclaimed ${name} to the stash`, 'info');
+    return true;
+  }
+
+  /** Equip an item from the Armory stash into a hero's regular six-slot inventory. */
+  equipArmoryItem(recIdx: number, stashIdx: number): boolean {
+    const rec = this.party[recIdx];
+    const saved = this.inventoryStash[stashIdx];
+    if (!rec || !saved) return false;
+
+    if (rec.unit) {
+      const free = rec.unit.items.findIndex((it) => it === null);
+      if (free < 0) {
+        this.msg('Inventory full', 'bad');
+        return false;
+      }
+      this.inventoryStash.splice(stashIdx, 1);
+      rec.unit.items[free] = itemStateFromSave(saved, this.sim.time);
+      rec.unit.items = sortInventory(rec.unit.items);
+      rec.unit.markStatsDirty();
+      rec.unit.refresh(this.sim.time);
+      rec.items = rec.unit.items.map((it) => itemSaveOf(it, this.sim.time));
+    } else {
+      const states = rec.items.map((it) => (it ? itemStateFromSave(it, this.sim.time) : null));
+      const free = states.findIndex((it) => it === null);
+      if (free < 0) {
+        this.msg('Inventory full', 'bad');
+        return false;
+      }
+      this.inventoryStash.splice(stashIdx, 1);
+      states[free] = itemStateFromSave(saved, this.sim.time);
+      rec.items = sortInventory(states).map((it) => itemSaveOf(it, this.sim.time));
+    }
+
+    this.codexUnlock('item:' + saved.id);
+    this.msg(`${REG.hero(rec.heroId).name} equips ${REG.item(saved.id).name}`, 'good');
+    return true;
+  }
+
+  /** Return a bound main-slot item to the Armory. Liquid items still sell through the shop path. */
+  reclaimArmoryItem(recIdx: number, invSlot: number): boolean {
+    const rec = this.party[recIdx];
+    if (!rec) return false;
+
+    if (rec.unit) {
+      const it = rec.unit.items[invSlot];
+      if (!it?.bound) {
+        this.msg('Only bound items return to the Armory', 'bad');
+        return false;
+      }
+      const saved = itemSaveOf(it, this.sim.time);
+      if (!saved) return false;
+      rec.unit.items[invSlot] = null;
+      rec.unit.items = sortInventory(rec.unit.items);
+      rec.unit.markStatsDirty();
+      rec.unit.refresh(this.sim.time);
+      rec.items = rec.unit.items.map((slot) => itemSaveOf(slot, this.sim.time));
+      this.inventoryStash.push(saved);
+      this.msg(`Returned ${REG.item(saved.id).name} to the Armory`, 'info');
+      return true;
+    }
+
+    const saved = rec.items[invSlot];
+    if (!saved?.bound) {
+      this.msg('Only bound items return to the Armory', 'bad');
+      return false;
+    }
+    rec.items[invSlot] = null;
+    const states = rec.items.map((it) => (it ? itemStateFromSave(it, this.sim.time) : null));
+    rec.items = sortInventory(states).map((it) => itemSaveOf(it, this.sim.time));
+    this.inventoryStash.push(saved);
+    this.msg(`Returned ${REG.item(saved.id).name} to the Armory`, 'info');
     return true;
   }
 
@@ -1533,6 +1777,8 @@ export class Game {
   // ---------- swap (1-5) ----------
 
   trySwap(idx: number): boolean {
+    if (this.liveGym) return this.selectLiveGymHero(idx);
+    if (this.liveRaid) return this.selectLiveRaidHero(idx);
     if (idx === this.activeIdx) return false;
     const rec = this.party[idx];
     if (!rec) return false;
@@ -1585,7 +1831,8 @@ export class Game {
   // ---------- orders from input ----------
 
   private issueOrder(order: Order, queued = false): void {
-    const u = this.activeUnit();
+    const sim = this.inputSim();
+    const u = this.controlledUnit();
     if (!u || !u.alive) return;
     if (queued) {
       this.queuedOrders.push(order);
@@ -1593,14 +1840,15 @@ export class Game {
       return;
     }
     this.queuedOrders = [];
-    this.sim.order(u.uid, order);
+    sim.order(u.uid, order);
   }
 
   private advanceQueuedOrder(): void {
-    const u = this.activeUnit();
+    const sim = this.inputSim();
+    const u = this.controlledUnit();
     if (!u || !u.alive || this.queuedOrders.length === 0) return;
     if (u.order.kind !== 'stop' && u.order.kind !== 'hold') return;
-    this.sim.order(u.uid, this.queuedOrders.shift()!);
+    sim.order(u.uid, this.queuedOrders.shift()!);
   }
 
   orderMove(point: Vec2, queued = false): void {
@@ -1616,14 +1864,16 @@ export class Game {
   }
 
   orderStop(): void {
-    const u = this.activeUnit();
+    const sim = this.inputSim();
+    const u = this.controlledUnit();
     if (!u) return;
     this.queuedOrders = [];
-    this.sim.order(u.uid, { kind: 'stop' });
+    sim.order(u.uid, { kind: 'stop' });
   }
 
   tryDash(point?: Vec2): boolean {
-    const u = this.activeUnit();
+    if (this.liveGym) return false;
+    const u = this.controlledUnit();
     if (!u || !u.alive) return false;
     if (u.summary.rooted || u.summary.stunned || u.summary.cycloned || u.summary.sleeping || u.summary.frozen) {
       this.msg('Cannot dash while rooted or disabled', 'bad');
@@ -1654,14 +1904,15 @@ export class Game {
   }
 
   castAbility(slot: number, opts: { uid?: number; point?: Vec2; queued?: boolean }): void {
-    const u = this.activeUnit();
+    const sim = this.inputSim();
+    const u = this.controlledUnit();
     if (!u || !u.alive) return;
     const a = u.abilities[slot];
     if (!a || a.level <= 0) {
       this.msg('Ability not learned', 'bad');
       return;
     }
-    const ready = u.abilityReady(slot, this.sim.time);
+    const ready = u.abilityReady(slot, sim.time);
     if (!ready.ok) {
       this.msg(ready.reason === 'mana' ? 'Not enough mana' : ready.reason === 'cooldown' ? 'On cooldown' : `Cannot cast (${ready.reason})`, 'bad');
       return;
@@ -1670,7 +1921,7 @@ export class Game {
   }
 
   useItem(invSlot: number, opts: { uid?: number; point?: Vec2; queued?: boolean }): void {
-    const u = this.activeUnit();
+    const u = this.controlledUnit();
     if (!u || !u.alive) return;
     this.issueOrder({ kind: 'item', invSlot, uid: opts.uid, point: opts.point }, opts.queued);
   }
@@ -2044,6 +2295,18 @@ export class Game {
     const it = u.items[invSlot];
     if (!it) return;
     const def = REG.item(it.defId);
+    if (it.bound) {
+      const saved = itemSaveOf(it, this.sim.time);
+      u.items[invSlot] = null;
+      u.items = sortInventory(u.items);
+      u.markStatsDirty();
+      u.refresh(this.sim.time);
+      const rec = this.party[this.activeIdx];
+      if (rec) rec.items = u.items.map((slot) => itemSaveOf(slot, this.sim.time));
+      if (saved) this.inventoryStash.push(saved);
+      this.msg(`${def.name} is bound — returned to the Armory`, 'info');
+      return;
+    }
     u.items[invSlot] = null;
     u.items = sortInventory(u.items);
     u.markStatsDirty();
@@ -2516,6 +2779,7 @@ export class Game {
 
     // neutral drop on a slain wild creep (§3.7): rolls into the dedicated neutral stash
     if (victim && victim.kind === 'creep' && victim.tier) {
+      this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid);
       this.rollNeutralFor(victim.tier, ev.victimUid);
     }
   }
@@ -2723,6 +2987,10 @@ export class Game {
   update(realDt: number): void {
     if (this.liveGym) {
       this.updateLiveGym(realDt);
+      return;
+    }
+    if (this.liveRaid) {
+      this.updateLiveRaid(realDt);
       return;
     }
     if (this.paused) {

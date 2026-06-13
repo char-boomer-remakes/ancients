@@ -486,15 +486,44 @@ export interface CreepDef {
   palette: [string, string, string];
   aggroRadius?: number;        // default from tuning
   elementalShield?: { element: ActiveElement; hp: number; weakTo: ActiveElement[]; weakMult: number };
+  drops?: ItemDropTable;
   animProfile?: AnimProfile;
 }
 
 // ---------- Items ----------
 export type ItemTier = 'consumable' | 'component' | 'basic' | 'core';
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'mythical' | 'legendary' | 'immortal' | 'arcana';
+export type ItemQuality = 'standard' | 'inscribed' | 'genuine' | 'frozen' | 'corrupted' | 'unusual';
+export type DropSource = 'shop' | 'creep' | 'echo' | 'boss' | 'raid' | 'special-battle' | 'gamble' | 'dungeon';
+
+export interface DropEntry {
+  id: string;
+  weight: number;
+  quality?: ItemQuality;
+}
+
+export interface DropSlot {
+  id?: string;
+  rarity: ItemRarity;
+  rolls: number;
+  chance: Record<DifficultyTier, number>;
+  pool: DropEntry[];
+  qualityOdds?: Partial<Record<ItemQuality, number>>;
+  pity?: number;
+  source?: DropSource;
+}
+
+export interface ItemDropTable {
+  guaranteed: string[];
+  slots: DropSlot[];
+}
+
 export interface ItemDef {
   id: string;
   name: string;
   tier: ItemTier;
+  rarity?: ItemRarity;
+  exclusiveTo?: DropSource[];
   cost: number;                // total cost (recipe included for assembled)
   components?: string[];       // item ids; repeats allowed
   recipeCost?: number;
@@ -547,6 +576,84 @@ export interface RaidDef {
   loot: LootTable;
   signatureExotic?: string;
   dialogue: string[];          // in-character boss lines (§3.13), original
+}
+
+// ---------- Dungeons ----------
+export type RoomType = 'entrance' | 'combat' | 'elite' | 'treasure' | 'shrine' | 'rest' | 'boss';
+export type MonsterRarity = 'normal' | 'champion' | 'rare';
+
+export interface RoomTemplate {
+  id: string;
+  biome: RegionDef['biome'];
+  size: Vec2;
+  connectors: { side: 'n' | 's' | 'e' | 'w'; at: Vec2 }[];
+  spawnAnchors: Vec2[];
+  props?: { treeDensity: number; rockDensity: number };
+  allowTypes: RoomType[];
+}
+
+export interface SpawnCard {
+  creepId: string;
+  weight: number;
+  cost: number;
+  minDepth?: number;
+  rarity?: MonsterRarity;
+}
+
+export interface AffixDef {
+  id: string;
+  name: string;
+  apply: EffectNode[];
+  minTier?: DifficultyTier;
+  excludes?: string[];
+}
+
+export interface DungeonDef {
+  id: string;
+  name: string;
+  regionId: string;
+  biome: RegionDef['biome'];
+  templates: string[];
+  roomCount: { min: number; max: number };
+  spawnPool: SpawnCard[];
+  affixPool: string[];
+  guardian: string;
+  loot: Record<RoomType, ItemDropTable>;
+  budget: { base: number; perDepth: number };
+  tiers: DifficultyTier[];
+  unlockQuest?: string;
+}
+
+export interface RoomReward {
+  kind: 'none' | 'loot' | 'chest' | 'shrine' | 'rest' | 'guardian';
+  roomType: RoomType;
+  table?: ItemDropTable;
+  guaranteed?: string[];
+  rarity?: ItemRarity;
+}
+
+export interface PlannedPack {
+  cards: { creepId: string; star: 1 | 2 | 3 }[];
+  rarity: MonsterRarity;
+  affixes: string[];
+  anchorIndex: number;
+}
+
+export interface DungeonRoom {
+  index: number;
+  type: RoomType;
+  templateId: string;
+  exits: number[];
+  reward: RoomReward;
+  packs: PlannedPack[];
+}
+
+export interface DungeonLayout {
+  seed: number;
+  def: string;
+  tier: DifficultyTier;
+  depth: number;
+  rooms: DungeonRoom[];
 }
 
 export interface DraftMember {
@@ -783,15 +890,33 @@ export type GambitCondition =
   | { k: 'allies-alive'; count: number }
   | { k: 'ability-ready'; slot: number }
   | { k: 'fight-time-gt'; sec: number }
+  | { k: 'standing-in-zone' }
+  | { k: 'focus-is-role'; role: string }
   | { k: 'distance-to-focus-gt'; dist: number }
-  | { k: 'distance-to-focus-lt'; dist: number };
+  | { k: 'distance-to-focus-lt'; dist: number }
+  // reactive reads (AI_OVERHAUL §2): answer what the enemy is doing right now
+  | { k: 'enemy-cast-seen'; category: 'blink' | 'ult' | 'channel' | 'any' }
+  | { k: 'self-disabled' }
+  | { k: 'incoming-disable' };
 
-export type GambitTargetMode = 'lowest-hp-enemy' | 'most-clustered' | 'self' | 'lowest-hp-ally' | 'focus';
+export type GambitTargetMode =
+  | 'lowest-hp-enemy'
+  | 'lowest-hp-in-range'
+  | 'most-clustered'
+  | 'most-dangerous'
+  | 'enemy-casting'
+  | 'nearest-enemy'
+  | 'self'
+  | 'lowest-hp-ally'
+  | 'focus';
 
 export type GambitAction =
   | { k: 'cast'; slot: number; targetMode: GambitTargetMode }
   | { k: 'use-item'; itemId: string; targetMode: GambitTargetMode }
   | { k: 'attack-focus' }
+  | { k: 'focus-fire'; targetMode?: GambitTargetMode }
+  | { k: 'kite'; distance?: number }
+  | { k: 'dodge-zones' }
   | { k: 'retreat' }
   | { k: 'hold' };
 
@@ -810,6 +935,8 @@ export interface MacroHeroSetup {
 export interface RaidBossSetup extends MacroHeroSetup {
   hpScale?: number;
   damageScale?: number;
+  /** Boss-brain opportunism (AI_OVERHAUL §5/§6): 0..1, scales off-threat targeting. */
+  aiDepth?: number;
 }
 
 // ---------- Orders ----------
@@ -859,7 +986,7 @@ export type SimEvent =
   | { t: 'kill-credit'; victimUid: number; killerUid: number; bounty: { xp: number; gold: number }; lastHitByPlayer: boolean };
 
 // ---------- Saved game ----------
-export interface ItemSave { id: string; charges?: number; cooldownLeft?: number }
+export interface ItemSave { id: string; charges?: number; cooldownLeft?: number; quality?: ItemQuality; bound?: boolean }
 export interface HeroSave {
   heroId: string;
   level: number;
