@@ -7,6 +7,7 @@ import { buildTerrain, type TerrainInfo } from './terrain';
 import { applyHeroLikeness, applyItemAppearances, buildUnitRig, buildSelectionRing, type UnitRig } from './models';
 import { animateRig, newAnimState, type AnimState } from './animator';
 import { VfxManager } from './vfx';
+import { lodForDistance, shouldAnimateAtLod } from './lod';
 import { WORLD_SCALE } from './scale';
 import { TUNING } from '../data/tuning';
 import { clampedPixelRatio, qualityPreset, type QualityTier } from './performance';
@@ -89,6 +90,7 @@ export class GameScene {
   selectedUid = -1;
   playerTeam = 0;
   private time = 0;
+  private frameParity = 0; // flips 0/1 each frame to drive reduced-LOD animation cadence
 
   constructor(canvas: HTMLCanvasElement, region: RegionDef, quality: QualityTier = 'high') {
     const qualityCfg = qualityPreset(quality);
@@ -145,6 +147,7 @@ export class GameScene {
 
   update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number): void {
     this.time += renderDt;
+    this.frameParity ^= 1;
     this.syncUnits(sim, renderDt);
     this.vfx.syncProjectiles(sim.projectiles);
     this.vfx.syncZoneFollow((uid) => {
@@ -342,7 +345,13 @@ export class GameScene {
     while (dr < -Math.PI) dr += Math.PI * 2;
     rig.root.rotation.y += dr * Math.min(1, dt * 12);
 
-    animateRig(rig, u, view.anim, dt, this.time, simTime);
+    // Overworld LOD (§3.16): far units freeze their pose, mid units animate at
+    // a reduced cadence. The active hero and nearby combat always animate full.
+    const distLod = Math.hypot(wx - this.camTarget.x, wz - this.camTarget.z);
+    const tier = lodForDistance(distLod);
+    if (shouldAnimateAtLod(tier, this.frameParity)) {
+      animateRig(rig, u, view.anim, dt, this.time, simTime);
+    }
 
     // death cleanup timer
     if (!u.alive && view.removeAt === 0) view.removeAt = this.time + 2.2;
@@ -395,7 +404,7 @@ export class GameScene {
     if (view.immuneShell.visible) {
       (view.immuneShell.material as THREE.MeshBasicMaterial).opacity = 0.13 + Math.sin(this.time * 6) * 0.05;
     }
-    rig.itemLayer.rotation.y = Math.sin(this.time * 1.6 + u.uid) * 0.035;
+    if (tier === 'full') rig.itemLayer.rotation.y = Math.sin(this.time * 1.6 + u.uid) * 0.035;
   }
 
   private itemVisualKey(u: Unit): string {

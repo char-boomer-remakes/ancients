@@ -14,6 +14,16 @@ interface Transient {
   update?: (t: number, lifeT: number) => void; // lifeT 0..1
 }
 
+type ProjKind = 'hook' | 'orb';
+
+/** A reusable projectile object. Pooled so spawns don't allocate per cast (§3.16). */
+interface PooledProjectile {
+  obj: THREE.Group;
+  kind: ProjKind;
+  core: THREE.MeshBasicMaterial;
+  halo?: THREE.MeshBasicMaterial;
+}
+
 const geometryCache = new Map<string, THREE.BufferGeometry>();
 
 function sharedGeometry<T extends THREE.BufferGeometry>(geo: T): T {
@@ -34,7 +44,9 @@ export function vfxGeometryCacheSize(): number {
 export class VfxManager {
   group = new THREE.Group();
   private transients: Transient[] = [];
-  private projectiles = new Map<number, { obj: THREE.Object3D; trail?: THREE.Object3D }>();
+  private projectiles = new Map<number, PooledProjectile>();
+  private projectilePool: Record<ProjKind, PooledProjectile[]> = { hook: [], orb: [] };
+  private projAllocated = 0; // total projectile objects ever constructed (steady-state should plateau)
   private projectileSeen = new Set<number>();
   private zones = new Map<number, Transient>();
   private time = 0;
@@ -68,18 +80,17 @@ export class VfxManager {
   handleEvent(ev: SimEvent, unitPos: (uid: number) => { x: number; y: number; h: number } | null): void {
     switch (ev.t) {
       case 'projectile-spawn': {
-        const obj = this.makeProjectile(ev.vfx);
-        const p = this.w(ev.from.x, ev.from.y, 1.2);
-        obj.position.copy(p);
-        this.group.add(obj);
-        this.projectiles.set(ev.pid, { obj });
+        const entry = this.acquireProjectile(ev.vfx);
+        entry.obj.position.copy(this.w(ev.from.x, ev.from.y, 1.2));
+        this.group.add(entry.obj);
+        this.projectiles.set(ev.pid, entry);
         break;
       }
       case 'projectile-hit':
       case 'projectile-expire': {
         const entry = this.projectiles.get(ev.pid);
         if (entry) {
-          this.group.remove(entry.obj);
+          this.releaseProjectile(entry);
           this.projectiles.delete(ev.pid);
           if (ev.t === 'projectile-hit') this.burst(ev.pos.x, ev.pos.y, '#ffffff', 0.6, 0.25);
         }
@@ -156,7 +167,7 @@ export class VfxManager {
     }
     for (const [pid, entry] of this.projectiles) {
       if (!seen.has(pid)) {
-        this.group.remove(entry.obj);
+        this.releaseProjectile(entry);
         this.projectiles.delete(pid);
       }
     }
@@ -167,14 +178,21 @@ export class VfxManager {
   reset(): void {
     for (const tr of this.transients) this.group.remove(tr.obj);
     this.transients.length = 0;
-    for (const [, entry] of this.projectiles) {
-      this.group.remove(entry.obj);
-      if (entry.trail) this.group.remove(entry.trail);
-    }
+    for (const [, entry] of this.projectiles) this.releaseProjectile(entry);
     this.projectiles.clear();
     this.projectileSeen.clear();
     for (const [, z] of this.zones) this.group.remove(z.obj);
     this.zones.clear();
+  }
+
+  /** Total projectile objects ever constructed. Plateaus once the pool warms (§3.16). */
+  projectileAllocations(): number {
+    return this.projAllocated;
+  }
+
+  /** Free projectile objects currently parked in the pool (test introspection). */
+  pooledProjectileCount(): number {
+    return this.projectilePool.hook.length + this.projectilePool.orb.length;
   }
 
   update(dt: number): void {
@@ -208,27 +226,37 @@ export class VfxManager {
 
   // ---------- archetype builders ----------
 
-  private makeProjectile(vfx: VfxSpec): THREE.Object3D {
+  /** Take a projectile from the pool (or build one), recolored/scaled for this cast. */
+  private acquireProjectile(vfx: VfxSpec): PooledProjectile {
+    const kind: ProjKind = vfx.archetype === 'hook' ? 'hook' : 'orb';
+    const entry = this.projectilePool[kind].pop() ?? this.buildProjectile(kind);
+    entry.obj.scale.setScalar(vfx.scale ?? 1);
+    entry.obj.visible = true;
+    entry.core.color.set(vfx.color);
+    if (entry.halo) entry.halo.color.set(vfx.color2 ?? vfx.color);
+    return entry;
+  }
+
+  /** Park a spent projectile back in the pool — no disposal, ready for reuse. */
+  private releaseProjectile(entry: PooledProjectile): void {
+    this.group.remove(entry.obj);
+    entry.obj.visible = false;
+    this.projectilePool[entry.kind].push(entry);
+  }
+
+  private buildProjectile(kind: ProjKind): PooledProjectile {
+    this.projAllocated++;
     const g = new THREE.Group();
-    const scale = vfx.scale ?? 1;
-    if (vfx.archetype === 'hook') {
-      const hook = new THREE.Mesh(
-        sharedGeometry(new THREE.TorusGeometry(0.35 * scale, 0.1 * scale, 5, 8, Math.PI * 1.5)),
-        new THREE.MeshBasicMaterial({ color: vfx.color })
-      );
-      g.add(hook);
-    } else {
-      const core = new THREE.Mesh(
-        sharedGeometry(new THREE.SphereGeometry(0.28 * scale, 6, 5)),
-        new THREE.MeshBasicMaterial({ color: vfx.color })
-      );
-      const halo = new THREE.Mesh(
-        sharedGeometry(new THREE.SphereGeometry(0.42 * scale, 6, 5)),
-        new THREE.MeshBasicMaterial({ color: vfx.color2 ?? vfx.color, transparent: true, opacity: 0.35 })
-      );
-      g.add(core, halo);
+    if (kind === 'hook') {
+      const core = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+      g.add(new THREE.Mesh(sharedGeometry(new THREE.TorusGeometry(0.35, 0.1, 5, 8, Math.PI * 1.5)), core));
+      return { obj: g, kind, core };
     }
-    return g;
+    const core = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+    const halo = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.35 });
+    g.add(new THREE.Mesh(sharedGeometry(new THREE.SphereGeometry(0.28, 6, 5)), core));
+    g.add(new THREE.Mesh(sharedGeometry(new THREE.SphereGeometry(0.42, 6, 5)), halo));
+    return { obj: g, kind, core, halo };
   }
 
   private burst(x: number, y: number, color: string, radiusW: number, dur: number, color2?: string): void {
