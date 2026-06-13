@@ -1020,7 +1020,7 @@ export type SimEvent =
   | { t: 'kill-credit'; victimUid: number; killerUid: number; bounty: { xp: number; gold: number }; lastHitByPlayer: boolean };
 
 // ---------- Saved game ----------
-export interface ItemSave { id: string; charges?: number; cooldownLeft?: number; quality?: ItemQuality; bound?: boolean }
+export interface ItemSave { id: string; charges?: number; cooldownLeft?: number; quality?: ItemQuality; bound?: boolean; inscribedKills?: number }
 export type HeroLoadoutSlots = (string | null)[];
 export type ArmoryLoadouts = Record<string, Record<string, HeroLoadoutSlots>>;
 export interface DungeonProgressSave {

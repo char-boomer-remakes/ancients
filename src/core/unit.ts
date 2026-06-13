@@ -1,4 +1,5 @@
 import { TUNING } from '../data/tuning';
+import { qualityStatMods } from '../data/quality';
 import { clamp } from './math2d';
 import { REG } from './registry';
 import { deriveStats, levelFromXp, xpForLevel, type DerivedStats } from './stats';
@@ -49,6 +50,7 @@ export interface ItemState {
   cooldownUntil: number;
   bound?: boolean;
   quality?: ItemQuality;
+  inscribedKills?: number;   // banked holder kills for an Inscribed copy (LOOT L5)
 }
 
 export interface CastState {
@@ -261,6 +263,11 @@ export class Unit {
       if (!it) continue;
       const def = REG.items.get(it.defId);
       if (def?.passiveMods) addAll(def.passiveMods as Record<string, number>);
+      // quality overlay (LOOT L5): a bounded, named delta on the copy, summed
+      // here through the same item-mod pass. Inscribed grows with banked kills.
+      if (it.quality && it.quality !== 'standard') {
+        addAll(qualityStatMods(it.quality, it.inscribedKills) as Record<string, number> | undefined);
+      }
     }
     // statuses (incl. auras applied as buff statuses)
     addAll(this.summary.mods);
@@ -309,7 +316,7 @@ export class Unit {
 
   private statSourceSignature(): string {
     const abilityLevels = this.abilities.map((a) => a.level).join(',');
-    const items = this.items.map((it) => it?.defId ?? '-').join(',');
+    const items = this.items.map((it) => (it ? `${it.defId}:${it.quality ?? ''}:${it.inscribedKills ?? 0}` : '-')).join(',');
     return `${this.level}|${abilityLevels}|${items}|${modSig(this.externalMods)}|${modSig(this.permanentMods)}|${this.statuses.length}`;
   }
 

@@ -1,5 +1,6 @@
 import { REG } from '../core/registry';
 import { TUNING } from '../data/tuning';
+import { QUALITY_GRADES, qualityColor, rarityColor } from '../data/quality';
 import { xpProgress } from '../core/progression';
 import { itemReady, sellValue, computeBuyPlan } from '../core/items';
 import { buybackCost } from '../core/phase3';
@@ -346,8 +347,13 @@ export class Hud {
       const ready = itemReady(it, idef, u, now);
       const cdLeft = Math.max(0, it.cooldownUntil - now);
       const lockout = !ready.ok && ready.reason === 'damage-lockout';
+      const hasQuality = !!it.quality && it.quality !== 'standard';
+      const qTip = hasQuality
+        ? ` [${QUALITY_GRADES[it.quality!].name}${it.quality === 'inscribed' && it.inscribedKills ? ` ${it.inscribedKills}` : ''}]`
+        : '';
+      const qBorder = hasQuality ? `box-shadow: inset 0 0 0 2px ${qualityColor(it.quality)};` : '';
       itemsHtml += `
-        <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}" title="${idef.name} — ${idef.lore}">
+        <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}" title="${idef.name}${qTip} — ${idef.lore}" style="border-color:${rarityColor(idef.rarity)};${qBorder}">
           <img src="${itemIcon(idef)}" alt="">
           ${cdLeft > 0 ? `<span class="cd-num">${cdLeft.toFixed(cdLeft > 5 ? 0 : 1)}</span>` : ''}
           ${it.charges >= 0 ? `<span class="charges">${it.charges}</span>` : ''}
@@ -385,6 +391,10 @@ export class Hud {
       const el = document.createElement('div');
       el.className = `toast ${t.kind}`;
       el.textContent = t.text;
+      if (t.color) {
+        el.style.borderLeft = `3px solid ${t.color}`;
+        el.style.color = t.color;
+      }
       this.toastCol.appendChild(el);
       setTimeout(() => el.classList.add('show'), 10);
       setTimeout(() => {
@@ -1283,12 +1293,20 @@ export class Hud {
       ? `<p class="dim">No stashed items yet. Bosses, raids, chests, and wild creeps can stock the Armory.</p>`
       : armory.stash.map((it, i) => {
           const def = REG.item(it.id);
-          const flags = [def.tier, it.bound ? 'bound' : 'liquid', it.quality].filter(Boolean).join(' · ');
-          return `<div class="svc-row">
-            <div class="svc-main"><b>${def.name}</b> <em>${flags}</em><div class="rr-sub">${def.lore}</div></div>
+          const qLabel = it.quality && it.quality !== 'standard'
+            ? ` · <span style="color:${qualityColor(it.quality)}">${QUALITY_GRADES[it.quality].name}</span>`
+            : '';
+          const flags = [def.tier, it.bound ? 'bound' : 'liquid'].join(' · ');
+          const quote = it.bound ? g.qualityUpgradeQuote(i) : null;
+          const forge = quote
+            ? `<button class="btn small" data-arm-upgrade="${i}">Forge ${QUALITY_GRADES[quote.to].name} (${quote.essence}e/${quote.gold}g)</button>`
+            : '';
+          return `<div class="svc-row" style="border-left:3px solid ${rarityColor(def.rarity)}">
+            <div class="svc-main"><b style="color:${rarityColor(def.rarity)}">${def.name}</b> <em>${flags}${qLabel}</em><div class="rr-sub">${def.lore}</div></div>
             <div class="svc-actions">
               <select class="small-select" data-arm-pick="${i}">${heroOptions}</select>
               <button class="btn small" data-arm-hero-eq="${i}">Equip</button>
+              ${forge}
               ${it.bound ? `<button class="btn small" data-arm-salvage="${i}">Salvage</button>` : ''}
             </div>
           </div>`;
@@ -1421,6 +1439,7 @@ export class Hud {
       rerender();
     }));
     this.modal.querySelectorAll<HTMLElement>('[data-arm-salvage]').forEach((el) => el.addEventListener('click', () => { g.salvageArmoryItem(Number(el.dataset.armSalvage)); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-upgrade]').forEach((el) => el.addEventListener('click', () => { g.upgradeArmoryItemQuality(Number(el.dataset.armUpgrade)); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-arm-rec-hero]').forEach((el) => el.addEventListener('click', () => {
       const [heroId, slotRaw] = el.dataset.armRecHero!.split(':');
       g.reclaimArmoryItemForHero(heroId, Number(slotRaw));
@@ -1685,7 +1704,12 @@ export class Hud {
       .map((r) => `<div class="codex-note"><b>${r.name}</b><p>${r.lore}</p></div>`)
       .join('') || '<p class="dim">Travel the world to reveal regions.</p>';
     const items = cx.items
-      .map((i) => `<div class="codex-note"><b>${i.name}</b><p>${i.lore}</p></div>`)
+      .map((i) => {
+        const def = REG.item(i.id);
+        const rarity = def.rarity ?? 'common';
+        const src = def.exclusiveTo && def.exclusiveTo.length > 0 ? ` · ${def.exclusiveTo.join('/')}-only` : '';
+        return `<div class="codex-note" style="border-left:3px solid ${rarityColor(rarity)}"><b style="color:${rarityColor(rarity)}">${i.name}</b> <em>${rarity}${src}</em><p>${i.lore}</p></div>`;
+      })
       .join('') || '<p class="dim">Find or buy relics to reveal them.</p>';
     const creeps = cx.creeps
       .map((c) => `<div class="codex-note"><b>${c.name}</b><p>${c.lore}</p></div>`)

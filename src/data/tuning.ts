@@ -99,7 +99,12 @@ export const TUNING = {
     relicWheelBaseCost: 2400,
     relicWheelStepCost: 450,
     salvageEssence: { common: 1, uncommon: 2, rare: 4, mythical: 7, legendary: 12, immortal: 20, arcana: 30 },
-    relicRarityCeiling: 'legendary' as const
+    relicRarityCeiling: 'legendary' as const,
+    // Essence + gold to raise a bound copy one quality grade (LOOT L5). Keyed by target grade.
+    qualityUpgrade: {
+      essence: { genuine: 2, frozen: 3, inscribed: 5, corrupted: 8, unusual: 14, standard: 0 },
+      gold: { genuine: 600, frozen: 900, inscribed: 1300, corrupted: 2000, unusual: 3400, standard: 0 }
+    }
   },
   buybackBaseCost: 350,
   tomeXp: 420,

@@ -1,5 +1,6 @@
 import { TUNING } from '../data/tuning';
 import { DEFAULT_CREEP_DROP_TABLES } from '../data/creep-drops';
+import { QUALITY_GRADES, nextQuality, rarityColor } from '../data/quality';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { Unit } from '../core/unit';
@@ -42,7 +43,7 @@ import { ELITE_DRAFT } from '../data/drafts';
 import { resonanceMods } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroLoadoutSlots, HeroSave, ItemDropTable, ItemRarity, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, RoomType, SimEvent, StingerId, Vec2 } from '../core/types';
+import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroLoadoutSlots, HeroSave, ItemDropTable, ItemQuality, ItemRarity, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, RoomType, SimEvent, StingerId, Vec2 } from '../core/types';
 import { ProceduralAudio } from '../engine/audio';
 import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
@@ -190,6 +191,7 @@ export interface Toast {
   text: string;
   kind: 'info' | 'good' | 'bad' | 'bark';
   at: number;
+  color?: string;   // optional accent (LOOT L6: rarity-tinted loot toasts)
 }
 
 interface CampState {
@@ -784,9 +786,19 @@ export class Game {
     return pct;
   }
 
-  msg(text: string, kind: Toast['kind'] = 'info'): void {
-    this.toasts.push({ text, kind, at: performance.now() / 1000 });
+  msg(text: string, kind: Toast['kind'] = 'info', color?: string): void {
+    this.toasts.push({ text, kind, at: performance.now() / 1000, color });
     if (this.toasts.length > 60) this.toasts.splice(0, this.toasts.length - 60);
+  }
+
+  /** The Valve rarity color of the richest item in a drop (LOOT L6). */
+  private dropAccent(items: ItemSave[]): string | undefined {
+    let best: ItemRarity | undefined;
+    for (const it of items) {
+      const r = REG.item(it.id).rarity;
+      if (r && (!best || RARITY_RANK[r] > RARITY_RANK[best])) best = r;
+    }
+    return best ? rarityColor(best) : undefined;
   }
 
   /** Warm the renderer behind a loading screen: build the first unit views and
@@ -1502,7 +1514,7 @@ export class Game {
     const drops = this.addDroppedItems(roll.items);
     const names = drops.map((it) => REG.item(it.id).name).join(', ');
     const label = reward.kind === 'guardian' ? 'Guardian drop' : reward.kind === 'chest' ? 'Chest reward' : 'Dungeon reward';
-    this.msg(`${label}: ${names} (→ Armory)`, reward.kind === 'guardian' ? 'good' : 'info');
+    this.msg(`${label}: ${names} (→ Armory)`, reward.kind === 'guardian' ? 'good' : 'info', this.dropAccent(drops));
   }
 
   private recordDungeonProgress(dungeonId: string, tier: DifficultyTier, cleared: boolean, clearedRooms: number, depth: number, modifiers: string[]): void {
@@ -1545,7 +1557,7 @@ export class Game {
     if (loot.assembled) {
       this.inventoryStash.push(bindIfNeeded(loot.assembled));
       if (!this.heldUniques.includes(loot.assembled.id)) this.heldUniques.push(loot.assembled.id);
-      this.msg(`Raid drop: ${REG.item(loot.assembled.id).name}${loot.pityUsed ? ' (pity!)' : ''}`, 'good');
+      this.msg(`Raid drop: ${REG.item(loot.assembled.id).name}${loot.pityUsed ? ' (pity!)' : ''}`, 'good', this.dropAccent([loot.assembled]));
     }
     if (def.id === ROSHAN_RAID_ID) {
       next.aegisHeld = true;
@@ -1749,7 +1761,7 @@ export class Game {
     if (roll.items.length === 0) return;
     this.addDroppedItems(roll.items);
     const names = roll.items.map((it) => REG.item(it.id).name).join(', ');
-    this.msg(`Creep drop: ${names} (→ stash)`, 'good');
+    this.msg(`Creep drop: ${names} (→ stash)`, 'good', this.dropAccent(roll.items));
   }
 
   private addDroppedItems(items: ItemSave[]): ItemSave[] {
@@ -1791,7 +1803,7 @@ export class Game {
     const roll = rollItemDrops(this.echoComponentTable(heroId), 'normal', {}, new Rng(seed));
     if (roll.items.length === 0) return [];
     const drops = this.addDroppedItems(roll.items);
-    this.msg(`Echo drop: ${roll.items.map((it) => REG.item(it.id).name).join(', ')} (→ Armory)`, 'good');
+    this.msg(`Echo drop: ${roll.items.map((it) => REG.item(it.id).name).join(', ')} (→ Armory)`, 'good', this.dropAccent(roll.items));
     return drops;
   }
 
@@ -2059,7 +2071,7 @@ export class Game {
     this.goldSinks.gambleRolls += 1;
     const item: ItemSave = { id };
     this.addDroppedItems([item]);
-    this.msg(`Recipe wheel: ${REG.item(id).name} (→ Armory)`, 'good');
+    this.msg(`Recipe wheel: ${REG.item(id).name} (→ Armory)`, 'good', this.dropAccent([item]));
     return item;
   }
 
@@ -2093,7 +2105,7 @@ export class Game {
     this.goldSinks.gambleRolls += 1;
     const item: ItemSave = { id, bound: true };
     this.addDroppedItems([item]);
-    this.msg(`Relic wheel: ${REG.item(id).name} (bound, → Armory)`, 'good');
+    this.msg(`Relic wheel: ${REG.item(id).name} (bound, → Armory)`, 'good', this.dropAccent([item]));
     return item;
   }
 
@@ -2111,6 +2123,50 @@ export class Game {
     this.goldSinks.salvages += 1;
     this.msg(`Salvaged ${REG.item(saved.id).name} (+${amount} essence)`, 'info');
     return amount;
+  }
+
+  /** Quote the essence + gold cost to raise a bound Armory item one quality grade (LOOT L5). */
+  qualityUpgradeQuote(stashIdx: number): { from: ItemQuality; to: ItemQuality; essence: number; gold: number } | null {
+    const saved = this.inventoryStash[stashIdx];
+    if (!saved?.bound) return null;
+    const from = saved.quality ?? 'standard';
+    const to = nextQuality(from);
+    if (!to) return null;
+    return {
+      from,
+      to,
+      essence: TUNING.blackMarket.qualityUpgrade.essence[to],
+      gold: TUNING.blackMarket.qualityUpgrade.gold[to]
+    };
+  }
+
+  /**
+   * Spend essence + gold to raise a bound Armory item one quality grade, the
+   * deterministic earn-it path that complements luck at the source (LOOT L5/§3.4).
+   * Upgrading off Inscribed banks no kills; a fresh Inscribed starts its stack at 0.
+   */
+  upgradeArmoryItemQuality(stashIdx: number): boolean {
+    const quote = this.qualityUpgradeQuote(stashIdx);
+    if (!quote) {
+      this.msg('Only bound items can be upgraded, and Unusual is the ceiling', 'bad');
+      return false;
+    }
+    if (this.essence < quote.essence) {
+      this.msg(`Need ${quote.essence} essence (have ${this.essence})`, 'bad');
+      return false;
+    }
+    if (this.gold < quote.gold) {
+      this.msg(`Need ${quote.gold}g to forge ${QUALITY_GRADES[quote.to].name}`, 'bad');
+      return false;
+    }
+    const saved = this.inventoryStash[stashIdx];
+    this.essence -= quote.essence;
+    this.gold -= quote.gold;
+    this.goldSinks.gambleRolls += 1;
+    saved.quality = quote.to;
+    if (quote.to !== 'inscribed') delete saved.inscribedKills;
+    this.msg(`Forged ${QUALITY_GRADES[quote.to].name} ${REG.item(saved.id).name}`, 'good');
+    return true;
   }
 
   /** Tinker's Bench reroll: swap a stashed neutral for another of the same tier, for gold (§3.7). */
@@ -3455,6 +3511,26 @@ export class Game {
     if (victim && victim.kind === 'creep' && victim.tier) {
       this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid);
       this.rollNeutralFor(victim.tier, ev.victimUid);
+    }
+
+    // Inscribed copies bank the holder's kills into a capped, growing stack (LOOT L5).
+    this.creditInscribedKills(killer);
+  }
+
+  /** Grow the killer's Inscribed items by one banked kill, up to the grade cap. */
+  private creditInscribedKills(killer: Unit): void {
+    const cap = QUALITY_GRADES.inscribed.killCap ?? 0;
+    let changed = false;
+    for (const it of killer.items) {
+      if (it?.quality !== 'inscribed') continue;
+      const cur = it.inscribedKills ?? 0;
+      if (cur >= cap) continue;
+      it.inscribedKills = cur + 1;
+      changed = true;
+    }
+    if (changed) {
+      killer.markStatsDirty();
+      killer.refresh(this.sim.time);
     }
   }
 
