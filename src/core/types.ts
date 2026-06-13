@@ -999,6 +999,8 @@ export type SimEvent =
 
 // ---------- Saved game ----------
 export interface ItemSave { id: string; charges?: number; cooldownLeft?: number; quality?: ItemQuality; bound?: boolean }
+export type HeroLoadoutSlots = (string | null)[];
+export type ArmoryLoadouts = Record<string, Record<string, HeroLoadoutSlots>>;
 export interface HeroSave {
   heroId: string;
   level: number;
@@ -1052,6 +1054,7 @@ export interface GameSave {
   neutralStash: { id: string; count: number }[];
   goldSinks: { buybacks: number; tomesUsed: number; respecs: number; gambleRolls: number; salvages: number };
   essence: number;
+  loadouts: ArmoryLoadouts;
   reputation: number;                     // karma (Phase 6 §3.2), default 0
   codexUnlocks: string[];                 // entry ids revealed on encounter (§3.14)
   journalSeen: string[];                  // acknowledged journal entries (§3.14)

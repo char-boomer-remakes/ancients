@@ -32,7 +32,8 @@ import {
 } from '../core/phase3';
 import { Rng } from '../core/rng';
 import { defaultAudioSettings, defaultGraphicsSettings, defaultPhase4SaveFields } from '../core/phase4';
-import { defaultPhase5SaveFields, migratePhase5Save } from '../core/phase5';
+import { defaultPhase5SaveFields } from '../core/phase5';
+import { migratePhase6Save } from '../core/phase6';
 import { type QualityTier } from '../engine/performance';
 import { mergeCreeps, newCreepInstanceId, validateEntourage } from '../core/capture';
 import { computeBuyPlan, executeBuy, itemSaveOf, itemStateFromSave, sellValue, sortInventory } from '../core/items';
@@ -41,7 +42,7 @@ import { ELITE_DRAFT } from '../data/drafts';
 import { resonanceMods } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import type { ActiveElement, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, EchoProgress, GambitRule, GameSave, GraphicsSettings, ItemDropTable, ItemRarity, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, SimEvent, StingerId, Vec2 } from '../core/types';
+import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroLoadoutSlots, HeroSave, ItemDropTable, ItemRarity, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, SimEvent, StingerId, Vec2 } from '../core/types';
 import { ProceduralAudio } from '../engine/audio';
 import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
@@ -54,7 +55,9 @@ const ROSHAN_RAID_ID = 'roshan-pit';
 /** Top-tier power that only drops from bosses/raids — never vended by any shop or gold sink (§6). */
 export const GATED_TOP_TIER: ReadonlySet<string> = new Set([
   'divine-rapier', 'butterfly', 'scythe-of-vyse', 'heart-of-tarrasque', 'eye-of-skadi',
-  'refresher-orb', 'aghanims-scepter', 'aegis-of-the-immortal', 'refresher-shard', 'cheese'
+  'refresher-orb', 'aghanims-scepter', 'abyssal-blade', 'bloodthorn', 'radiance', 'satanic',
+  'octarine-core', 'aghanims-blessing', 'aghanims-shard', 'aegis-of-the-immortal',
+  'refresher-shard', 'cheese'
 ]);
 
 const RARITY_RANK: Record<ItemRarity, number> = {
@@ -87,7 +90,7 @@ function bindIfNeeded(item: ItemSave): ItemSave {
 // camps, capture/entourage, shop, shrine, day clock, save/load.
 // ------------------------------------------------------------------
 
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 const SLOT_KEYS = ['ancients.save.1', 'ancients.save.2', 'ancients.save.3'];
 const AUTO_KEY = 'ancients.save.auto';
 
@@ -112,6 +115,75 @@ export interface RosterEntry {
   resonanceMods: Record<string, number>;
   neutralMods?: Record<string, number>; // currently-applied neutral-slot passive mods
   unit: Unit | null;
+}
+
+function cloneItemSave(item: ItemSave | null | undefined): ItemSave | null {
+  return item ? { ...item } : null;
+}
+
+function normalizeSavedItems(items: (ItemSave | null)[] | undefined): (ItemSave | null)[] {
+  const out: (ItemSave | null)[] = [null, null, null, null, null, null];
+  (items ?? []).slice(0, TUNING.itemSlots).forEach((item, i) => {
+    out[i] = cloneItemSave(item);
+  });
+  return out;
+}
+
+function cloneHeroSave(save: HeroSave): HeroSave {
+  return {
+    heroId: save.heroId,
+    level: save.level,
+    xp: save.xp,
+    items: normalizeSavedItems(save.items),
+    neutralSlot: cloneItemSave(save.neutralSlot),
+    gambits: structuredClone(save.gambits ?? []),
+    talentPicks: [...save.talentPicks],
+    echo: normalizeEchoProgress(save.echo),
+    facetIdx: save.facetIdx,
+    hpPct: save.hpPct,
+    manaPct: save.manaPct,
+    abilityCooldowns: [...save.abilityCooldowns],
+    fleshStacks: save.fleshStacks ? { ...save.fleshStacks } : undefined
+  };
+}
+
+function heroSaveFromRosterEntry(rec: RosterEntry): HeroSave {
+  return {
+    heroId: rec.heroId,
+    level: rec.level,
+    xp: rec.xp,
+    items: rec.items.map(cloneItemSave),
+    neutralSlot: cloneItemSave(rec.neutralSlot),
+    gambits: structuredClone(rec.gambits),
+    talentPicks: [...rec.talentPicks],
+    echo: {
+      kills: rec.echo.kills,
+      facetSwapUnlocked: rec.echo.facetSwapUnlocked,
+      talentTierUnlocks: [...rec.echo.talentTierUnlocks]
+    },
+    facetIdx: rec.facetIdx,
+    hpPct: rec.hpPct,
+    manaPct: rec.manaPct,
+    abilityCooldowns: [...rec.abilityCooldowns],
+    fleshStacks: rec.fleshStacks ? { ...rec.fleshStacks } : undefined
+  };
+}
+
+function freshHeroSave(heroId: string, level = 1): HeroSave {
+  return {
+    heroId,
+    level,
+    xp: xpForLevel(level),
+    items: [null, null, null, null, null, null],
+    neutralSlot: null,
+    gambits: [],
+    talentPicks: [null, null, null, null],
+    echo: freshEchoProgress(),
+    facetIdx: 0,
+    hpPct: 1,
+    manaPct: 1,
+    abilityCooldowns: [0, 0, 0, 0]
+  };
 }
 
 export interface Toast {
@@ -183,6 +255,7 @@ export function newGameSave(starterHeroId: string): GameSave {
     defeatedGyms: [],
     echoRespawn: {},
     campRespawn: {},
+    loadouts: {},
     ...phase3,
     ...defaultPhase4SaveFields(),
     ...phase5,
@@ -260,6 +333,8 @@ export class Game {
   playtime = 0;
 
   party: RosterEntry[] = [];
+  /** Saved records for recruited heroes outside the fielded party. */
+  private benchRoster = new Map<string, HeroSave>();
   activeIdx = 0;
   swapReadyAt = 0;
 
@@ -286,6 +361,7 @@ export class Game {
   neutralStash: GameSave['neutralStash'] = [];
   goldSinks: GameSave['goldSinks'] = { buybacks: 0, tomesUsed: 0, respecs: 0, gambleRolls: 0, salvages: 0 };
   essence = 0;
+  loadouts: ArmoryLoadouts = {};
   reputation = 0;
   codexUnlocks = new Set<string>();
   journalSeen = new Set<string>();
@@ -374,6 +450,7 @@ export class Game {
     this.factionChoices = { ...save.factionChoices };
     this.heldUniques = [...save.heldUniques];
     this.neutralStash = save.neutralStash.map((n) => ({ ...n }));
+    this.loadouts = structuredClone(save.loadouts ?? {});
     this.goldSinks = {
       buybacks: save.goldSinks.buybacks ?? 0,
       tomesUsed: save.goldSinks.tomesUsed ?? 0,
@@ -396,6 +473,13 @@ export class Game {
     this.resinUpdatedAt = save.resinUpdatedAt ?? save.playtimeSec;
     this.regenResinToPlaytime();
     this.codexUnlocks.add('region:' + this.region.id); // standing in a region is the encounter (§3.14)
+
+    const partyIds = new Set(save.party);
+    this.benchRoster = new Map(
+      save.roster
+        .filter((hs) => !partyIds.has(hs.heroId))
+        .map((hs) => [hs.heroId, cloneHeroSave(hs)])
+    );
 
     this.party = save.party.map((heroId) => {
       const hs = save.roster.find((r) => r.heroId === heroId)!;
@@ -473,6 +557,144 @@ export class Game {
     if (this.liveRaid) return this.liveRaid.drivenUnit();
     if (this.liveDungeon) return this.liveDungeon.drivenUnit();
     return this.activeUnit();
+  }
+
+  private partyEntryByHeroId(heroId: string): RosterEntry | undefined {
+    return this.party.find((rec) => rec.heroId === heroId);
+  }
+
+  private heroSnapshot(heroId: string): HeroSave | null {
+    const rec = this.partyEntryByHeroId(heroId);
+    if (rec) {
+      if (rec.unit) this.serializeHero(rec);
+      return heroSaveFromRosterEntry(rec);
+    }
+    const saved = this.benchRoster.get(heroId);
+    return saved ? cloneHeroSave(saved) : null;
+  }
+
+  private allOwnedHeroSaves(): HeroSave[] {
+    const fielded = this.party.map((rec) => {
+      if (rec.unit) this.serializeHero(rec);
+      return heroSaveFromRosterEntry(rec);
+    });
+    const fieldedIds = new Set(fielded.map((h) => h.heroId));
+    const benched = [...this.benchRoster.values()]
+      .filter((h) => !fieldedIds.has(h.heroId))
+      .map(cloneHeroSave);
+    return [...fielded, ...benched];
+  }
+
+  private setHeroItems(heroId: string, items: (ItemSave | null)[]): boolean {
+    const next = normalizeSavedItems(items);
+    const rec = this.partyEntryByHeroId(heroId);
+    if (rec) {
+      const states = next.map((it) => (it ? itemStateFromSave(it, this.sim.time) : null));
+      const sorted = sortInventory(states);
+      if (rec.unit) {
+        rec.unit.items = sorted;
+        rec.unit.markStatsDirty();
+        rec.unit.refresh(this.sim.time);
+        rec.items = rec.unit.items.map((it) => itemSaveOf(it, this.sim.time));
+      } else {
+        rec.items = sorted.map((it) => itemSaveOf(it, this.sim.time));
+      }
+      return true;
+    }
+
+    const saved = this.benchRoster.get(heroId);
+    if (!saved) return false;
+    const states = next.map((it) => (it ? itemStateFromSave(it, this.sim.time) : null));
+    saved.items = sortInventory(states).map((it) => itemSaveOf(it, this.sim.time));
+    this.benchRoster.set(heroId, cloneHeroSave(saved));
+    return true;
+  }
+
+  private cleanLoadoutName(name: string): string {
+    const trimmed = name.trim();
+    return trimmed.length > 0 ? trimmed.slice(0, 32) : 'Default';
+  }
+
+  private cloneLoadoutSlots(slots: HeroLoadoutSlots): HeroLoadoutSlots {
+    const out: HeroLoadoutSlots = [null, null, null, null, null, null];
+    slots.slice(0, TUNING.itemSlots).forEach((id, i) => {
+      out[i] = typeof id === 'string' && REG.items.has(id) ? id : null;
+    });
+    return out;
+  }
+
+  heroLoadout(heroId: string, name = 'Default'): HeroLoadoutSlots | null {
+    const slots = this.loadouts[heroId]?.[this.cleanLoadoutName(name)];
+    return slots ? this.cloneLoadoutSlots(slots) : null;
+  }
+
+  saveHeroLoadout(heroId: string, name = 'Default'): boolean {
+    const hero = this.heroSnapshot(heroId);
+    if (!hero) return false;
+    const loadoutName = this.cleanLoadoutName(name);
+    this.loadouts[heroId] = { ...(this.loadouts[heroId] ?? {}) };
+    this.loadouts[heroId][loadoutName] = normalizeSavedItems(hero.items).map((it) => it?.id ?? null);
+    this.msg(`Saved ${REG.hero(heroId).name}'s ${loadoutName} loadout`, 'good');
+    return true;
+  }
+
+  clearHeroLoadout(heroId: string, name = 'Default'): boolean {
+    const loadoutName = this.cleanLoadoutName(name);
+    if (!this.loadouts[heroId]?.[loadoutName]) return false;
+    delete this.loadouts[heroId][loadoutName];
+    if (Object.keys(this.loadouts[heroId]).length === 0) delete this.loadouts[heroId];
+    this.msg(`Cleared ${REG.hero(heroId).name}'s ${loadoutName} loadout`, 'info');
+    return true;
+  }
+
+  loadoutConflicts(name = 'Default'): { itemId: string; requested: number; owned: number; claimedBy: string[] }[] {
+    const loadoutName = this.cleanLoadoutName(name);
+    const requested = new Map<string, string[]>();
+    for (const [heroId, byName] of Object.entries(this.loadouts)) {
+      const slots = byName[loadoutName];
+      if (!slots) continue;
+      for (const id of slots) {
+        if (!id) continue;
+        const claimants = requested.get(id) ?? [];
+        claimants.push(heroId);
+        requested.set(id, claimants);
+      }
+    }
+
+    const owned = new Map<string, number>();
+    const count = (it: ItemSave | null) => {
+      if (!it?.bound) return;
+      owned.set(it.id, (owned.get(it.id) ?? 0) + 1);
+    };
+    this.inventoryStash.forEach(count);
+    this.allOwnedHeroSaves().forEach((hero) => hero.items.forEach(count));
+
+    return [...requested.entries()]
+      .filter(([id, claimants]) => claimants.length > (owned.get(id) ?? 0))
+      .map(([itemId, claimedBy]) => ({ itemId, requested: claimedBy.length, owned: owned.get(itemId) ?? 0, claimedBy }));
+  }
+
+  armoryView(): {
+    stash: ItemSave[];
+    heroes: { heroId: string; name: string; level: number; fielded: boolean; items: (ItemSave | null)[]; loadouts: string[]; conflicts: string[] }[];
+    conflicts: { itemId: string; requested: number; owned: number; claimedBy: string[] }[];
+    essence: number;
+  } {
+    const conflicts = this.loadoutConflicts();
+    return {
+      stash: this.inventoryStash.map((it) => ({ ...it })),
+      heroes: this.allOwnedHeroSaves().map((hero) => ({
+        heroId: hero.heroId,
+        name: REG.hero(hero.heroId).name,
+        level: hero.level,
+        fielded: this.party.some((rec) => rec.heroId === hero.heroId),
+        items: hero.items.map(cloneItemSave),
+        loadouts: Object.keys(this.loadouts[hero.heroId] ?? {}),
+        conflicts: conflicts.filter((c) => c.claimedBy.includes(hero.heroId)).map((c) => c.itemId)
+      })),
+      conflicts,
+      essence: this.essence
+    };
   }
 
   /** Select a player-side gym hero by party slot for the next Captain's Call. */
@@ -1551,75 +1773,147 @@ export class Game {
     return true;
   }
 
-  /** Equip an item from the Armory stash into a hero's regular six-slot inventory. */
-  equipArmoryItem(recIdx: number, stashIdx: number): boolean {
-    const rec = this.party[recIdx];
+  /** Equip an item from the Armory stash into a fielded or benched hero. */
+  equipArmoryItemForHero(heroId: string, stashIdx: number): boolean {
+    const hero = this.heroSnapshot(heroId);
     const saved = this.inventoryStash[stashIdx];
-    if (!rec || !saved) return false;
+    if (!hero || !saved) return false;
 
-    if (rec.unit) {
-      const free = rec.unit.items.findIndex((it) => it === null);
-      if (free < 0) {
-        this.msg('Inventory full', 'bad');
-        return false;
-      }
-      this.inventoryStash.splice(stashIdx, 1);
-      rec.unit.items[free] = itemStateFromSave(saved, this.sim.time);
-      rec.unit.items = sortInventory(rec.unit.items);
-      rec.unit.markStatsDirty();
-      rec.unit.refresh(this.sim.time);
-      rec.items = rec.unit.items.map((it) => itemSaveOf(it, this.sim.time));
-    } else {
-      const states = rec.items.map((it) => (it ? itemStateFromSave(it, this.sim.time) : null));
-      const free = states.findIndex((it) => it === null);
-      if (free < 0) {
-        this.msg('Inventory full', 'bad');
-        return false;
-      }
-      this.inventoryStash.splice(stashIdx, 1);
-      states[free] = itemStateFromSave(saved, this.sim.time);
-      rec.items = sortInventory(states).map((it) => itemSaveOf(it, this.sim.time));
+    const items = normalizeSavedItems(hero.items);
+    const free = items.findIndex((it) => it === null);
+    if (free < 0) {
+      this.msg('Inventory full', 'bad');
+      return false;
     }
 
+    this.inventoryStash.splice(stashIdx, 1);
+    items[free] = { ...saved };
+    this.setHeroItems(heroId, items);
     this.codexUnlock('item:' + saved.id);
-    this.msg(`${REG.hero(rec.heroId).name} equips ${REG.item(saved.id).name}`, 'good');
+    this.msg(`${REG.hero(heroId).name} equips ${REG.item(saved.id).name}`, 'good');
     return true;
   }
 
+  /** Back-compat wrapper: party-index Armory equip used by older UI/tests. */
+  equipArmoryItem(recIdx: number, stashIdx: number): boolean {
+    const heroId = this.party[recIdx]?.heroId;
+    return heroId ? this.equipArmoryItemForHero(heroId, stashIdx) : false;
+  }
+
   /** Return a bound main-slot item to the Armory. Liquid items still sell through the shop path. */
-  reclaimArmoryItem(recIdx: number, invSlot: number): boolean {
-    const rec = this.party[recIdx];
-    if (!rec) return false;
-
-    if (rec.unit) {
-      const it = rec.unit.items[invSlot];
-      if (!it?.bound) {
-        this.msg('Only bound items return to the Armory', 'bad');
-        return false;
-      }
-      const saved = itemSaveOf(it, this.sim.time);
-      if (!saved) return false;
-      rec.unit.items[invSlot] = null;
-      rec.unit.items = sortInventory(rec.unit.items);
-      rec.unit.markStatsDirty();
-      rec.unit.refresh(this.sim.time);
-      rec.items = rec.unit.items.map((slot) => itemSaveOf(slot, this.sim.time));
-      this.inventoryStash.push(saved);
-      this.msg(`Returned ${REG.item(saved.id).name} to the Armory`, 'info');
-      return true;
-    }
-
-    const saved = rec.items[invSlot];
+  reclaimArmoryItemForHero(heroId: string, invSlot: number): boolean {
+    const hero = this.heroSnapshot(heroId);
+    if (!hero) return false;
+    const items = normalizeSavedItems(hero.items);
+    const saved = items[invSlot];
     if (!saved?.bound) {
       this.msg('Only bound items return to the Armory', 'bad');
       return false;
     }
-    rec.items[invSlot] = null;
-    const states = rec.items.map((it) => (it ? itemStateFromSave(it, this.sim.time) : null));
-    rec.items = sortInventory(states).map((it) => itemSaveOf(it, this.sim.time));
+    items[invSlot] = null;
+    this.setHeroItems(heroId, items);
     this.inventoryStash.push(saved);
     this.msg(`Returned ${REG.item(saved.id).name} to the Armory`, 'info');
     return true;
+  }
+
+  /** Back-compat wrapper: party-index Armory reclaim used by older UI/tests. */
+  reclaimArmoryItem(recIdx: number, invSlot: number): boolean {
+    const heroId = this.party[recIdx]?.heroId;
+    return heroId ? this.reclaimArmoryItemForHero(heroId, invSlot) : false;
+  }
+
+  reclaimAllArmoryItemsForHero(heroId: string): number {
+    const hero = this.heroSnapshot(heroId);
+    if (!hero) return 0;
+    const items = normalizeSavedItems(hero.items);
+    let moved = 0;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it?.bound) continue;
+      this.inventoryStash.push(it);
+      items[i] = null;
+      moved += 1;
+    }
+    if (moved > 0) {
+      this.setHeroItems(heroId, items);
+      this.msg(`Returned ${moved} item${moved === 1 ? '' : 's'} from ${REG.hero(heroId).name}`, 'info');
+    }
+    return moved;
+  }
+
+  applyHeroLoadout(heroId: string, name = 'Default'): { ok: boolean; missing: string[] } {
+    const desired = this.heroLoadout(heroId, name);
+    const hero = this.heroSnapshot(heroId);
+    if (!desired || !hero) return { ok: false, missing: [] };
+
+    const current = normalizeSavedItems(hero.items);
+    const next: (ItemSave | null)[] = [null, null, null, null, null, null];
+    const usedCurrent = new Set<number>();
+    const missing: string[] = [];
+    const stashPicks: { slot: number; stashIdx: number; item: ItemSave }[] = [];
+
+    desired.forEach((id, slot) => {
+      if (!id) return;
+      const currentIdx = current.findIndex((it, i) => !usedCurrent.has(i) && it?.id === id);
+      if (currentIdx >= 0) {
+        usedCurrent.add(currentIdx);
+        next[slot] = current[currentIdx] ? { ...current[currentIdx]! } : null;
+        return;
+      }
+      const reserved = new Set(stashPicks.map((p) => p.stashIdx));
+      const stashIdx = this.inventoryStash.findIndex((it, i) => !reserved.has(i) && it.bound && it.id === id);
+      if (stashIdx < 0) {
+        missing.push(id);
+        return;
+      }
+      stashPicks.push({ slot, stashIdx, item: { ...this.inventoryStash[stashIdx] } });
+    });
+
+    if (missing.length > 0) {
+      const names = [...new Set(missing)].map((id) => REG.item(id).name).join(', ');
+      this.msg(`${REG.hero(heroId).name}'s loadout is missing: ${names}`, 'bad');
+      return { ok: false, missing };
+    }
+
+    for (const pick of [...stashPicks].sort((a, b) => b.stashIdx - a.stashIdx)) {
+      this.inventoryStash.splice(pick.stashIdx, 1);
+    }
+    for (const pick of stashPicks) next[pick.slot] = pick.item;
+
+    for (let i = 0; i < current.length; i++) {
+      const it = current[i];
+      if (!it || usedCurrent.has(i)) continue;
+      if (it.bound) {
+        this.inventoryStash.push(it);
+      } else {
+        const free = next.findIndex((slot) => slot === null);
+        if (free >= 0) next[free] = it;
+      }
+    }
+
+    this.setHeroItems(heroId, next);
+    this.msg(`Applied ${REG.hero(heroId).name}'s ${this.cleanLoadoutName(name)} loadout`, 'good');
+    return { ok: true, missing: [] };
+  }
+
+  gearFieldLoadouts(name = 'Default'): { applied: number; failed: string[]; conflicts: { itemId: string; requested: number; owned: number; claimedBy: string[] }[] } {
+    const conflicts = this.loadoutConflicts(name);
+    if (conflicts.length > 0) {
+      this.msg('Resolve loadout contention before gearing the field', 'bad');
+      return { applied: 0, failed: this.party.map((rec) => rec.heroId), conflicts };
+    }
+
+    let applied = 0;
+    const failed: string[] = [];
+    for (const rec of this.party) {
+      if (!this.heroLoadout(rec.heroId, name)) continue;
+      const res = this.applyHeroLoadout(rec.heroId, name);
+      if (res.ok) applied += 1;
+      else failed.push(rec.heroId);
+    }
+    if (applied > 0) this.msg(`Equipped ${applied} fielded loadout${applied === 1 ? '' : 's'}`, 'good');
+    return { applied, failed, conflicts: [] };
   }
 
   private blackMarketCost(kind: 'recipe' | 'relic'): number {
@@ -2402,10 +2696,6 @@ export class Game {
   private recruitHero(heroId: string, npcUid?: number): boolean {
     const def = REG.hero(heroId);
     if (this.recruited.has(heroId)) return false;
-    if (this.party.length >= 5) {
-      this.msg('Party is full (5 heroes)', 'bad');
-      return false;
-    }
     if (npcUid !== undefined) {
       this.sim.removeUnit(npcUid);
       this.npcHeroes.delete(npcUid);
@@ -2419,28 +2709,32 @@ export class Game {
     }
     this.recruited.add(heroId);
     this.codexUnlock('hero:' + heroId); // recruiting is the encounter (§3.14)
-    this.party.push({
-      heroId,
-      level: 1,
-      xp: 0,
-      talentPicks: [null, null, null, null],
-      gambits: [],
-      echo: freshEchoProgress(),
-      facetIdx: 0,
-      hpPct: 1,
-      manaPct: 1,
-      items: [null, null, null, null, null, null],
-      neutralSlot: null,
-      abilityCooldowns: [0, 0, 0, 0],
-      benchedAt: 0,
-      respawnAt: 0,
-      lastCombatAt: -999,
-      dayNightMods: {},
-      resonanceMods: {},
-      unit: null
-    });
+    if (this.party.length < 5) {
+      this.party.push({
+        heroId,
+        level: 1,
+        xp: 0,
+        talentPicks: [null, null, null, null],
+        gambits: [],
+        echo: freshEchoProgress(),
+        facetIdx: 0,
+        hpPct: 1,
+        manaPct: 1,
+        items: [null, null, null, null, null, null],
+        neutralSlot: null,
+        abilityCooldowns: [0, 0, 0, 0],
+        benchedAt: 0,
+        respawnAt: 0,
+        lastCombatAt: -999,
+        dayNightMods: {},
+        resonanceMods: {},
+        unit: null
+      });
+    } else {
+      this.benchRoster.set(heroId, freshHeroSave(heroId));
+    }
     this.refreshResonanceMods(true);
-    this.msg(`${def.name} joins the party! (key ${this.party.length})`, 'good');
+    this.msg(this.party.some((rec) => rec.heroId === heroId) ? `${def.name} joins the party! (key ${this.party.length})` : `${def.name} joins the bench. Gear them from the Armory.`, 'good');
     if (def.barks.length > 0) this.msg(`${def.name}: "${def.barks[0]}"`, 'bark');
     if (def.recruitmentQuestId) {
       this.questProgress[def.recruitmentQuestId] = { ...(this.questProgress[def.recruitmentQuestId] ?? defaultQuestProgress()), stage: 'bound' };
@@ -2722,6 +3016,11 @@ export class Game {
   buildSave(): GameSave {
     const active = this.party[this.activeIdx];
     if (active.unit) this.serializeHero(active);
+    const partySaves = this.party.map(heroSaveFromRosterEntry);
+    const partyIds = new Set(partySaves.map((r) => r.heroId));
+    const benchSaves = [...this.benchRoster.values()]
+      .filter((r) => !partyIds.has(r.heroId))
+      .map(cloneHeroSave);
     return {
       version: SAVE_VERSION,
       name: REG.hero(this.party[0].heroId).name,
@@ -2735,25 +3034,7 @@ export class Game {
       playerPos: active.unit ? { ...active.unit.pos } : { ...this.region.shrine.pos },
       party: this.party.map((r) => r.heroId),
       activeIdx: this.activeIdx,
-      roster: this.party.map((r) => ({
-        heroId: r.heroId,
-        level: r.level,
-        xp: r.xp,
-        items: r.items.map((i) => (i ? { ...i } : null)),
-        neutralSlot: r.neutralSlot ? { ...r.neutralSlot } : null,
-        gambits: structuredClone(r.gambits),
-        talentPicks: [...r.talentPicks],
-        echo: {
-          kills: r.echo.kills,
-          facetSwapUnlocked: r.echo.facetSwapUnlocked,
-          talentTierUnlocks: [...r.echo.talentTierUnlocks]
-        },
-        facetIdx: r.facetIdx,
-        hpPct: r.hpPct,
-        manaPct: r.manaPct,
-        abilityCooldowns: [...r.abilityCooldowns],
-        fleshStacks: r.fleshStacks ? { ...r.fleshStacks } : undefined
-      })),
+      roster: [...partySaves, ...benchSaves],
       stash: [],
       inventoryStash: this.inventoryStash.map((i) => ({ ...i })),
       caught: this.caught.map((c) => ({ ...c })),
@@ -2772,6 +3053,7 @@ export class Game {
       neutralStash: this.neutralStash.map((n) => ({ ...n })),
       goldSinks: { ...this.goldSinks },
       essence: this.essence,
+      loadouts: structuredClone(this.loadouts),
       reputation: this.reputation,
       codexUnlocks: [...this.codexUnlocks],
       journalSeen: [...this.journalSeen],
@@ -2854,9 +3136,9 @@ export class Game {
   static migrateSave(s: unknown): GameSave | null {
     if (!s || typeof s !== 'object') return null;
     const v = s as Partial<GameSave>;
-    if (v.version === 2 || v.version === 3 || v.version === 4 || v.version === SAVE_VERSION) {
-      // v2/v3 -> v3 shape, v4 audio/codex fields, then v5 exploration/stamina fields.
-      const migrated = migratePhase5Save(migratePhase3Save(v as unknown as { version: number; [k: string]: unknown }));
+    if (v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === SAVE_VERSION) {
+      // v2/v3 -> v3 shape, v4 audio/codex fields, v5 exploration, then v6 Armory loadouts.
+      const migrated = migratePhase6Save(migratePhase3Save(v as unknown as { version: number; [k: string]: unknown }));
       return Game.validateSave(migrated) ? migrated : null;
     }
     return null;
@@ -2901,6 +3183,14 @@ export class Game {
     if (!v.goldSinks || typeof v.goldSinks.buybacks !== 'number' || typeof v.goldSinks.tomesUsed !== 'number' || typeof v.goldSinks.respecs !== 'number') return false;
     if (typeof v.goldSinks.gambleRolls !== 'number' || typeof v.goldSinks.salvages !== 'number') return false;
     if (typeof v.essence !== 'number' || v.essence < 0) return false;
+    if (!v.loadouts || typeof v.loadouts !== 'object') return false;
+    for (const [heroId, byName] of Object.entries(v.loadouts)) {
+      if (!REG.heroes.has(heroId) || !byName || typeof byName !== 'object') return false;
+      for (const slots of Object.values(byName)) {
+        if (!Array.isArray(slots) || slots.length !== TUNING.itemSlots) return false;
+        if (!slots.every((id) => id === null || (typeof id === 'string' && REG.items.has(id)))) return false;
+      }
+    }
     if (typeof v.reputation !== 'number') return false;
     if (!Array.isArray(v.codexUnlocks) || !v.codexUnlocks.every((id) => typeof id === 'string')) return false;
     if (!Array.isArray(v.journalSeen) || !v.journalSeen.every((id) => typeof id === 'string')) return false;

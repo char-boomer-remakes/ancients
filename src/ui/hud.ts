@@ -9,7 +9,7 @@ import { abilityIcon, itemIcon, heroPortrait } from '../engine/icons';
 import { WORLD_SCALE } from '../engine/scale';
 import { Game } from '../systems/game';
 import type { InputController } from '../systems/input';
-import type { GambitAction, GambitCondition, GambitRule, GambitTargetMode, GraphicsSettings, ItemDef, SimEvent } from '../core/types';
+import type { GambitAction, GambitCondition, GambitRule, GambitTargetMode, GraphicsSettings, ItemDef, ItemSave, SimEvent } from '../core/types';
 import * as THREE from 'three';
 
 // ------------------------------------------------------------------
@@ -1222,27 +1222,49 @@ export class Hud {
       </div>`;
     }).join('');
 
-    // Armory: boss/raid/chest/creep drops that are waiting to be assigned.
-    const armoryHtml = g.inventoryStash.length === 0
+    // Armory: bound drops and bench loadouts (LOOT L8).
+    const armory = g.armoryView();
+    const heroOptions = armory.heroes
+      .map((h) => `<option value="${h.heroId}">${h.name}${h.fielded ? ' · fielded' : ''}</option>`)
+      .join('');
+    const conflictHtml = armory.conflicts.length === 0
+      ? ''
+      : `<div class="rr-sub bad">Contention: ${armory.conflicts.map((c) => `${REG.item(c.itemId).name} claimed ${c.requested}×, owned ${c.owned}×`).join(' · ')}</div>`;
+    const armoryHtml = armory.stash.length === 0
       ? `<p class="dim">No stashed items yet. Bosses, raids, chests, and wild creeps can stock the Armory.</p>`
-      : g.inventoryStash.map((it, i) => {
+      : armory.stash.map((it, i) => {
           const def = REG.item(it.id);
           const flags = [def.tier, it.bound ? 'bound' : 'liquid', it.quality].filter(Boolean).join(' · ');
           return `<div class="svc-row">
             <div class="svc-main"><b>${def.name}</b> <em>${flags}</em><div class="rr-sub">${def.lore}</div></div>
-            <div class="svc-actions"><button class="btn small" data-arm-eq="${i}">Equip → ${activeName}</button></div>
+            <div class="svc-actions">
+              <select class="small-select" data-arm-pick="${i}">${heroOptions}</select>
+              <button class="btn small" data-arm-hero-eq="${i}">Equip</button>
+              ${it.bound ? `<button class="btn small" data-arm-salvage="${i}">Salvage</button>` : ''}
+            </div>
           </div>`;
         }).join('');
-    const armorySlotsHtml = g.party.map((rec, i) => {
-      const bound = rec.items
+    const armorySlotsHtml = armory.heroes.map((hero) => {
+      const bound = hero.items
         .map((it, slot) => (it?.bound ? { it, slot } : null))
-        .filter((x): x is { it: NonNullable<typeof rec.items[number]>; slot: number } => !!x);
+        .filter((x): x is { it: ItemSave; slot: number } => !!x);
       const rows = bound.length === 0
         ? `<div class="rr-sub">no bound main-slot items</div>`
-        : bound.map(({ it, slot }) => `<button class="btn small" data-arm-rec="${i}:${slot}">Reclaim ${REG.item(it.id).name}</button>`).join('');
+        : bound.map(({ it, slot }) => `<button class="btn small" data-arm-rec-hero="${hero.heroId}:${slot}">Reclaim ${REG.item(it.id).name}</button>`).join('');
+      const loadoutText = hero.loadouts.length > 0 ? `loadouts: ${hero.loadouts.join(', ')}` : 'no saved loadout';
+      const conflicts = hero.conflicts.length > 0
+        ? `<div class="rr-sub bad">waiting on ${hero.conflicts.map((id) => REG.item(id).name).join(', ')}</div>`
+        : '';
       return `<div class="svc-row">
-        <div class="svc-main"><b>${REG.hero(rec.heroId).name}</b></div>
-        <div class="svc-actions">${rows}</div>
+        <div class="svc-main"><b>${hero.name}</b> <em>Lv ${hero.level}${hero.fielded ? ' · fielded' : ' · bench'}</em>
+          <div class="rr-sub">${loadoutText}</div>${conflicts}
+        </div>
+        <div class="svc-actions">
+          ${rows}
+          <button class="btn small" data-arm-save-loadout="${hero.heroId}">Save Loadout</button>
+          <button class="btn small" data-arm-apply-loadout="${hero.heroId}" ${hero.loadouts.includes('Default') ? '' : 'disabled'}>Apply</button>
+          <button class="btn small" data-arm-reclaim-all="${hero.heroId}">Reclaim All</button>
+        </div>
       </div>`;
     }).join('');
 
@@ -1304,7 +1326,9 @@ export class Hud {
           ${stashHtml}
           <div class="svc-sub">Neutral slots</div>${slotHtml}
         </section>
-        <section><h3>Armory</h3>
+        <section><h3>Armory <span class="gold">${armory.essence} essence</span></h3>
+          ${conflictHtml}
+          <div class="svc-actions"><button class="btn small accent" data-arm-gear-field="1">Gear Fielded Loadouts</button></div>
           ${armoryHtml}
           <div class="svc-sub">Bound items</div>${armorySlotsHtml}
         </section>
@@ -1341,12 +1365,22 @@ export class Hud {
     this.modal.querySelectorAll<HTMLElement>('[data-nrr]').forEach((el) => el.addEventListener('click', () => { g.tinkerReroll(el.dataset.nrr!); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-nen]').forEach((el) => el.addEventListener('click', () => { g.tinkerEnchant(el.dataset.nen!); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-nrec]').forEach((el) => el.addEventListener('click', () => { g.reclaimNeutral(Number(el.dataset.nrec)); rerender(); }));
-    this.modal.querySelectorAll<HTMLElement>('[data-arm-eq]').forEach((el) => el.addEventListener('click', () => { g.equipArmoryItem(g.activeIdx, Number(el.dataset.armEq)); rerender(); }));
-    this.modal.querySelectorAll<HTMLElement>('[data-arm-rec]').forEach((el) => el.addEventListener('click', () => {
-      const [recIdx, slot] = el.dataset.armRec!.split(':').map(Number);
-      g.reclaimArmoryItem(recIdx, slot);
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-hero-eq]').forEach((el) => el.addEventListener('click', () => {
+      const idx = Number(el.dataset.armHeroEq);
+      const select = this.modal.querySelector<HTMLSelectElement>(`select[data-arm-pick="${idx}"]`);
+      if (select) g.equipArmoryItemForHero(select.value, idx);
       rerender();
     }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-salvage]').forEach((el) => el.addEventListener('click', () => { g.salvageArmoryItem(Number(el.dataset.armSalvage)); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-rec-hero]').forEach((el) => el.addEventListener('click', () => {
+      const [heroId, slotRaw] = el.dataset.armRecHero!.split(':');
+      g.reclaimArmoryItemForHero(heroId, Number(slotRaw));
+      rerender();
+    }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-save-loadout]').forEach((el) => el.addEventListener('click', () => { g.saveHeroLoadout(el.dataset.armSaveLoadout!); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-apply-loadout]').forEach((el) => el.addEventListener('click', () => { g.applyHeroLoadout(el.dataset.armApplyLoadout!); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-reclaim-all]').forEach((el) => el.addEventListener('click', () => { g.reclaimAllArmoryItemsForHero(el.dataset.armReclaimAll!); rerender(); }));
+    this.modal.querySelector<HTMLElement>('[data-arm-gear-field]')?.addEventListener('click', () => { g.gearFieldLoadouts(); rerender(); });
     this.modal.querySelectorAll<HTMLElement>('[data-tome]').forEach((el) => el.addEventListener('click', () => { g.buyTome(Number(el.dataset.tome)); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-respec]').forEach((el) => el.addEventListener('click', () => { g.respec(Number(el.dataset.respec)); rerender(); }));
     this.modal.querySelector<HTMLElement>('[data-heal]')?.addEventListener('click', () => { g.healParty(); rerender(); });

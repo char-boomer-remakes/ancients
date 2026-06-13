@@ -3,18 +3,20 @@ import { registerAllContent } from '../data';
 import { Game, newGameSave, SAVE_VERSION } from '../systems/game';
 import { migratePhase4Save } from '../core/phase4';
 import { migratePhase5Save } from '../core/phase5';
+import { migratePhase6Save } from '../core/phase6';
 import type { GameSave } from '../core/types';
 
-// Save migration coverage. v5 adds gameplay-overhaul exploration/stamina
-// fields while preserving the v4 audio/karma/codex migration path.
+// Save migration coverage. v6 adds Armory loadouts while preserving the v4
+// audio/karma/codex and v5 exploration/stamina migration paths.
 
 beforeAll(() => registerAllContent());
 
-describe('save v5 round-trip and migration', () => {
-  it('a fresh save is v5 with audio, karma, and exploration defaults', () => {
+describe('save v6 round-trip and migration', () => {
+  it('a fresh save is v6 with audio, karma, exploration, and Armory defaults', () => {
     const save = newGameSave('juggernaut');
-    expect(save.version).toBe(5);
-    expect(SAVE_VERSION).toBe(5);
+    expect(save.version).toBe(6);
+    expect(SAVE_VERSION).toBe(6);
+    expect(save.loadouts).toEqual({});
     expect(save.reputation).toBe(0);
     expect(save.codexUnlocks).toEqual([]);
     expect(save.journalSeen).toEqual([]);
@@ -43,8 +45,9 @@ describe('save v5 round-trip and migration', () => {
     expect(migrated!.settings.graphics).toEqual({ quality: 'auto', exposure: 0.92, grade: 1, reducedMotion: false });
   });
 
-  it('round-trips a v5 save carrying karma, codex/journal, exploration, and audio channels identically', () => {
+  it('round-trips a v6 save carrying karma, codex/journal, exploration, audio, and loadouts identically', () => {
     const save = newGameSave('crystal-maiden');
+    save.loadouts = { 'crystal-maiden': { Default: ['blink-dagger', null, null, null, null, null] } };
     save.reputation = 7;
     save.codexUnlocks = ['hero:lich', 'region:icewrack', 'raid:roshan-pit'];
     save.journalSeen = ['quest-lich', 'badge:frost-badge'];
@@ -62,7 +65,8 @@ describe('save v5 round-trip and migration', () => {
     const json = JSON.stringify(save);
     const reloaded = Game.migrateSave(JSON.parse(json) as unknown);
     expect(reloaded).not.toBeNull();
-    expect(reloaded!.version).toBe(5);
+    expect(reloaded!.version).toBe(6);
+    expect(reloaded!.loadouts).toEqual(save.loadouts);
     expect(reloaded!.reputation).toBe(7);
     expect(reloaded!.codexUnlocks).toEqual(save.codexUnlocks);
     expect(reloaded!.journalSeen).toEqual(save.journalSeen);
@@ -100,7 +104,8 @@ describe('save v5 round-trip and migration', () => {
 
     const migrated = Game.migrateSave(v3);
     expect(migrated).not.toBeNull();
-    expect(migrated!.version).toBe(5);
+    expect(migrated!.version).toBe(6);
+    expect(migrated!.loadouts).toEqual({});
     expect(migrated!.reputation).toBe(0);
     expect(migrated!.codexUnlocks).toEqual([]);
     expect(migrated!.journalSeen).toEqual([]);
@@ -116,7 +121,7 @@ describe('save v5 round-trip and migration', () => {
     expect(Game.validateSave(migrated!)).toBe(true);
   });
 
-  it('migrates a v2-shaped save all the way to v5', () => {
+  it('migrates a v2-shaped save all the way to v6', () => {
     const v4 = newGameSave('juggernaut');
     const v2 = JSON.parse(JSON.stringify(v4)) as Record<string, unknown>;
     v2.version = 2;
@@ -130,7 +135,8 @@ describe('save v5 round-trip and migration', () => {
 
     const migrated = Game.migrateSave(v2);
     expect(migrated).not.toBeNull();
-    expect(migrated!.version).toBe(5);
+    expect(migrated!.version).toBe(6);
+    expect(migrated!.loadouts).toEqual({});
     expect(migrated!.difficulty).toEqual({});
     expect(migrated!.raidProgress).toEqual({});
     expect(migrated!.reputation).toBe(0);
@@ -148,6 +154,20 @@ describe('save v5 round-trip and migration', () => {
     const once = migratePhase5Save(save);
     const twice = migratePhase5Save(once);
     expect(twice).toEqual(once);
+  });
+
+  it('migratePhase6Save is idempotent and normalizes loadout slots', () => {
+    const save = newGameSave('juggernaut') as GameSave;
+    save.loadouts = { juggernaut: { Default: ['butterfly', null, null, null, null, null] } };
+    const once = migratePhase6Save(save);
+    const twice = migratePhase6Save(once);
+    expect(twice).toEqual(once);
+
+    const legacy = JSON.parse(JSON.stringify(save)) as Record<string, unknown>;
+    legacy.version = 5;
+    legacy.loadouts = { juggernaut: { Default: ['butterfly'] } };
+    const migrated = Game.migrateSave(legacy);
+    expect(migrated?.loadouts.juggernaut.Default).toEqual(['butterfly', null, null, null, null, null]);
   });
 
   it('migratePhase4Save is idempotent on a v4 save', () => {

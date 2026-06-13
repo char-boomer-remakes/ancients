@@ -68,6 +68,24 @@ function soloSave(heroId = 'juggernaut', level = 10, badges: string[] = []): Gam
   return save;
 }
 
+function addBenchHero(save: GameSave, heroId: string, level = 20, items: string[] = []): void {
+  if (!save.recruited.includes(heroId)) save.recruited.push(heroId);
+  save.roster.push({
+    heroId,
+    level,
+    xp: xpForLevel(level),
+    items: rosterItems(items),
+    neutralSlot: null,
+    talentPicks: [0, 0, 0, 0],
+    gambits: AGGRO,
+    echo: freshEchoProgress(),
+    facetIdx: 0,
+    hpPct: 1,
+    manaPct: 1,
+    abilityCooldowns: [0, 0, 0, 0]
+  });
+}
+
 function creepOfTier(tier: CreepDef['tier']): CreepDef {
   const def = [...REG.creeps.values()].find((c) => c.tier === tier);
   if (!def) throw new Error(`no creep of tier ${tier}`);
@@ -305,6 +323,77 @@ describe('Armory and bound loot', () => {
 
     expect(g.gold - goldBefore).toBe(Math.round(REG.item('broadsword').cost * TUNING.sellRatio));
     expect(hero.items.some((it) => it?.defId === 'broadsword')).toBe(false);
+  });
+
+  it('equips and reclaims bound gear on a benched hero without fielding them', () => {
+    const save = soloSave('juggernaut', 20);
+    addBenchHero(save, 'sven', 20);
+    save.inventoryStash = [{ id: 'heart-of-tarrasque', bound: true }];
+    const g = Game.headless(save);
+
+    expect(g.party.map((r) => r.heroId)).toEqual(['juggernaut']);
+    expect(g.equipArmoryItemForHero('sven', 0)).toBe(true);
+    expect(g.inventoryStash).toEqual([]);
+
+    const view = g.armoryView();
+    const sven = view.heroes.find((h) => h.heroId === 'sven')!;
+    expect(sven.fielded).toBe(false);
+    expect(sven.items.some((it) => it?.id === 'heart-of-tarrasque' && it.bound)).toBe(true);
+
+    const saveWithBenchGear = g.buildSave();
+    expect(saveWithBenchGear.party).toEqual(['juggernaut']);
+    expect(saveWithBenchGear.roster.find((r) => r.heroId === 'sven')?.items.some((it) => it?.id === 'heart-of-tarrasque' && it.bound)).toBe(true);
+
+    const slot = sven.items.findIndex((it) => it?.id === 'heart-of-tarrasque');
+    expect(g.reclaimArmoryItemForHero('sven', slot)).toBe(true);
+    expect(g.inventoryStash).toContainEqual({ id: 'heart-of-tarrasque', bound: true });
+  });
+
+  it('saves and applies a benched loadout through the Armory', () => {
+    const save = soloSave('juggernaut', 20);
+    addBenchHero(save, 'sven', 20, ['heart-of-tarrasque']);
+    save.roster.find((r) => r.heroId === 'sven')!.items[0] = { id: 'heart-of-tarrasque', bound: true };
+    const g = Game.headless(save);
+
+    expect(g.saveHeroLoadout('sven')).toBe(true);
+    expect(g.reclaimAllArmoryItemsForHero('sven')).toBe(1);
+    expect(g.armoryView().heroes.find((h) => h.heroId === 'sven')!.items.every((it) => !it?.bound)).toBe(true);
+
+    const applied = g.applyHeroLoadout('sven');
+    expect(applied.ok).toBe(true);
+    expect(g.armoryView().heroes.find((h) => h.heroId === 'sven')!.items.some((it) => it?.id === 'heart-of-tarrasque' && it.bound)).toBe(true);
+
+    const roundTrip = Game.migrateSave(JSON.parse(JSON.stringify(g.buildSave())) as unknown)!;
+    expect(roundTrip.loadouts.sven.Default).toEqual(['heart-of-tarrasque', null, null, null, null, null]);
+  });
+
+  it('gears fielded loadouts and reports contention for single-copy claims', () => {
+    const save = fullPartySave(20);
+    save.inventoryStash = [{ id: 'butterfly', bound: true }, { id: 'heart-of-tarrasque', bound: true }];
+    const g = Game.headless(save);
+    g.loadouts = {
+      juggernaut: { Default: ['butterfly', null, null, null, null, null] },
+      sven: { Default: ['heart-of-tarrasque', null, null, null, null, null] }
+    };
+
+    const geared = g.gearFieldLoadouts();
+    expect(geared.applied).toBe(2);
+    expect(g.armoryView().heroes.find((h) => h.heroId === 'juggernaut')!.items.some((it) => it?.id === 'butterfly')).toBe(true);
+    expect(g.armoryView().heroes.find((h) => h.heroId === 'sven')!.items.some((it) => it?.id === 'heart-of-tarrasque')).toBe(true);
+
+    const conflictSave = fullPartySave(20);
+    conflictSave.roster[0].items[0] = { id: 'butterfly', bound: true };
+    const conflicted = Game.headless(conflictSave);
+    conflicted.loadouts = {
+      juggernaut: { Default: ['butterfly', null, null, null, null, null] },
+      sven: { Default: ['butterfly', null, null, null, null, null] }
+    };
+
+    const conflicts = conflicted.loadoutConflicts();
+    expect(conflicts).toEqual([{ itemId: 'butterfly', requested: 2, owned: 1, claimedBy: ['juggernaut', 'sven'] }]);
+    const blocked = conflicted.gearFieldLoadouts();
+    expect(blocked.applied).toBe(0);
+    expect(blocked.conflicts.length).toBe(1);
   });
 });
 

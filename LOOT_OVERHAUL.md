@@ -2,6 +2,8 @@
 
 How a finite Dota item set becomes a real looter without leaving Dota's element. Companion to `SPEC.md` (the design target, especially §4 World & Progression / Raids, §5 Roster & Items, §6 Micro Combat), `DECISIONS.md` (calls already made, especially the M4 economy rows), `COMBAT_OVERHAUL.md` (the live-combat side), and `PROGRESS.md` (what shipped).
 
+> **Addendum:** `MARQUEE_AND_ARMORY_ADDENDUM.md` extends this doc with a second wave of marquee homage bosses/raids (more curated chase) and the **L8** Armory collection layer (gearing the 65-hero bench from one screen, building on the shipped L2 bind-and-move).
+
 Same footing as the rest of the project. **The headless deterministic core (`src/core/`) stays untouched in its resolution layer.** It never imports `three`, never touches the DOM, and stays deterministic for a seed. The drop roller is a pure seeded function alongside `rollLoot`; rarity, quality, and item-appearance metadata stay data the renderer reads, never the sim (`SPEC.md` §1.1). Everything here is additive and reversible, the way Resonance and the combat context were: the existing loot paths (`rollLoot`, `scaledBounty`, neutral drops, the gated-shop guard) stay the tested system of record, and new tables wrap them rather than replace them. `boundary.test.ts` stays green.
 
 ---
