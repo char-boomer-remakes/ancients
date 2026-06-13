@@ -6,7 +6,8 @@ import { REG } from './registry';
 import { SpatialGrid } from './spatial';
 import { applyDamage, attackImpact } from './combat';
 import { applyStatus, execEffects, type EffectCtx } from './effects';
-import { abilityCtx, breakInvis, fireCast, updateUnitActions } from './actions';
+import { abilityCtx, breakInvis, emitBark, fireCast, updateUnitActions } from './actions';
+import { soundForAbility } from './gestures';
 import { thinkUnit } from './controllers';
 import { itemReady } from './items';
 import { makeCreepUnit, makeSummonUnit, Unit, type ItemState } from './unit';
@@ -195,6 +196,7 @@ export class Sim {
     });
     u.heroId = def.id;
     u.animProfile = def.animProfile;
+    u.barks = def.barks;
     u.setupHeroAbilities(def);
     u.autoLevelAbilities(opts.skillOrder ?? def.skillOrder);
     u.ctrl = opts.ctrl;
@@ -307,7 +309,7 @@ export class Sim {
       chargeCount: chargesConsumed
     };
     this.events.emit({ t: 'item-used', uid: u.uid, itemId: def.id });
-    this.events.emit({ t: 'cast', uid: u.uid, abilityId: `item:${def.id}`, vfx: active.vfx, target: target?.uid, point });
+    this.events.emit({ t: 'cast', uid: u.uid, abilityId: `item:${def.id}`, vfx: active.vfx, target: target?.uid, point, sound: soundForAbility(active), timbre: u.animProfile?.voiceTimbre });
     if (active.effects) execEffects(this, u, ctx, active.effects, { target, point });
     breakInvis(this, u);
   }
@@ -913,6 +915,7 @@ export class Sim {
         lastHitByPlayer: killer.uid === this.playerActiveUid
       });
       this.runTriggers(killer, 'on-kill', { other: victim });
+      if (killer.heroId) emitBark(this, killer); // a hero crows over a kill (§3.13), rate-limited
     }
     // on-nearby-death triggers (Flesh Heap)
     for (const u of this.unitsArr) {

@@ -7,7 +7,7 @@ import { cannotAttack, cannotCast, cannotMove, isDisabled } from './status';
 import type { Unit } from './unit';
 import { faceToward, integrateForcedMoves, steerToward } from './movement';
 import { levelArr } from './values';
-import { gestureForAbility } from './gestures';
+import { gestureForAbility, soundForAbility } from './gestures';
 import type { AbilityDef } from './types';
 import type { Sim } from './sim';
 
@@ -347,7 +347,9 @@ export function fireCast(sim: Sim, u: Unit, source: 'ability' | 'item', slot: nu
     }
 
     const ctx = abilityCtx(def, a.level);
-    sim.events.emit({ t: 'cast', uid: u.uid, abilityId: def.id, vfx: def.vfx, target: target?.uid, point });
+    sim.events.emit({ t: 'cast', uid: u.uid, abilityId: def.id, vfx: def.vfx, target: target?.uid, point, sound: soundForAbility(def), timbre: u.animProfile?.voiceTimbre });
+    // Signature (ult) casts speak in-character, rate-limited so they flavor rather than spam (§3.13).
+    if (def.ult) emitBark(sim, u);
     sim.runTriggers(u, 'on-cast', { other: target });
     sim.notifyEnemyCast(u);
 
@@ -372,6 +374,19 @@ export function fireCast(sim: Sim, u: Unit, source: 'ability' | 'item', slot: nu
   }
 }
 
+/** Per-unit bark cadence (sim seconds) so signature lines flavor rather than spam (§3.13). */
+const BARK_COOLDOWN = 6;
+
+/** Emit a deterministic in-character bark from the sim core, rate-limited per unit. */
+export function emitBark(sim: Sim, u: Unit): void {
+  const lines = u.barks;
+  if (!lines || lines.length === 0) return;
+  if (sim.time - u.lastBarkAt < BARK_COOLDOWN) return;
+  u.lastBarkAt = sim.time;
+  const line = lines[sim.rng.int(0, lines.length - 1)];
+  sim.events.emit({ t: 'bark', uid: u.uid, line });
+}
+
 function channelSource(sim: Sim, u: Unit): { def: AbilityDef | null; level: number; ctx: EffectCtx } {
   void sim;
   if (!u.channel) return { def: null, level: 1, ctx: { defId: 'none', level: 1, vfx: { archetype: 'channel', color: '#fff' } } };
@@ -390,7 +405,7 @@ function toggleAbility(sim: Sim, u: Unit, slot: number): void {
   a.toggled = !a.toggled;
   if (a.toggled) {
     a.nextToggleTickAt = sim.time;
-    sim.events.emit({ t: 'cast', uid: u.uid, abilityId: a.def.id, vfx: a.def.vfx });
+    sim.events.emit({ t: 'cast', uid: u.uid, abilityId: a.def.id, vfx: a.def.vfx, sound: soundForAbility(a.def), timbre: u.animProfile?.voiceTimbre });
   } else {
     sim.events.emit({ t: 'status-expire', uid: u.uid, status: 'buff' });
   }

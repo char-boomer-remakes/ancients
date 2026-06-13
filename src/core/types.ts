@@ -733,7 +733,7 @@ export type SimEvent =
   | { t: 'damage'; uid: number; from: number; amount: number; dtype: DamageType; crit?: boolean }
   | { t: 'heal'; uid: number; amount: number }
   | { t: 'death'; uid: number; killer: number }
-  | { t: 'cast'; uid: number; abilityId: string; vfx: VfxSpec; target?: number; point?: Vec2 }
+  | { t: 'cast'; uid: number; abilityId: string; vfx: VfxSpec; target?: number; point?: Vec2; sound?: SoundArchetype; timbre?: string }
   | { t: 'attack-impact'; uid: number; target: number }
   | { t: 'attack-launch'; uid: number; target: number; speed: number }
   | { t: 'projectile-spawn'; pid: number; from: Vec2; vfx: VfxSpec; targetUid?: number; toPoint?: Vec2 }

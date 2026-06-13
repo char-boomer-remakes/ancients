@@ -190,6 +190,10 @@ export class Unit {
   castGesture: AnimGesture | null = null;
   /** Per-hero rig/weight/voice profile, copied from the def for the animator + audio. */
   animProfile?: AnimProfile;
+  /** In-character bark lines, copied from the def; the sim core emits one on triggers (Phase 6 §3.13). */
+  barks?: string[];
+  /** Sim-time of the last emitted bark, for per-unit rate limiting. */
+  lastBarkAt = -100;
   /** Echo units render desaturated and translucent (Phase 6 §3.3). */
   isEcho = false;
 

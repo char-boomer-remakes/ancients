@@ -35,7 +35,7 @@ import { ELITE_DRAFT } from '../data/drafts';
 import { resonanceMods } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { dist } from '../core/math2d';
-import type { BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, EchoProgress, GambitRule, GameSave, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, SimEvent, Vec2 } from '../core/types';
+import type { BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, EchoProgress, GambitRule, GameSave, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, SimEvent, StingerId, Vec2 } from '../core/types';
 import { ProceduralAudio } from '../engine/audio';
 import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
@@ -167,6 +167,7 @@ export interface SceneLike {
 export interface AudioLike {
   setSettings(settings: GameSave['settings']): void;
   handleEvent(ev: SimEvent): void;
+  playStinger(id: StingerId): void;
 }
 
 /** No-op scene for headless (test/CI) runs — no WebGL, no DOM. */
@@ -181,6 +182,7 @@ export class HeadlessScene implements SceneLike {
 export class HeadlessAudio implements AudioLike {
   setSettings(): void {}
   handleEvent(): void {}
+  playStinger(): void {}
 }
 
 export interface GameDeps {
@@ -579,6 +581,7 @@ export class Game {
       this.defeatedGyms.add(gym.id);
       this.badges.add(gym.badgeId);
       this.applyRecruitCeiling(); // a new badge raises the ceiling; banked XP catches up (§3.4)
+      this.audio.playStinger('badge');
       this.msg(`${gym.leader} awards the ${gym.badgeId.replace('-', ' ')}!`, 'good');
       this.autosave('badge');
       return true;
@@ -723,7 +726,7 @@ export class Game {
     }
     this.deliverRaidLoot(def, tier, raidId, clears);
     this.msg(`${def.name} cleared! (clear #${clears + 1})`, 'good');
-    this.audio.handleEvent({ t: 'cast', uid: -1, abilityId: 'stinger:raid-clear', vfx: { archetype: 'global-mark', color: '#ffd27a' } });
+    this.audio.playStinger('raid-clear');
     this.autosave('raid');
     return { won: true, result };
   }
@@ -823,7 +826,7 @@ export class Game {
     if (result.winner === 0) {
       this.eliteFive.championDown = true;
       this.msg('The Champion is dethroned. The ancients answer to you now.', 'good');
-      this.audio.handleEvent({ t: 'cast', uid: -1, abilityId: 'stinger:raid-clear', vfx: { archetype: 'global-mark', color: '#ffd27a' } });
+      this.audio.playStinger('raid-clear');
     } else {
       this.msg('The Champion endures. Sharpen the draft and return.', 'bad');
     }
@@ -2217,6 +2220,7 @@ export class Game {
     const { list, merges } = mergeCreeps(this.caught);
     this.caught = list;
     for (const m of merges) {
+      this.audio.playStinger('merge');
       this.msg(`Merge! 3× ${REG.creep(m.creepId).name} → ${'★'.repeat(m.toStar)}`, 'good');
       // merged-away instances may have been fielded; clean up stale fielded refs
       this.fielded = this.fielded.filter((id) => this.caught.some((c) => c.uid === id));
