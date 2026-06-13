@@ -54,6 +54,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 .btn.small { padding: 4px 10px; font-size: 12px; }
 .btn.tiny { padding: 2px 7px; font-size: 11px; }
 .btn.on { border-color: var(--gold); color: var(--gold); }
+.btn.accent { border-color: var(--accent); color: var(--accent); }
+.btn.accent:hover { background: #1d3450; }
 .btn.big { font-size: 20px; padding: 14px 34px; }
 .btn.warn:hover { border-color: var(--bad); }
 .dim-btn { opacity: 0.75; }
@@ -420,6 +422,59 @@ button:disabled { opacity: 0.45; cursor: default; }
 #trial-choice .tc-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 #trial-choice .tc-btn { background: #2a2350; border-color: #6a5ba8; }
 #trial-choice .tc-btn:hover { background: #3a3070; }
+
+/* ---------- live gym overlay ---------- */
+
+#live-gym-bar {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: rgba(10, 13, 20, 0.92);
+  border: 1px solid #ff9ad5;
+  border-radius: 14px;
+  padding: 8px 16px;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+}
+#live-gym-bar .lg-score { color: #ffe9a8; }
+#live-gym-bar .lg-w { color: #5ad95a; font-weight: 700; }
+#live-gym-bar .lg-l { color: #e05a5a; font-weight: 700; }
+#live-gym-bar .lg-dots { letter-spacing: 2px; color: #67d7ff; }
+#live-gym-bar .lg-dots.foe { color: #e0a05a; }
+
+/* ---------- gambit editor ---------- */
+
+.gambit-editor .ge-presets { margin-bottom: 10px; font-size: 12px; color: #9aa3b8; }
+.gambit-editor .ge-rules { display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow-y: auto; }
+.ge-rule { border: 1px solid var(--panel-line); border-radius: 10px; padding: 8px 10px; background: rgba(255, 255, 255, 0.02); }
+.ge-rule-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.ge-rn { width: 20px; height: 20px; border-radius: 50%; background: #2a2350; color: #c9b8ff; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.ge-reorder { display: flex; gap: 3px; }
+.ge-if, .ge-then { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin: 3px 0; }
+.ge-kw { font-size: 11px; font-weight: 700; color: #ffd87a; width: 36px; }
+.ge-chip { display: inline-flex; align-items: center; gap: 3px; background: rgba(106, 91, 168, 0.18); border-radius: 8px; padding: 2px 5px; }
+.ge-and { font-size: 10px; color: #9aa3b8; margin: 0 2px; }
+.ge-at { color: #9aa3b8; }
+.ge-sel { background: #14171f; color: #e8e8ee; border: 1px solid var(--panel-line); border-radius: 6px; padding: 2px 4px; font-size: 12px; }
+.ge-num { width: 56px; background: #14171f; color: #e8e8ee; border: 1px solid var(--panel-line); border-radius: 6px; padding: 2px 4px; font-size: 12px; }
+.ge-x { background: #20242f; color: #c8c8d4; border: 1px solid var(--panel-line); border-radius: 6px; width: 22px; height: 22px; cursor: pointer; font-size: 11px; padding: 0; }
+.ge-x:disabled { opacity: 0.35; cursor: default; }
+.ge-foot { display: flex; justify-content: space-between; margin-top: 12px; }
+
+/* ---------- gym pre-fight ---------- */
+
+.prefight .pf-theme { font-style: italic; color: #c9b8ff; }
+.prefight .pf-roster { display: flex; flex-direction: column; gap: 6px; }
+.pf-hero { display: flex; gap: 10px; align-items: center; }
+.pf-hero img { width: 40px; height: 40px; border-radius: 8px; }
+.pf-hero .pf-main { flex: 1; }
+.prefight .pf-enemy { color: #e0a05a; line-height: 1.7; }
+.prefight .pf-foot { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+.btn.big { padding: 8px 22px; font-size: 14px; }
 
 /* ---------- modals ---------- */
 

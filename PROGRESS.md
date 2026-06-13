@@ -36,7 +36,7 @@ Phase 6 holds Phases 2–4 to the **standalone specs'** bar, not the looser in-r
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | Gyms 1–2 beatable end-to-end with player-authored gambits | PARTIAL — gym reachable; player-authored-gambit + 8-gym proof → P6 M3 |
+| 1 | Gyms 1–2 beatable end-to-end with player-authored gambits | PASS — all 8 gyms proven winnable with authored gambits + live Captain Calls, P6 M3 |
 | 2 | Echo kill visibly unlocks a talent branch | PASS |
 | 3 | All 6 recruitment trials completable | PASS — real `TrialRunner`, P6 M2 (was a 3-click stub) |
 | 4 | Tests: silence interrupts channel | PASS |
@@ -136,8 +136,8 @@ Phase 4 also leaves the **animation gesture player** (drives every ability/item 
 | 2a | Recruitment is Find → Trial → Bind: shard-gated Find, a runner per trial kind (≥12 bespoke + templates), failure relocates not locks | PASS — M2 |
 | 2b | Reputation gates a recruit both above and below threshold; Souls Pact lowers it | PASS — M2 |
 | 2c | Echoes fight with the gambit controller, ×0.6 HP tax, no item slots, echo visual flag | PASS — M2 |
-| 2d | Gambit editor: ordered ≤8-rule dropdown builder; presets populate it; gambits drive macro fights | OPEN → M3 |
-| 2e | Player Captain Calls in live gym fights (3 charges, shown); gyms grant enemy `enemyBonusCaptainCalls` | OPEN → M3 |
+| 2d | Gambit editor: ordered ≤8-rule dropdown builder; presets populate it; gambits drive macro fights | PASS — M3 |
+| 2e | Player Captain Calls in live gym fights (3 charges, shown); gyms grant enemy `enemyBonusCaptainCalls` | PASS — M3 |
 | 2f | Recruit level ceiling rises with badges; TV→Nightsilver requires the first recruit | PASS — M2 |
 
 **Phase 3 finished for real**
@@ -181,8 +181,8 @@ Phase 4 also leaves the **animation gesture player** (drives every ability/item 
 | 3 | trial-completion — each runner reaches complete on success and fail→relocation (shards to floor, not locked) | PASS — M2 |
 | 4 | bind-duel-runs — the Bind 1v1 resolves for every recruit chain in the roster | PASS — M2 |
 | 5 | reputation-gate — good-karma gate opens above / shut below; Souls Pact lowers karma | PASS — M2 |
-| 6 | gym-winnable — fixed-seed Bo3 with player-authored gambits beats all 8 gyms; enemy gets bonus calls | OPEN → M3 |
-| 7 | captain-call-live — player Captain Call attaches/reverts in a live gym fight, decrements counter | OPEN → M3 |
+| 6 | gym-winnable — fixed-seed Bo3 with player-authored gambits beats all 8 gyms; enemy gets bonus calls | PASS — M3 |
+| 7 | captain-call-live — player Captain Call attaches/reverts in a live gym fight, decrements counter | PASS — M3 |
 | 8 | recruit-ceiling — cap is `[15,22,30]` by badges; XP banks past the cap | PASS — M2 |
 | 9 | boss-rerun-live — Nightmare boss in the loop, scaled stats + scaled loot to inventory; Hell gates; pity | OPEN → M4 |
 | 10 | reward-scaling-live — deeper region / higher tier / higher creep star yields more; post-cap XP→gold | OPEN → M4 |
@@ -234,3 +234,4 @@ _Pending M9 — the visual 30-unit/200-projectile harness records steady-state f
 - 2026-06-12: Presentation-spec reward slice: kill/last-hit/overflow/echo/sell gold now emits one presentation event, coin SFX uses a 1.5s pitch ladder, gold flies to an animated count-up counter with streak badge, last-hit gold calls out +15%, and crits get larger magnitude-scaled text plus a sharper impact sound. `npm run typecheck`, `npm run build`, and `npm test` green; browser smoke verified title -> starter -> in-game HUD gold counter on a fresh Vite server.
 - 2026-06-13: Phase 6 kickoff + M1 (save v4): reconciled `PROGRESS.md` to the standalone Phase 2–4 bar (helper-only rows annotated `→ P6 Mn`), added the Phase 6 acceptance/test-matrix/demo sections. Bumped `SAVE_VERSION` 3→4; added `reputation`, `codexUnlocks`, `journalSeen`, and the `settings.audio` channel object; v2→v3→v4 migration chain folds the loose volume fields and preserves an existing audio object. New tuning fields for recruit ceiling, relocation floor, find shards, reputation gates, echo tax/leash, trial time, roster-legend, voice cap. `src/test/save-v4.test.ts` covers fresh/round-trip/v3→v4/v2→v4.
 - 2026-06-13: Phase 6 M2 (recruitment + reputation, Phase 2 core): rewrote `tryRecruit`/`advanceAttunement` into a shard-gated Find → `TrialRunner` → Bind chain; added `core/trials.ts` (nine mechanics across all trial kinds incl. new `souls-pact`/`stealth-hunt`, plus `trialGateOpen` for reputation/roster/raid gates), `core/echo-unit.ts` (gambit-driven, ×0.6 HP, no slots, `isEcho` flag + translucent render, overworld leash), reputation karma with both-way gates, fail→relocation to alternate in-region spots with shards reset to the floor, recruit level ceiling `[15,22,30]` by badges with XP banking, and the `requiresRecruits:1` TV→Nightsilver gate. Added a headless `Game` seam (`Game.headless`, `SceneLike`/`AudioLike`) and a trial-choice HUD panel. `src/test/recruitment.test.ts` covers tests 1–5 + 8 + the TV gate. `npm run build` + `npm test` green.
+- 2026-06-13: Phase 6 M3 (gambit editor + live Captain Calls + 8-gym proof): replaced the headless-only gym round runner with `LiveGymFight` (`systems/macro-session.ts`) — a stepped best-of-3 carrying a player Captain Call controller (3) and an enemy one (3 + `enemyBonusCaptainCalls`) with an auto-call AI; `runGymMatch` runs it headlessly so both paths share one engine. Wired a live, rendered gym fight into `Game` (`startLiveGym`/`updateLiveGym`/`liveGymPlayerCall`, scene sim-swap with `scene.resetUnitViews()`), a Space/HUD-button player call, and a live overlay (round score + both teams' charges). Built the gambit dropdown rule builder (ordered, reorderable ≤8 rules, condition+action selects, presets populate it) and a gym pre-fight screen (Fight Live / Auto-Resolve, per-hero Edit rules). `src/test/gyms.test.ts` covers tests 6 (all 8 gyms winnable with authored gambits, enemy bonus calls) + 7 (captain-call-live attach/revert/decrement). Build + 707 tests green; browser smoke (port 5174) verified the editor opens in-game with zero console errors.

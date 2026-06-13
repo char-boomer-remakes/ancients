@@ -175,6 +175,14 @@ export class InputController {
       this.onToggleMenu();
       return;
     }
+    // live gym fight (§3.5): Space spends a Captain Call; other overworld keys are inert
+    if (this.game.liveGym) {
+      if (key === ' ' || key === 'spacebar') {
+        e.preventDefault();
+        this.game.liveGymPlayerCall();
+      }
+      return;
+    }
     if (this.uiModalOpen) {
       if (key === 'tab' || key === 'b') {
         e.preventDefault();

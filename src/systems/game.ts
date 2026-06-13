@@ -17,7 +17,7 @@ import { dist } from '../core/math2d';
 import type { CreepInstanceSave, EchoProgress, GambitRule, GameSave, ItemSave, Order, QuestProgress, RegionDef, SimEvent, Vec2 } from '../core/types';
 import { ProceduralAudio } from '../engine/audio';
 import { GameScene } from '../engine/scene';
-import { runGymMatch } from './macro-session';
+import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
 
 // ------------------------------------------------------------------
 // Overworld orchestration (SPEC layout: /src/systems/): party, swap,
@@ -205,6 +205,12 @@ export class Game {
   private faintTickAt = 0;
   private createdAt = 0;
   private queuedOrders: Order[] = [];
+
+  /** Active live gym fight (§3.5): when set, update() steps + renders it instead of the overworld. */
+  liveGym: LiveGymFight | null = null;
+  private liveGymId: string | null = null;
+  /** HUD hook: open the gym pre-fight screen (§3.5). Null in headless. */
+  onOpenGymPrefight: ((gymId: string) => void) | null = null;
 
   toasts: Toast[] = [];
   /** events the HUD wants this frame (damage floaters, gold, barks) */
@@ -416,7 +422,14 @@ export class Game {
 
   tryInteract(): boolean {
     const gym = this.nearbyGym();
-    if (gym) return this.challengeGym(gym.gymId);
+    if (gym) {
+      if (!this.gymStartGuard(gym.gymId)) return false;
+      if (this.onOpenGymPrefight) {
+        this.onOpenGymPrefight(gym.gymId);
+        return true;
+      }
+      return this.challengeGym(gym.gymId);
+    }
     return this.tryTravel();
   }
 
@@ -447,7 +460,17 @@ export class Game {
     return true;
   }
 
-  challengeGym(gymId: string): boolean {
+  /** The current party as a gym/macro team (heroId, level, items, authored gambits). */
+  gymPlayerTeam(): GymMatchHero[] {
+    return this.party.slice(0, 5).map((r) => ({
+      heroId: r.heroId,
+      level: r.unit ? r.unit.level : r.level,
+      items: r.items.map((i) => i?.id).filter((id): id is string => !!id),
+      gambits: r.gambits.length > 0 ? r.gambits : undefined
+    }));
+  }
+
+  private gymStartGuard(gymId: string): boolean {
     const gym = REG.gym(gymId);
     if (this.defeatedGyms.has(gymId)) {
       this.msg(`${gym.name} already cleared`, 'info');
@@ -457,16 +480,62 @@ export class Game {
       this.msg(`${gym.name} requires a full party of 5 heroes`, 'bad');
       return false;
     }
-    const result = runGymMatch(
-      gym,
-      this.party.slice(0, 5).map((r) => ({
-        heroId: r.heroId,
-        level: r.level,
-        items: r.items.map((i) => i?.id).filter((id): id is string => !!id),
-        gambits: r.gambits.length > 0 ? r.gambits : undefined
-      })),
-      this.region.seed + Math.round(this.playtime)
-    );
+    return true;
+  }
+
+  /** Headless / auto-resolve path: simulate the best-of-3 to a result immediately. */
+  challengeGym(gymId: string): boolean {
+    if (!this.gymStartGuard(gymId)) return false;
+    const gym = REG.gym(gymId);
+    const result = runGymMatch(gym, this.gymPlayerTeam(), this.region.seed + Math.round(this.playtime));
+    return this.applyGymResult(gymId, result);
+  }
+
+  /** Live path (§3.5): step + render a real fight where the player spends Captain Calls. */
+  startLiveGym(gymId: string): boolean {
+    if (this.liveGym) return false;
+    if (!this.gymStartGuard(gymId)) return false;
+    const gym = REG.gym(gymId);
+    this.liveGym = new LiveGymFight(gym, this.gymPlayerTeam(), this.region.seed + Math.round(this.playtime));
+    this.liveGymId = gymId;
+    this.scene.resetUnitViews(); // gym sim uids must not alias overworld views
+    this.msg(`${gym.name}: best of ${gym.bestOf}. Spend Captain Calls (Space) to seize a hero.`, 'info');
+    return true;
+  }
+
+  /** Player spends a Captain Call on an ult-ready hero in the live gym fight. */
+  liveGymPlayerCall(): boolean {
+    if (!this.liveGym) return false;
+    const ok = this.liveGym.playerCaptainCall();
+    if (!ok) this.msg('No Captain Call available', 'bad');
+    return ok;
+  }
+
+  private updateLiveGym(dt: number): void {
+    const fight = this.liveGym;
+    if (!fight) return;
+    if (!this.paused) fight.step(Math.min(dt, 0.1));
+    for (const ev of fight.sim.events.drain()) {
+      this.scene.pushEvent(ev, fight.sim);
+      this.audio.handleEvent(ev);
+    }
+    this.scene.update(fight.sim, fight.cameraFollow(), dt, 0.5);
+    if (fight.done && fight.result) {
+      const id = this.liveGymId!;
+      const result = fight.result;
+      this.endLiveGym();
+      this.applyGymResult(id, result);
+    }
+  }
+
+  private endLiveGym(): void {
+    this.liveGym = null;
+    this.liveGymId = null;
+    this.scene.resetUnitViews(); // drop gym views so the overworld re-syncs cleanly
+  }
+
+  private applyGymResult(gymId: string, result: GymMatchResult): boolean {
+    const gym = REG.gym(gymId);
     this.msg(`${gym.name}: ${result.playerWins}-${result.enemyWins}`, result.winner === 0 ? 'good' : 'bad');
     if (result.winner === 0) {
       this.defeatedGyms.add(gym.id);
@@ -1626,6 +1695,10 @@ export class Game {
   // ---------- main update ----------
 
   update(realDt: number): void {
+    if (this.liveGym) {
+      this.updateLiveGym(realDt);
+      return;
+    }
     if (this.paused) {
       this.scene.update(this.sim, this.activeUnit(), 0, this.dayTime);
       return;

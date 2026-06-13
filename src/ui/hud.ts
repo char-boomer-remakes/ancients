@@ -8,7 +8,7 @@ import { abilityIcon, itemIcon, heroPortrait } from '../engine/icons';
 import { WORLD_SCALE } from '../engine/scale';
 import { Game } from '../systems/game';
 import type { InputController } from '../systems/input';
-import type { GambitRule, ItemDef, SimEvent } from '../core/types';
+import type { GambitAction, GambitCondition, GambitRule, GambitTargetMode, ItemDef, SimEvent } from '../core/types';
 import * as THREE from 'three';
 
 // ------------------------------------------------------------------
@@ -55,11 +55,19 @@ export class Hud {
   private hint: HTMLElement;
   private trialChoice: HTMLElement;
   private lastTrialChoiceKey = '';
+  private liveGymBar: HTMLElement;
+  private lastLiveGymKey = '';
+
+  // gambit editor working state (§3.5)
+  private gambitDraft: GambitRule[] = [];
+  private gambitEditRec = -1;
+  private gambitReturnTo: 'party' | 'prefight' | 'none' = 'none';
+  private prefightGymId: string | null = null;
 
   private floaters: Floater[] = [];
   private coinFx: CoinFx[] = [];
   private shownToasts = 0;
-  private modalKind: 'none' | 'party' | 'shop' | 'menu' | 'talents' | 'journal' | 'codex' = 'none';
+  private modalKind: 'none' | 'party' | 'shop' | 'menu' | 'talents' | 'journal' | 'codex' | 'gambit' | 'prefight' = 'none';
   private captureUntil = 0;
   private captureDur = 1;
   private vec = new THREE.Vector3();
@@ -89,6 +97,7 @@ export class Hud {
       <div id="hero-panel"></div>
       <div id="hud-hint"></div>
       <div id="trial-choice" class="hidden"></div>
+      <div id="live-gym-bar" class="hidden"></div>
       <div id="modal-root" class="hidden"></div>
     `;
     this.topBar = this.root.querySelector('#top-bar')!;
@@ -106,6 +115,12 @@ export class Hud {
       const btn = (e.target as HTMLElement).closest('[data-choice]') as HTMLElement | null;
       if (btn?.dataset.choice) this.game.resolveTrialChoice(btn.dataset.choice);
     });
+    this.liveGymBar = this.root.querySelector('#live-gym-bar')!;
+    this.liveGymBar.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('[data-livegym]') as HTMLElement | null;
+      if (btn?.dataset.livegym === 'call') this.game.liveGymPlayerCall();
+    });
+    this.game.onOpenGymPrefight = (gymId) => this.openGymPrefight(gymId);
     this.displayGold = this.game.gold;
     this.goldTweenFrom = this.game.gold;
     this.goldTweenTo = this.game.gold;
@@ -143,9 +158,10 @@ export class Hud {
     this.updateCaptureBar();
     this.renderHint();
     this.renderTrialChoice();
+    this.renderLiveGym();
     if (this.modalKind === 'shop' || this.modalKind === 'party') this.refreshModalDynamic();
-    // auto-open talent picker
-    if (this.modalKind === 'none') {
+    // auto-open talent picker (never over a live gym fight or a blocking modal)
+    if (this.modalKind === 'none' && !this.game.liveGym) {
       const rec = this.game.party[this.game.activeIdx];
       if (rec && this.game.pendingTalentTier(rec) >= 0) this.toggleModal('talents');
     }
@@ -667,6 +683,7 @@ export class Hud {
   }
 
   closeModal(): void {
+    if (this.modalKind === 'gambit') this.commitGambit();
     this.modalKind = 'none';
     this.input.uiModalOpen = false;
     this.modal.classList.add('hidden');
@@ -709,6 +726,7 @@ export class Hud {
               <button class="btn tiny" data-gambit="${i}:default">Default</button>
               <button class="btn tiny" data-gambit="${i}:aggro">Aggro</button>
               <button class="btn tiny" data-gambit="${i}:safe">Safe</button>
+              <button class="btn tiny accent" data-gambit-edit="${i}">Edit rules</button>
             </div>
           </div>
         </div>`;
@@ -770,6 +788,9 @@ export class Hud {
         this.renderPartyModal();
       });
     });
+    this.modal.querySelectorAll('[data-gambit-edit]').forEach((el) => {
+      el.addEventListener('click', () => this.openGambitEditor(Number((el as HTMLElement).dataset.gambitEdit), 'party'));
+    });
   }
 
   private gambitPreset(preset: 'aggro' | 'safe'): GambitRule[] {
@@ -787,6 +808,332 @@ export class Hud {
       { if: [{ k: 'ability-ready', slot: 0 }, { k: 'distance-to-focus-lt', dist: 700 }], then: { k: 'cast', slot: 0, targetMode: 'focus' } },
       { if: [{ k: 'always' }], then: { k: 'attack-focus' } }
     ];
+  }
+
+  // --- gambit editor (§3.5): an ordered, reorderable ≤8-rule dropdown builder ---
+
+  private static readonly COND_KINDS = [
+    'always', 'self-hp-below', 'ally-hp-below', 'enemy-hp-below', 'self-mana-above', 'self-mana-below',
+    'enemies-within', 'allies-alive', 'ability-ready', 'fight-time-gt', 'distance-to-focus-gt', 'distance-to-focus-lt'
+  ];
+  private static readonly COND_LABEL: Record<string, string> = {
+    'always': 'Always', 'self-hp-below': 'My HP <', 'ally-hp-below': 'Ally HP <', 'enemy-hp-below': 'Enemy HP <',
+    'self-mana-above': 'My mana >', 'self-mana-below': 'My mana <', 'enemies-within': 'Enemies within',
+    'allies-alive': 'Allies alive ≥', 'ability-ready': 'Ability ready', 'fight-time-gt': 'Fight time >',
+    'distance-to-focus-gt': 'Focus farther than', 'distance-to-focus-lt': 'Focus closer than'
+  };
+  private static readonly ACT_KINDS = ['cast', 'use-item', 'attack-focus', 'retreat', 'hold'];
+  private static readonly ACT_LABEL: Record<string, string> = {
+    'cast': 'Cast ability', 'use-item': 'Use item', 'attack-focus': 'Attack focus', 'retreat': 'Retreat', 'hold': 'Hold'
+  };
+  private static readonly TARGET_MODES = ['focus', 'lowest-hp-enemy', 'most-clustered', 'lowest-hp-ally', 'self'];
+  private static readonly TARGET_LABEL: Record<string, string> = {
+    'focus': 'focus', 'lowest-hp-enemy': 'lowest-HP enemy', 'most-clustered': 'most clustered', 'lowest-hp-ally': 'lowest-HP ally', 'self': 'self'
+  };
+  private static readonly SLOT_LABEL = ['Q', 'W', 'E', 'R'];
+
+  openGambitEditor(recIdx: number, returnTo: 'party' | 'prefight'): void {
+    const rec = this.game.party[recIdx];
+    if (!rec) return;
+    this.commitGambit(); // flush any prior edit
+    this.gambitEditRec = recIdx;
+    this.gambitReturnTo = returnTo;
+    this.gambitDraft = rec.gambits.length > 0
+      ? structuredClone(rec.gambits)
+      : buildDefaultGambit(REG.hero(rec.heroId).roles);
+    this.modalKind = 'gambit';
+    this.input.uiModalOpen = true;
+    this.modal.classList.remove('hidden');
+    this.game.paused = false;
+    this.renderGambitModal();
+  }
+
+  private commitGambit(): void {
+    if (this.gambitEditRec >= 0 && this.gambitDraft.length > 0) {
+      this.game.setGambits(this.gambitEditRec, this.gambitDraft);
+    }
+    this.gambitEditRec = -1;
+  }
+
+  private defaultCondition(kind: string): GambitCondition {
+    switch (kind) {
+      case 'self-hp-below': return { k: 'self-hp-below', pct: 40 };
+      case 'ally-hp-below': return { k: 'ally-hp-below', pct: 45 };
+      case 'enemy-hp-below': return { k: 'enemy-hp-below', pct: 40 };
+      case 'self-mana-above': return { k: 'self-mana-above', pct: 50 };
+      case 'self-mana-below': return { k: 'self-mana-below', pct: 30 };
+      case 'enemies-within': return { k: 'enemies-within', radius: 600, count: 2 };
+      case 'allies-alive': return { k: 'allies-alive', count: 3 };
+      case 'ability-ready': return { k: 'ability-ready', slot: 3 };
+      case 'fight-time-gt': return { k: 'fight-time-gt', sec: 5 };
+      case 'distance-to-focus-gt': return { k: 'distance-to-focus-gt', dist: 700 };
+      case 'distance-to-focus-lt': return { k: 'distance-to-focus-lt', dist: 500 };
+      default: return { k: 'always' };
+    }
+  }
+
+  private defaultAction(kind: string, itemId?: string): GambitAction {
+    switch (kind) {
+      case 'cast': return { k: 'cast', slot: 0, targetMode: 'focus' };
+      case 'use-item': return { k: 'use-item', itemId: itemId ?? '', targetMode: 'focus' };
+      case 'retreat': return { k: 'retreat' };
+      case 'hold': return { k: 'hold' };
+      default: return { k: 'attack-focus' };
+    }
+  }
+
+  private condParams(kind: string): { key: string; label: string }[] {
+    switch (kind) {
+      case 'self-hp-below': case 'ally-hp-below': case 'enemy-hp-below':
+      case 'self-mana-above': case 'self-mana-below': return [{ key: 'pct', label: '%' }];
+      case 'enemies-within': return [{ key: 'radius', label: 'radius' }, { key: 'count', label: 'count' }];
+      case 'allies-alive': return [{ key: 'count', label: 'count' }];
+      case 'ability-ready': return [{ key: 'slot', label: 'slot 0-3' }];
+      case 'fight-time-gt': return [{ key: 'sec', label: 'sec' }];
+      case 'distance-to-focus-gt': case 'distance-to-focus-lt': return [{ key: 'dist', label: 'dist' }];
+      default: return [];
+    }
+  }
+
+  private heroItemIds(recIdx: number): string[] {
+    const rec = this.game.party[recIdx];
+    if (!rec) return [];
+    return rec.items.map((i) => i?.id).filter((id): id is string => !!id);
+  }
+
+  private opts(values: string[], labels: Record<string, string>, selected: string): string {
+    return values.map((v) => `<option value="${v}" ${v === selected ? 'selected' : ''}>${labels[v] ?? v}</option>`).join('');
+  }
+
+  private renderGambitModal(): void {
+    const rec = this.game.party[this.gambitEditRec];
+    if (!rec) {
+      this.closeModal();
+      return;
+    }
+    const def = REG.hero(rec.heroId);
+    const items = this.heroItemIds(this.gambitEditRec);
+    const slotOpts = [0, 1, 2, 3].map((s) => `<option value="${s}">${Hud.SLOT_LABEL[s]} (slot ${s})</option>`).join('');
+
+    const ruleRows = this.gambitDraft.map((rule, ri) => {
+      const conds = rule.if.length > 0 ? rule.if : [{ k: 'always' } as GambitCondition];
+      const condChips = conds.map((c, ci) => {
+        const params = this.condParams(c.k).map((p) => {
+          const val = (c as unknown as Record<string, number>)[p.key] ?? 0;
+          return `<input class="ge-num" type="number" data-r="${ri}" data-ci="${ci}" data-field="cond-param" data-param="${p.key}" value="${val}" title="${p.label}">`;
+        }).join('');
+        const del = conds.length > 1 ? `<button class="ge-x" data-r="${ri}" data-ci="${ci}" data-act="cond-del" title="remove condition">×</button>` : '';
+        return `<span class="ge-chip">
+          <select class="ge-sel" data-r="${ri}" data-ci="${ci}" data-field="cond-kind">${this.opts(Hud.COND_KINDS, Hud.COND_LABEL, c.k)}</select>
+          ${params}${del}</span>`;
+      }).join('<span class="ge-and">AND</span>');
+
+      const act = rule.then;
+      let actExtra = '';
+      if (act.k === 'cast') {
+        const sel = `<select class="ge-sel" data-r="${ri}" data-field="act-slot">${slotOpts.replace(`value="${act.slot}"`, `value="${act.slot}" selected`)}</select>`;
+        actExtra = `${sel}<span class="ge-at">@</span><select class="ge-sel" data-r="${ri}" data-field="act-target">${this.opts(Hud.TARGET_MODES, Hud.TARGET_LABEL, act.targetMode)}</select>`;
+      } else if (act.k === 'use-item') {
+        const itemOpts = items.length > 0
+          ? items.map((id) => `<option value="${id}" ${id === act.itemId ? 'selected' : ''}>${REG.item(id).name}</option>`).join('')
+          : '<option value="">(no items)</option>';
+        actExtra = `<select class="ge-sel" data-r="${ri}" data-field="act-item">${itemOpts}</select><span class="ge-at">@</span><select class="ge-sel" data-r="${ri}" data-field="act-target">${this.opts(Hud.TARGET_MODES, Hud.TARGET_LABEL, act.targetMode)}</select>`;
+      }
+
+      return `<div class="ge-rule">
+        <div class="ge-rule-head"><span class="ge-rn">${ri + 1}</span>
+          <div class="ge-reorder">
+            <button class="ge-x" data-r="${ri}" data-act="up" ${ri === 0 ? 'disabled' : ''}>▲</button>
+            <button class="ge-x" data-r="${ri}" data-act="down" ${ri === this.gambitDraft.length - 1 ? 'disabled' : ''}>▼</button>
+            <button class="ge-x" data-r="${ri}" data-act="del" title="delete rule">🗑</button>
+          </div>
+        </div>
+        <div class="ge-if"><span class="ge-kw">IF</span> ${condChips} <button class="btn tiny" data-r="${ri}" data-act="cond-add">+ AND</button></div>
+        <div class="ge-then"><span class="ge-kw">THEN</span>
+          <select class="ge-sel" data-r="${ri}" data-field="act-kind">${this.opts(Hud.ACT_KINDS, Hud.ACT_LABEL, act.k)}</select>
+          ${actExtra}
+        </div>
+      </div>`;
+    }).join('');
+
+    const full = this.gambitDraft.length >= 8;
+    this.modalShell(
+      `Gambits — ${def.name}`,
+      `<div class="gambit-editor">
+        <p class="dim">Rules run top to bottom; the first whose conditions all match fires. Up to 8 rules.</p>
+        <div class="ge-presets">Templates:
+          <button class="btn tiny" data-preset="default">Default</button>
+          <button class="btn tiny" data-preset="aggro">Aggro</button>
+          <button class="btn tiny" data-preset="safe">Safe</button>
+        </div>
+        <div class="ge-rules">${ruleRows || '<p class="dim">No rules. Add one below.</p>'}</div>
+        <div class="ge-foot">
+          <button class="btn" data-act="add-rule" ${full ? 'disabled' : ''}>+ Add rule (${this.gambitDraft.length}/8)</button>
+          <button class="btn accent" data-act="done">Done</button>
+        </div>
+      </div>`
+    );
+    this.wireGambitEditor();
+  }
+
+  private wireGambitEditor(): void {
+    const draft = this.gambitDraft;
+    const rerender = () => this.renderGambitModal();
+    const ruleAt = (el: HTMLElement) => draft[Number(el.dataset.r)];
+
+    this.modal.querySelectorAll<HTMLElement>('[data-field]').forEach((el) => {
+      el.addEventListener('change', () => {
+        const rule = ruleAt(el);
+        if (!rule) return;
+        const field = el.dataset.field!;
+        const value = (el as HTMLInputElement | HTMLSelectElement).value;
+        if (field === 'cond-kind') {
+          rule.if[Number(el.dataset.ci)] = this.defaultCondition(value);
+        } else if (field === 'cond-param') {
+          const cond = rule.if[Number(el.dataset.ci)];
+          if (cond) (cond as unknown as Record<string, number>)[el.dataset.param!] = Number(value);
+        } else if (field === 'act-kind') {
+          rule.then = this.defaultAction(value, this.heroItemIds(this.gambitEditRec)[0]);
+        } else if (field === 'act-slot' && rule.then.k === 'cast') {
+          rule.then.slot = Number(value);
+        } else if (field === 'act-target' && (rule.then.k === 'cast' || rule.then.k === 'use-item')) {
+          rule.then.targetMode = value as GambitTargetMode;
+        } else if (field === 'act-item' && rule.then.k === 'use-item') {
+          rule.then.itemId = value;
+        }
+        rerender();
+      });
+    });
+
+    this.modal.querySelectorAll<HTMLElement>('[data-act]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const act = el.dataset.act!;
+        if (act === 'add-rule') {
+          if (draft.length < 8) draft.push({ if: [{ k: 'ability-ready', slot: 0 }], then: { k: 'attack-focus' } });
+        } else if (act === 'done') {
+          this.commitGambit();
+          if (this.gambitReturnTo === 'prefight' && this.prefightGymId) this.openGymPrefight(this.prefightGymId);
+          else this.toggleModal('party');
+          return;
+        } else {
+          const rule = ruleAt(el);
+          const ri = Number(el.dataset.r);
+          if (!rule) return;
+          if (act === 'up' && ri > 0) [draft[ri - 1], draft[ri]] = [draft[ri], draft[ri - 1]];
+          else if (act === 'down' && ri < draft.length - 1) [draft[ri + 1], draft[ri]] = [draft[ri], draft[ri + 1]];
+          else if (act === 'del') draft.splice(ri, 1);
+          else if (act === 'cond-add') rule.if.push({ k: 'ability-ready', slot: 0 });
+          else if (act === 'cond-del') {
+            rule.if.splice(Number(el.dataset.ci), 1);
+            if (rule.if.length === 0) rule.if.push({ k: 'always' });
+          }
+        }
+        rerender();
+      });
+    });
+
+    this.modal.querySelectorAll<HTMLElement>('[data-preset]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const preset = el.dataset.preset!;
+        const def = REG.hero(this.game.party[this.gambitEditRec].heroId);
+        this.gambitDraft = preset === 'default' ? buildDefaultGambit(def.roles) : this.gambitPreset(preset as 'aggro' | 'safe');
+        this.renderGambitModal();
+      });
+    });
+  }
+
+  // --- gym pre-fight screen (§3.5) ---
+
+  openGymPrefight(gymId: string): void {
+    this.prefightGymId = gymId;
+    this.modalKind = 'prefight';
+    this.input.uiModalOpen = true;
+    this.modal.classList.remove('hidden');
+    this.game.paused = true;
+    this.renderPrefightModal();
+  }
+
+  private renderPrefightModal(): void {
+    const g = this.game;
+    const gym = REG.gym(this.prefightGymId!);
+    const enemyCalls = TUNING.captainCallsPerFight + (gym.enemyBonusCaptainCalls ?? 0);
+    const roster = g.party.slice(0, 5).map((rec, i) => {
+      const def = REG.hero(rec.heroId);
+      const label = rec.gambits.length > 0 ? `${rec.gambits.length} authored rules` : 'default role gambit';
+      const itemBits = rec.items.map((it) => it ? REG.item(it.id).name : null).filter(Boolean).join(', ') || 'no items';
+      return `<div class="pf-hero">
+        <img src="${heroPortrait(def.palette, def.name[0], 40)}" alt="">
+        <div class="pf-main"><b>${def.name}</b> <em>Lv ${rec.unit ? rec.unit.level : rec.level}</em>
+          <div class="rr-sub">${def.roles.join(' / ')} · ${itemBits}</div>
+          <div class="rr-sub">Gambit: ${label} <button class="btn tiny accent" data-pf-edit="${i}">Edit rules</button></div>
+        </div>
+      </div>`;
+    }).join('');
+    const enemy = gym.enemyTeam.map((h) => `${REG.hero(h.heroId).name} <em>Lv ${h.level ?? 10}</em>`).join(' · ');
+
+    this.modalShell(
+      `${gym.name} — ${gym.leader}`,
+      `<div class="prefight">
+        <p class="pf-theme">${gym.theme}</p>
+        <p class="dim">Best of ${gym.bestOf}. You hold <b>${TUNING.captainCallsPerFight} Captain Calls</b>; ${gym.leader}'s side gets <b>${enemyCalls}</b>. Spend a call (Space or the button) to seize an ult-ready hero for ${TUNING.captainCallSec}s.</p>
+        <h3>Your five</h3>
+        <div class="pf-roster">${roster}</div>
+        <h3>Opposition</h3>
+        <p class="pf-enemy">${enemy}</p>
+        <div class="pf-foot">
+          <button class="btn accent big" data-pf="live">Fight Live</button>
+          <button class="btn" data-pf="auto">Auto-Resolve</button>
+          <button class="btn" data-pf="cancel">Back</button>
+        </div>
+      </div>`
+    );
+    this.modal.querySelectorAll<HTMLElement>('[data-pf-edit]').forEach((el) => {
+      el.addEventListener('click', () => this.openGambitEditor(Number(el.dataset.pfEdit), 'prefight'));
+    });
+    this.modal.querySelectorAll<HTMLElement>('[data-pf]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const action = el.dataset.pf;
+        const gymId = this.prefightGymId!;
+        if (action === 'live') {
+          this.closeModal();
+          this.game.startLiveGym(gymId);
+        } else if (action === 'auto') {
+          this.closeModal();
+          this.game.challengeGym(gymId);
+        } else {
+          this.closeModal();
+        }
+      });
+    });
+  }
+
+  // --- live gym overlay (§3.5): round score + both teams' Captain Call charges ---
+
+  private renderLiveGym(): void {
+    const fight = this.game.liveGym;
+    if (!fight) {
+      if (!this.liveGymBar.classList.contains('hidden')) {
+        this.liveGymBar.classList.add('hidden');
+        this.lastLiveGymKey = '';
+      }
+      return;
+    }
+    const pc = fight.playerCaptain;
+    const ec = fight.enemyCaptain;
+    const active = pc.activeUid !== null;
+    const key = `${fight.gym.id}|${fight.round}|${fight.playerWins}-${fight.enemyWins}|${pc.remaining}|${active}|${ec.remaining}`;
+    if (key === this.lastLiveGymKey) return;
+    this.lastLiveGymKey = key;
+    const dots = (remaining: number, total: number) => '●'.repeat(Math.max(0, remaining)) + '○'.repeat(Math.max(0, total - remaining));
+    const pcTotal = TUNING.captainCallsPerFight;
+    const ecTotal = TUNING.captainCallsPerFight + (fight.gym.enemyBonusCaptainCalls ?? 0);
+    const canCall = pc.remaining > 0 && !active;
+    this.liveGymBar.innerHTML = `
+      <div class="lg-score"><b>${fight.gym.name}</b> · Round ${fight.round} · <span class="lg-w">${fight.playerWins}</span>–<span class="lg-l">${fight.enemyWins}</span></div>
+      <div class="lg-calls">You <span class="lg-dots">${dots(pc.remaining, pcTotal)}</span></div>
+      <div class="lg-calls">Foe <span class="lg-dots foe">${dots(ec.remaining, ecTotal)}</span></div>
+      <button class="btn accent" data-livegym="call" ${canCall ? '' : 'disabled'}>${active ? 'Call active…' : 'Captain Call (Space)'}</button>`;
+    this.liveGymBar.classList.remove('hidden');
   }
 
   // --- shop ---

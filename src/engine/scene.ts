@@ -158,6 +158,16 @@ export class GameScene {
     this.renderer.render(this.scene, this.camera);
   }
 
+  /** Drop every cached unit view + transient VFX. Used when the rendered sim
+   *  is swapped (e.g. entering/leaving a live gym fight) so unit ids from the
+   *  new sim never alias views built for the old one. */
+  resetUnitViews(): void {
+    for (const [, view] of this.views) this.scene.remove(view.rig.root);
+    this.views.clear();
+    this.selectedUid = -1;
+    this.vfx.reset();
+  }
+
   private createMapMarkers(region: RegionDef): void {
     const add = (x: number, y: number, radius: number, color: number, shape: 'ring' | 'disc' = 'disc'): void => {
       const geo = shape === 'ring'

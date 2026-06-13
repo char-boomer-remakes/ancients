@@ -162,6 +162,21 @@ export class VfxManager {
     }
   }
 
+  /** Remove every live transient, projectile, and zone from the scene graph.
+   *  Used when the rendered sim is swapped (live gym fight enter/exit). */
+  reset(): void {
+    for (const tr of this.transients) this.group.remove(tr.obj);
+    this.transients.length = 0;
+    for (const [, entry] of this.projectiles) {
+      this.group.remove(entry.obj);
+      if (entry.trail) this.group.remove(entry.trail);
+    }
+    this.projectiles.clear();
+    this.projectileSeen.clear();
+    for (const [, z] of this.zones) this.group.remove(z.obj);
+    this.zones.clear();
+  }
+
   update(dt: number): void {
     this.time += dt;
     const t = this.time;
