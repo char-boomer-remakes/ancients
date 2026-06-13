@@ -7,6 +7,7 @@ import { cannotAttack, cannotCast, cannotMove, isDisabled } from './status';
 import type { Unit } from './unit';
 import { faceToward, integrateForcedMoves, steerToward } from './movement';
 import { levelArr } from './values';
+import { gestureForAbility } from './gestures';
 import type { AbilityDef } from './types';
 import type { Sim } from './sim';
 
@@ -316,6 +317,7 @@ function handleCastOrder(sim: Sim, u: Unit, dt: number): void {
     point: point ? { ...point } : undefined
   };
   u.castingUntil = sim.time + cp + 0.25;
+  u.castGesture = gestureForAbility(def);
   u.order = { kind: 'stop' };
   breakInvis(sim, u);
 }
@@ -456,6 +458,9 @@ function handleItemOrder(sim: Sim, u: Unit, dt: number): void {
   }
 
   u.order = { kind: 'stop' };
+  // A pressed item reads on the body for a brief beat (Phase 6 §3.11).
+  u.castGesture = gestureForAbility(active);
+  u.castingUntil = Math.max(u.castingUntil, sim.time + 0.35);
   sim.fireItemActive(u, slot, target, point);
 }
 

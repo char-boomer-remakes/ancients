@@ -53,7 +53,9 @@ export const SVEN: HeroDef = {
           }
         }
       ],
-      vfx: { archetype: 'projectile', color: '#6db7ff', color2: '#ffffff', scale: 0.9 }
+      vfx: { archetype: 'projectile', color: '#6db7ff', color2: '#ffffff', scale: 0.9 },
+      anim: 'ranged-shot',
+      sound: 'impact'
     },
     {
       id: 'sven-great-cleave',
@@ -65,7 +67,9 @@ export const SVEN: HeroDef = {
         radius: [650, 650, 650, 650]
       },
       attackMod: { cleave: { pct: 'cleave', radius: 'radius' } },
-      vfx: { archetype: 'chain', color: '#9fd8ff', scale: 0.5 }
+      vfx: { archetype: 'chain', color: '#9fd8ff', scale: 0.5 },
+      anim: 'melee-swing',
+      sound: 'blade'
     },
     {
       id: 'sven-warcry',
@@ -84,7 +88,9 @@ export const SVEN: HeroDef = {
       effects: [
         { kind: 'statmod', mods: { armor: 'armor', moveSpeedPct: 'move' }, duration: 'duration', target: 'allies-in-radius', radius: 'radius' }
       ],
-      vfx: { archetype: 'shield', color: '#7fb7ff', color2: '#d8e8ff', scale: 0.9 }
+      vfx: { archetype: 'shield', color: '#7fb7ff', color2: '#d8e8ff', scale: 0.9 },
+      anim: 'melee-swing',
+      sound: 'roar'
     },
     {
       id: 'sven-gods-strength',
@@ -102,7 +108,9 @@ export const SVEN: HeroDef = {
       effects: [
         { kind: 'statmod', mods: { damagePct: 'damagePct' }, duration: 'duration', target: 'self' }
       ],
-      vfx: { archetype: 'global-mark', color: '#ff6d4a', color2: '#ffd27f', scale: 1.2 }
+      vfx: { archetype: 'global-mark', color: '#ff6d4a', color2: '#ffd27f', scale: 1.2 },
+      anim: 'global-cast',
+      sound: 'roar'
     }
   ],
   talents: [
@@ -161,5 +169,6 @@ export const SVEN: HeroDef = {
     'Storm first. Sermon later.'
   ],
   bounty: { xp: 340, gold: 230 },
-  recruitmentQuestId: 'recruit-sven'
+  recruitmentQuestId: 'recruit-sven',
+  animProfile: { rig: 'fighter', castStyle: 'weapon', voiceTimbre: 'low' }
 };

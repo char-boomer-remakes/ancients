@@ -40,7 +40,9 @@ export const AXE: HeroDef = {
         { kind: 'status', status: 'taunt', duration: 'duration', target: 'enemies-in-radius', radius: 'radius' },
         { kind: 'statmod', mods: { armor: 'armor' }, duration: 'duration', target: 'self' }
       ],
-      vfx: { archetype: 'ground-aoe', color: '#d94a32', color2: '#ffb35c', scale: 0.9 }
+      vfx: { archetype: 'ground-aoe', color: '#d94a32', color2: '#ffb35c', scale: 0.9 },
+      anim: 'ground-slam',
+      sound: 'roar'
     },
     {
       id: 'axe-battle-hunger',
@@ -61,7 +63,9 @@ export const AXE: HeroDef = {
         { kind: 'status', status: 'buff', duration: 'duration', target: 'target', params: { dotDps: 'dps', dotType: 'magical', tag: 'axe-battle-hunger-dot' } },
         { kind: 'status', status: 'slow', duration: 'duration', target: 'target', params: { moveSlowPct: 'slow', tag: 'axe-battle-hunger-slow' } }
       ],
-      vfx: { archetype: 'global-mark', color: '#d94a32', scale: 0.7 }
+      vfx: { archetype: 'global-mark', color: '#d94a32', scale: 0.7 },
+      anim: 'melee-swing',
+      sound: 'roar'
     },
     {
       id: 'axe-counter-helix',
@@ -79,7 +83,9 @@ export const AXE: HeroDef = {
           effects: [{ kind: 'damage', dtype: 'pure', amount: 'damage', target: 'enemies-in-radius', radius: 'radius' }]
         }
       ],
-      vfx: { archetype: 'storm', color: '#c63c2c', color2: '#ffb35c', scale: 0.6 }
+      vfx: { archetype: 'storm', color: '#c63c2c', color2: '#ffb35c', scale: 0.6 },
+      anim: 'melee-swing',
+      sound: 'blade'
     },
     {
       id: 'axe-culling-blade',
@@ -102,7 +108,9 @@ export const AXE: HeroDef = {
         { kind: 'damage', dtype: 'pure', amount: 'damage', target: 'target' },
         { kind: 'statmod', mods: { moveSpeedPct: 'move' }, duration: 'duration', target: 'allies-in-radius', radius: 'radius' }
       ],
-      vfx: { archetype: 'beam', color: '#ff382d', color2: '#ffd27f', scale: 1.1 }
+      vfx: { archetype: 'beam', color: '#ff382d', color2: '#ffd27f', scale: 1.1 },
+      anim: 'melee-swing',
+      sound: 'blade'
     }
   ],
   talents: [
@@ -161,5 +169,6 @@ export const AXE: HeroDef = {
     'The blade voted yes.'
   ],
   bounty: { xp: 340, gold: 230 },
-  recruitmentQuestId: 'recruit-axe'
+  recruitmentQuestId: 'recruit-axe',
+  animProfile: { rig: 'brute', castStyle: 'weapon', voiceTimbre: 'low' }
 };

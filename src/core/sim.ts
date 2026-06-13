@@ -194,6 +194,7 @@ export class Sim {
       level: opts.level ?? 1
     });
     u.heroId = def.id;
+    u.animProfile = def.animProfile;
     u.setupHeroAbilities(def);
     u.autoLevelAbilities(opts.skillOrder ?? def.skillOrder);
     u.ctrl = opts.ctrl;

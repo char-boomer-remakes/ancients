@@ -10,6 +10,8 @@ import {
 } from './status';
 import type {
   AbilityDef,
+  AnimGesture,
+  AnimProfile,
   AttackModSpec,
   Attribute,
   CreepDef,
@@ -184,6 +186,10 @@ export class Unit {
 
   // render hints
   castingUntil = -1;
+  /** Gesture the animator should play during the current cast window (Phase 6 §3.11). */
+  castGesture: AnimGesture | null = null;
+  /** Per-hero rig/weight/voice profile, copied from the def for the animator + audio. */
+  animProfile?: AnimProfile;
   /** Echo units render desaturated and translucent (Phase 6 §3.3). */
   isEcho = false;
 
@@ -544,6 +550,7 @@ export function makeCreepUnit(def: CreepDef, opts: { team: Team; pos: Vec2; star
     radius: TUNING.unitRadiusCreep[def.tier]
   });
   u.creepId = def.id;
+  u.animProfile = def.animProfile;
   u.star = star;
   u.tier = def.tier;
   u.capturable = !!opts.wild;

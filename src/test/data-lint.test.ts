@@ -15,6 +15,7 @@ import { HERO_LIKENESS_PROFILES } from '../engine/models';
 import { PERFORMANCE_BUDGET } from '../engine/performance';
 import type { AbilityDef, AnimGesture, AttackVisualKind, EffectNode, ItemAppearancePart, ItemWeaponVisualKind, SoundArchetype, ValueRef, VfxArchetype } from '../core/types';
 import { abilityMaxLevel } from '../core/values';
+import { gestureForAbility, soundForAbility } from '../core/gestures';
 
 // ============================================================
 // Data lint (SPEC §1.2): every entry validates, every
@@ -106,12 +107,20 @@ function walkEffects(effects: EffectNode[] | undefined, def: AbilityDef, where: 
   }
 }
 
-function lintAbility(def: AbilityDef, where: string, exoticIds: string[]): void {
+function lintAbility(def: AbilityDef, where: string, exoticIds: string[], requireTags = false): void {
   expect(def.id, `${where}: ability id`).toBeTruthy();
   expect(VFX_ARCHETYPES, `${where}/${def.id}: vfx archetype '${def.vfx.archetype}'`).toContain(def.vfx.archetype);
   expectHex(def.vfx.color, `${where}/${def.id}: vfx color`);
-  if (def.anim) expect(ANIM_GESTURES, `${where}/${def.id}: anim '${def.anim}'`).toContain(def.anim);
-  if (def.sound) expect(SOUND_ARCHETYPES, `${where}/${def.id}: sound '${def.sound}'`).toContain(def.sound);
+  // §6: anim/sound are required on every castable ability and item active
+  // (not "if present"). Nested summon sub-abilities stay optional.
+  if (requireTags || def.anim !== undefined) {
+    expect(def.anim, `${where}/${def.id}: anim required`).toBeTruthy();
+    expect(ANIM_GESTURES, `${where}/${def.id}: anim '${def.anim}'`).toContain(def.anim);
+  }
+  if (requireTags || def.sound !== undefined) {
+    expect(def.sound, `${where}/${def.id}: sound required`).toBeTruthy();
+    expect(SOUND_ARCHETYPES, `${where}/${def.id}: sound '${def.sound}'`).toContain(def.sound);
+  }
   walkEffects(def.effects, def, `${where}/${def.id}`, exoticIds);
   if (def.channel) {
     checkValueRef(def.channel.duration, def, `${where}/${def.id}>channel`);
@@ -155,11 +164,10 @@ describe('data lint: heroes', () => {
         expect(hero.barks.length).toBeGreaterThanOrEqual(6);
         expect(hero.baseStats.moveSpeed).toBeGreaterThan(200);
         expect(hero.baseStats.turnRate).toBeGreaterThan(0.2);
-        if (hero.animProfile) {
-          expect(hero.animProfile.rig).toBeTruthy();
-          expect(hero.animProfile.castStyle).toBeTruthy();
-          expect(hero.animProfile.voiceTimbre).toBeTruthy();
-        }
+        expect(hero.animProfile, `${hero.id}: animProfile required`).toBeDefined();
+        expect(hero.animProfile!.rig).toBeTruthy();
+        expect(hero.animProfile!.castStyle).toBeTruthy();
+        expect(hero.animProfile!.voiceTimbre).toBeTruthy();
         expect([...ACTIVE_ELEMENTS, 'neutral']).toContain(elementForHero(hero));
         if (hero.recruitmentQuestId) expect(REG.quests.has(hero.recruitmentQuestId), `${hero.id}: quest ${hero.recruitmentQuestId}`).toBe(true);
         if (!hero.starter) expect(ALL_QUESTS.some((q) => q.heroId === hero.id), `${hero.id}: missing recruitment chain`).toBe(true);
@@ -173,7 +181,7 @@ describe('data lint: heroes', () => {
 
       it('abilities lint clean', () => {
         for (const a of hero.abilities) {
-          lintAbility(a, hero.id, exoticIds);
+          lintAbility(a, hero.id, exoticIds, true);
           expect([...ACTIVE_ELEMENTS, 'neutral'], `${hero.id}/${a.id}: bad element`).toContain(elementForAbility(hero, a.id));
         }
       });
@@ -229,7 +237,7 @@ describe('data lint: items', () => {
       }
       if (item.active) {
         const exoticIds: string[] = [];
-        lintAbility(item.active, `item:${item.id}`, exoticIds);
+        lintAbility(item.active, `item:${item.id}`, exoticIds, true);
         for (const id of exoticIds) expect(REG.exotics.has(id), `item exotic ${id}`).toBe(true);
       }
       if (item.appearance) {
@@ -332,9 +340,10 @@ describe('data lint: creeps', () => {
       expect(creep.stats.maxHp).toBeGreaterThan(0);
       expect(creep.palette.length).toBe(3);
       expect(creep.bounty.xp).toBeGreaterThan(0);
-      if (creep.animProfile) expect(creep.animProfile.rig).toBeTruthy();
+      expect(creep.animProfile, `${creep.id}: animProfile required`).toBeDefined();
+      expect(creep.animProfile!.rig).toBeTruthy();
       const exoticIds: string[] = [];
-      for (const a of creep.abilities) lintAbility(a, creep.id, exoticIds);
+      for (const a of creep.abilities) lintAbility(a, creep.id, exoticIds, true);
       expect(exoticIds.length).toBe(0);
     });
   }
@@ -453,5 +462,65 @@ describe('data lint: Phase 3 registries', () => {
 describe('data lint: exotic budget', () => {
   it('stays within ~25 exotics', () => {
     expect(REG.exotics.size).toBeLessThanOrEqual(25);
+  });
+});
+
+// ============================================================
+// Test 19 — anim-coverage (SPEC §6 / build order #6): every ability
+// and item active carries a valid anim/sound; every hero and creep
+// has an animProfile; the gesture player resolves a gesture for each
+// (including nested summon sub-abilities) without throwing.
+// ============================================================
+
+function collectAbilities(def: AbilityDef, out: AbilityDef[]): void {
+  out.push(def);
+  const buckets: (EffectNode[] | undefined)[] = [def.effects, def.channel?.tick?.effects, def.channel?.onEnd, def.toggle?.effects];
+  for (const effects of buckets) {
+    for (const node of effects ?? []) {
+      if (node.kind === 'summon') for (const sa of node.summon.abilities ?? []) collectAbilities(sa, out);
+      if (node.kind === 'projectile') for (const oh of node.proj.onHit ?? []) {
+        if (oh.kind === 'summon') for (const sa of oh.summon.abilities ?? []) collectAbilities(sa, out);
+      }
+    }
+  }
+}
+
+describe('data lint: anim coverage (test 19)', () => {
+  it('every hero and creep declares an animProfile', () => {
+    for (const hero of ALL_HEROES) expect(hero.animProfile, `${hero.id}: animProfile`).toBeDefined();
+    for (const creep of ALL_CREEPS) expect(creep.animProfile, `${creep.id}: animProfile`).toBeDefined();
+  });
+
+  it('every hero ability + creep ability + item active has a valid anim and sound tag', () => {
+    for (const hero of ALL_HEROES) {
+      for (const a of hero.abilities) {
+        expect(ANIM_GESTURES, `${hero.id}/${a.id}: anim`).toContain(a.anim);
+        expect(SOUND_ARCHETYPES, `${hero.id}/${a.id}: sound`).toContain(a.sound);
+      }
+    }
+    for (const creep of ALL_CREEPS) {
+      for (const a of creep.abilities) {
+        expect(ANIM_GESTURES, `${creep.id}/${a.id}: anim`).toContain(a.anim);
+        expect(SOUND_ARCHETYPES, `${creep.id}/${a.id}: sound`).toContain(a.sound);
+      }
+    }
+    for (const item of ALL_ITEMS) {
+      if (!item.active) continue;
+      expect(ANIM_GESTURES, `${item.id}: active anim`).toContain(item.active.anim);
+      expect(SOUND_ARCHETYPES, `${item.id}: active sound`).toContain(item.active.sound);
+    }
+  });
+
+  it('the gesture player resolves a valid gesture + sound for every ability without throwing', () => {
+    const all: AbilityDef[] = [];
+    for (const hero of ALL_HEROES) for (const a of hero.abilities) collectAbilities(a, all);
+    for (const creep of ALL_CREEPS) for (const a of creep.abilities) collectAbilities(a, all);
+    for (const item of ALL_ITEMS) if (item.active) collectAbilities(item.active, all);
+    for (const n of ALL_NEUTRAL_ITEMS) if (n.active) collectAbilities(n.active, all);
+    expect(all.length).toBeGreaterThan(200);
+    for (const a of all) {
+      expect(ANIM_GESTURES, `${a.id}: resolved gesture`).toContain(gestureForAbility(a));
+      expect(SOUND_ARCHETYPES, `${a.id}: resolved sound`).toContain(soundForAbility(a));
+    }
   });
 });

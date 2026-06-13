@@ -1,4 +1,5 @@
 import type { CreepDef } from '../../core/types';
+import { gestureForAbility, soundForAbility } from '../../core/gestures';
 
 // ============================================================
 // Phase 1 wild creeps — the catchable "Pokémon" of the vale,
@@ -397,6 +398,25 @@ export const PHASE3_CREEPS: CreepDef[] = [
   creep('ancient-thunderhide', 'Ancient Thunderhide', 'ancient', 'Frenzy Slam', ['#6f8a4a', '#263418', '#d8f09a'], { stun: true })
 ];
 
+// The hand-authored Phase 1 creeps predate the anim/sound schema; default
+// their tags + animProfile from each ability's data (§3.11). Factory creeps
+// already carry these, so the ?? defaults are no-ops for them.
+function normalizeCreep(c: CreepDef): CreepDef {
+  if (!c.animProfile) {
+    const ranged = c.stats.attackRange > 350;
+    c.animProfile = {
+      rig: c.tier === 'ancient' ? 'ancient' : 'neutral',
+      castStyle: ranged ? 'caster' : 'beast',
+      voiceTimbre: c.tier
+    };
+  }
+  for (const a of c.abilities) {
+    a.anim = a.anim ?? gestureForAbility(a);
+    a.sound = a.sound ?? soundForAbility(a);
+  }
+  return c;
+}
+
 export const ALL_CREEPS: CreepDef[] = [
   KOBOLD,
   KOBOLD_FOREMAN,
@@ -411,4 +431,4 @@ export const ALL_CREEPS: CreepDef[] = [
   POLAR_FURBOLG,
   ICE_SHAMAN,
   ...PHASE3_CREEPS
-];
+].map(normalizeCreep);

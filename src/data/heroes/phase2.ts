@@ -1,4 +1,5 @@
 import type { AbilityDef, HeroBaseStats, HeroDef, StatModMap } from '../../core/types';
+import { gestureForAbility, soundForAbility } from '../../core/gestures';
 
 type HeroSeed = {
   id: string;
@@ -52,6 +53,7 @@ function talents(id: string, abilityA: string, valueA: string, abilityB: string,
 }
 
 function hero(seed: HeroSeed, talentA: [string, string], talentB: [string, string]): HeroDef {
+  const ranged = seed.baseStats.attackRange > 350;
   return {
     id: seed.id,
     name: seed.name,
@@ -62,7 +64,8 @@ function hero(seed: HeroSeed, talentA: [string, string], talentB: [string, strin
     lore: seed.lore,
     baseStats: seed.baseStats,
     skillOrder: [0, 1, 2],
-    abilities: seed.abilities,
+    // Default the closed-vocabulary anim/sound from each ability's own data (§3.11).
+    abilities: seed.abilities.map((a) => ({ ...a, anim: gestureForAbility(a), sound: soundForAbility(a) })),
     talents: talents(seed.id, talentA[0], talentA[1], talentB[0], talentB[1]),
     facets: [
       {
@@ -90,7 +93,12 @@ function hero(seed: HeroSeed, talentA: [string, string], talentB: [string, strin
       'Let the echo come closer.'
     ],
     bounty: { xp: 330, gold: 220 },
-    recruitmentQuestId: seed.recruitmentQuestId
+    recruitmentQuestId: seed.recruitmentQuestId,
+    animProfile: {
+      rig: ranged ? 'caster' : seed.attribute === 'str' ? 'brute' : 'fighter',
+      castStyle: seed.attribute === 'int' ? 'spell' : 'weapon',
+      voiceTimbre: seed.attribute === 'str' ? 'low' : seed.attribute === 'agi' ? 'sharp' : 'bright'
+    }
   };
 }
 

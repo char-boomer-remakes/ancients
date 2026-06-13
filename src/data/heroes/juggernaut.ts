@@ -55,7 +55,9 @@ export const JUGGERNAUT: HeroDef = {
         },
         { kind: 'statmod', mods: { moveSpeedPct: 10 }, duration: 'duration', target: 'self' }
       ],
-      vfx: { archetype: 'storm', color: '#9fe8ff', color2: '#e8fbff', scale: 0.6 }
+      vfx: { archetype: 'storm', color: '#9fe8ff', color2: '#e8fbff', scale: 0.6 },
+      anim: 'melee-swing',
+      sound: 'blade'
     },
     {
       id: 'jug-healing-ward',
@@ -93,7 +95,9 @@ export const JUGGERNAUT: HeroDef = {
           }
         }
       ],
-      vfx: { archetype: 'summon-pop', color: '#7dffb5', scale: 0.7 }
+      vfx: { archetype: 'summon-pop', color: '#7dffb5', scale: 0.7 },
+      anim: 'summon-gesture',
+      sound: 'heal'
     },
     {
       id: 'jug-blade-dance',
@@ -105,7 +109,9 @@ export const JUGGERNAUT: HeroDef = {
         critMult: [180, 180, 180, 180]
       },
       attackMod: { critChance: 'critChance', critMult: 'critMult' },
-      vfx: { archetype: 'shield', color: '#ff5b5b', scale: 0.4 }
+      vfx: { archetype: 'shield', color: '#ff5b5b', scale: 0.4 },
+      anim: 'melee-swing',
+      sound: 'blade'
     },
     {
       id: 'jug-omnislash',
@@ -138,7 +144,9 @@ export const JUGGERNAUT: HeroDef = {
           ]
         }
       ],
-      vfx: { archetype: 'chain', color: '#ffe27d', color2: '#ff5b5b', scale: 1 }
+      vfx: { archetype: 'chain', color: '#ffe27d', color2: '#ff5b5b', scale: 1 },
+      anim: 'dash',
+      sound: 'blade'
     }
   ],
   talents: [
@@ -197,5 +205,6 @@ export const JUGGERNAUT: HeroDef = {
     'Honor is a straight line. Walk it or step aside.'
   ],
   bounty: { xp: 300, gold: 200 },
-  starter: true
+  starter: true,
+  animProfile: { rig: 'fighter', castStyle: 'weapon', voiceTimbre: 'sharp' }
 };

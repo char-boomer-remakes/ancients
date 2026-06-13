@@ -1,10 +1,62 @@
 import type { UnitRig } from './models';
 import type { Unit } from '../core/unit';
+import type { AnimGesture } from '../core/types';
 
 // ------------------------------------------------------------------
 // Procedural animation (SPEC §3): pose layers keyed off sim state.
 // No keyframe data; everything is math on the rig's named parts.
+//
+// Phase 6 §3.11: casts play a gesture from the closed AnimGesture
+// vocabulary (set on the unit when the cast begins), shaped by the
+// hero's animProfile.castStyle and weighted by silhouette scale so a
+// dainty caster and a heavy brute read differently. The old iconic
+// heroId branches survive only as the fallback for units without a
+// resolved gesture (sparse animProfile / summons).
 // ------------------------------------------------------------------
+
+interface CastPose {
+  l: number;          // left arm rotation.z
+  r: number;          // right arm rotation.z
+  bodyZ: number;      // body roll (set, not added)
+  bodyY: number;      // body bob (added)
+  bodyX: number;      // body shift (added)
+}
+
+// Reused across frames so the cast path never allocates in the render hot loop.
+const POSE: CastPose = { l: 0, r: 0, bodyZ: 0, bodyY: 0, bodyX: 0 };
+
+/** Closed-vocabulary gesture player: one pose per AnimGesture, weight-shaped. */
+function castPose(g: AnimGesture, castStyle: string | undefined, time: number, weight: number): CastPose {
+  // Heavier silhouettes sway slower and lean more; daintier ones flit.
+  const sway = Math.sin(time * (12 / Math.max(0.6, weight)));
+  const lean = 0.06 * weight;
+  const spellHands = castStyle === 'spell'; // robed casters splay both hands
+  POSE.bodyZ = 0; POSE.bodyY = 0; POSE.bodyX = 0;
+  switch (g) {
+    case 'staff-cast':
+      POSE.l = -2.4 + sway * 0.08; POSE.r = (spellHands ? -2.1 : -1.4) + sway * 0.06; POSE.bodyZ = sway * 0.05; break;
+    case 'global-cast':
+      POSE.l = -2.75; POSE.r = -2.75; POSE.bodyY = Math.abs(sway) * 0.05; POSE.bodyZ = sway * 0.04; break;
+    case 'ground-slam':
+      POSE.l = -2.3; POSE.r = -2.3; POSE.bodyY = sway * 0.03 * weight; break;
+    case 'summon-gesture':
+      POSE.l = -1.0 - sway * 0.1; POSE.r = -1.0 + sway * 0.1; POSE.bodyZ = -lean * 0.4; break;
+    case 'channel-loop': {
+      const tremble = Math.sin(time * 24) * 0.06;
+      POSE.l = -1.1 + tremble; POSE.r = -1.1 - tremble; break;
+    }
+    case 'ranged-shot':
+      POSE.l = -1.45; POSE.r = -1.1 + sway * 0.04; POSE.bodyX = -0.05; break;
+    case 'dash':
+      POSE.l = 0.5; POSE.r = 0.6; POSE.bodyZ = lean; POSE.bodyX = 0.05; break;
+    case 'item-use':
+      POSE.l = -0.2; POSE.r = -1.7 + sway * 0.05; break;
+    case 'melee-swing':
+    default:
+      POSE.l = 0.1; POSE.r = -1.7; POSE.bodyZ = lean * 0.5; break;
+  }
+  return POSE;
+}
 
 export interface AnimState {
   runPhase: number;
@@ -86,7 +138,10 @@ export function animateRig(rig: UnitRig, unit: Unit, st: AnimState, dt: number, 
       armSwingR = -1.8 + t * 3.2;
       body.rotation.y = Math.sin(t * Math.PI) * 0.42;
     } else {
-      armSwingR = -1.6 + t * 2.4; // raise then strike
+      // weighted generic strike: heavy silhouettes wind up bigger/slower
+      const w = rig.scale;
+      armSwingR = (-1.4 - 0.4 * w) + t * (2.0 + 0.6 * w);
+      body.rotation.z = Math.sin(t * Math.PI) * 0.05 * w;
     }
     st.attackFlash = 1;
   } else if (st.attackFlash > 0) {
@@ -103,9 +158,16 @@ export function animateRig(rig: UnitRig, unit: Unit, st: AnimState, dt: number, 
     st.lungeFlash = Math.max(0, st.lungeFlash - dt * 7);
   }
 
-  // casting: both arms up
+  // casting: gesture-driven pose, shaped by animProfile + silhouette weight
   if (unit.castingUntil > simTime) {
-    if (unit.heroId === 'crystal-maiden' || unit.heroId === 'lich') {
+    if (unit.castGesture) {
+      const pose = castPose(unit.castGesture, unit.animProfile?.castStyle, time, rig.scale);
+      armSwingL = pose.l;
+      armSwingR = pose.r;
+      body.rotation.z = pose.bodyZ;
+      body.position.y += pose.bodyY;
+      body.position.x += pose.bodyX;
+    } else if (unit.heroId === 'crystal-maiden' || unit.heroId === 'lich') {
       armSwingL = -2.55 + Math.sin(time * 12) * 0.08;
       armSwingR = -1.35 + Math.sin(time * 10) * 0.05;
       body.rotation.z = Math.sin(time * 5) * 0.07;

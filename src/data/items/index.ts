@@ -656,4 +656,16 @@ export const ASSEMBLED: ItemDef[] = [
   }
 ];
 
-export const ALL_ITEMS: ItemDef[] = [...CONSUMABLES, ...COMPONENTS, ...ASSEMBLED];
+// A pressed item reads on the body (§3.11): self-displacers dash, the rest
+// play the generic item-use beat. Explicit tags on an active always win.
+function normalizeItemActive(item: ItemDef): ItemDef {
+  const a = item.active;
+  if (a) {
+    const selfDash = (a.effects ?? []).some((e) => e.kind === 'displace' && e.target === 'self');
+    a.anim = a.anim ?? (selfDash ? 'dash' : 'item-use');
+    a.sound = a.sound ?? 'item';
+  }
+  return item;
+}
+
+export const ALL_ITEMS: ItemDef[] = [...CONSUMABLES, ...COMPONENTS, ...ASSEMBLED].map(normalizeItemActive);

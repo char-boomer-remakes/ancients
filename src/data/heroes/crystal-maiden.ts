@@ -47,7 +47,9 @@ export const CRYSTAL_MAIDEN: HeroDef = {
           params: { moveSlowPct: 'slowMs', attackSlowPct: 'slowAs' }
         }
       ],
-      vfx: { archetype: 'ground-aoe', color: '#9fd8ff', color2: '#ffffff', scale: 1 }
+      vfx: { archetype: 'ground-aoe', color: '#9fd8ff', color2: '#ffffff', scale: 1 },
+      anim: 'ground-slam',
+      sound: 'frost'
     },
     {
       id: 'cm-frostbite',
@@ -67,7 +69,9 @@ export const CRYSTAL_MAIDEN: HeroDef = {
         { kind: 'status', status: 'root', duration: 'duration', target: 'target' },
         { kind: 'status', status: 'buff', duration: 'duration', target: 'target', params: { dotDps: 'dps', dotType: 'magical', tag: 'cm-frostbite-dot' } }
       ],
-      vfx: { archetype: 'shield', color: '#bfeaff', color2: '#5ba8d8', scale: 0.8 }
+      vfx: { archetype: 'shield', color: '#bfeaff', color2: '#5ba8d8', scale: 0.8 },
+      anim: 'staff-cast',
+      sound: 'frost'
     },
     {
       id: 'cm-arcane-aura',
@@ -78,7 +82,9 @@ export const CRYSTAL_MAIDEN: HeroDef = {
         regen: [1, 1.5, 2, 2.5]
       },
       aura: { radius: 'global', affects: 'allies', mods: { manaRegen: 'regen' } },
-      vfx: { archetype: 'global-mark', color: '#86c8ff', scale: 0.6 }
+      vfx: { archetype: 'global-mark', color: '#86c8ff', scale: 0.6 },
+      anim: 'staff-cast',
+      sound: 'heal'
     },
     {
       id: 'cm-freezing-field',
@@ -128,7 +134,9 @@ export const CRYSTAL_MAIDEN: HeroDef = {
           }
         }
       ],
-      vfx: { archetype: 'storm', color: '#bfeaff', color2: '#ffffff', scale: 1.6 }
+      vfx: { archetype: 'storm', color: '#bfeaff', color2: '#ffffff', scale: 1.6 },
+      anim: 'channel-loop',
+      sound: 'frost'
     }
   ],
   talents: [
@@ -188,5 +196,6 @@ export const CRYSTAL_MAIDEN: HeroDef = {
   ],
   bounty: { xp: 300, gold: 200 },
   recruitmentQuestId: 'recruit-crystal-maiden',
-  starter: true
+  starter: true,
+  animProfile: { rig: 'caster', castStyle: 'spell', voiceTimbre: 'bright' }
 };

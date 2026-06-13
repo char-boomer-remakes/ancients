@@ -49,7 +49,9 @@ export const LICH: HeroDef = {
           params: { moveSlowPct: 'slowMs', attackSlowPct: 20 }
         }
       ],
-      vfx: { archetype: 'projectile', color: '#9fd8ff', color2: '#4a78b8', scale: 0.9 }
+      vfx: { archetype: 'projectile', color: '#9fd8ff', color2: '#4a78b8', scale: 0.9 },
+      anim: 'staff-cast',
+      sound: 'frost'
     },
     {
       id: 'lich-frost-shield',
@@ -84,7 +86,9 @@ export const LICH: HeroDef = {
           }
         }
       ],
-      vfx: { archetype: 'shield', color: '#bfeaff', color2: '#7ec8f2', scale: 1 }
+      vfx: { archetype: 'shield', color: '#bfeaff', color2: '#7ec8f2', scale: 1 },
+      anim: 'staff-cast',
+      sound: 'frost'
     },
     {
       id: 'lich-sinister-gaze',
@@ -112,7 +116,9 @@ export const LICH: HeroDef = {
         manaTick: [12, 16, 20, 24]
       },
       effects: [],
-      vfx: { archetype: 'beam', color: '#b89fff', color2: '#4a3a78', scale: 0.8 }
+      vfx: { archetype: 'beam', color: '#b89fff', color2: '#4a3a78', scale: 0.8 },
+      anim: 'channel-loop',
+      sound: 'void'
     },
     {
       id: 'lich-chain-frost',
@@ -148,7 +154,9 @@ export const LICH: HeroDef = {
           }
         }
       ],
-      vfx: { archetype: 'projectile', color: '#bfeaff', color2: '#4a78b8', scale: 1.4 }
+      vfx: { archetype: 'projectile', color: '#bfeaff', color2: '#4a78b8', scale: 1.4 },
+      anim: 'ranged-shot',
+      sound: 'frost'
     }
   ],
   talents: [
@@ -207,5 +215,6 @@ export const LICH: HeroDef = {
     'Stand by the shield-bearer. The cold prefers the brave.'
   ],
   bounty: { xp: 300, gold: 200 },
-  recruitmentQuestId: 'recruit-lich'
+  recruitmentQuestId: 'recruit-lich',
+  animProfile: { rig: 'caster', castStyle: 'spell', voiceTimbre: 'low' }
 };

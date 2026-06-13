@@ -60,7 +60,9 @@ export const EARTHSHAKER: HeroDef = {
           }
         }
       ],
-      vfx: { archetype: 'wall', color: '#a9743c', color2: '#5e4022', scale: 1 }
+      vfx: { archetype: 'wall', color: '#a9743c', color2: '#5e4022', scale: 1 },
+      anim: 'ground-slam',
+      sound: 'impact'
     },
     {
       id: 'es-enchant-totem',
@@ -84,7 +86,9 @@ export const EARTHSHAKER: HeroDef = {
           }
         }
       ],
-      vfx: { archetype: 'shield', color: '#e8b15c', color2: '#a9743c', scale: 0.8 }
+      vfx: { archetype: 'shield', color: '#e8b15c', color2: '#a9743c', scale: 0.8 },
+      anim: 'ground-slam',
+      sound: 'impact'
     },
     {
       id: 'es-aftershock',
@@ -105,7 +109,9 @@ export const EARTHSHAKER: HeroDef = {
           ]
         }
       ],
-      vfx: { archetype: 'ground-aoe', color: '#a9743c', scale: 0.7 }
+      vfx: { archetype: 'ground-aoe', color: '#a9743c', scale: 0.7 },
+      anim: 'ground-slam',
+      sound: 'impact'
     },
     {
       id: 'es-echo-slam',
@@ -131,7 +137,9 @@ export const EARTHSHAKER: HeroDef = {
           params: { moveSlowPct: 30, tag: 'es-echo-slow' }
         }
       ],
-      vfx: { archetype: 'ground-aoe', color: '#e8b15c', color2: '#5e4022', scale: 1.6 }
+      vfx: { archetype: 'ground-aoe', color: '#e8b15c', color2: '#5e4022', scale: 1.6 },
+      anim: 'ground-slam',
+      sound: 'impact'
     }
   ],
   talents: [
@@ -190,5 +198,6 @@ export const EARTHSHAKER: HeroDef = {
     'My totem and I have an understanding: I swing, it sings.'
   ],
   bounty: { xp: 320, gold: 210 },
-  recruitmentQuestId: 'recruit-earthshaker'
+  recruitmentQuestId: 'recruit-earthshaker',
+  animProfile: { rig: 'brute', castStyle: 'weapon', voiceTimbre: 'low' }
 };

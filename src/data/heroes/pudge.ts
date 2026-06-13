@@ -55,7 +55,9 @@ export const PUDGE: HeroDef = {
           }
         }
       ],
-      vfx: { archetype: 'hook', color: '#b8442c', color2: '#6e6e6e', scale: 1 }
+      vfx: { archetype: 'hook', color: '#b8442c', color2: '#6e6e6e', scale: 1 },
+      anim: 'ranged-shot',
+      sound: 'impact'
     },
     {
       id: 'pudge-rot',
@@ -76,7 +78,9 @@ export const PUDGE: HeroDef = {
           { kind: 'status', status: 'slow', duration: 0.6, target: 'enemies-in-radius', radius: 'radius', params: { moveSlowPct: 'slowMs', tag: 'pudge-rot-slow' } }
         ]
       },
-      vfx: { archetype: 'ground-aoe', color: '#79a32e', color2: '#3f5b14', scale: 0.6 }
+      vfx: { archetype: 'ground-aoe', color: '#79a32e', color2: '#3f5b14', scale: 0.6 },
+      anim: 'ground-slam',
+      sound: 'impact'
     },
     {
       id: 'pudge-flesh-heap',
@@ -92,7 +96,9 @@ export const PUDGE: HeroDef = {
       triggers: [
         { on: 'on-nearby-death', radius: 'radius', statStack: { mods: { str: 'stackStr' } } }
       ],
-      vfx: { archetype: 'shield', color: '#c98b8b', scale: 0.5 }
+      vfx: { archetype: 'shield', color: '#c98b8b', scale: 0.5 },
+      anim: 'melee-swing',
+      sound: 'impact'
     },
     {
       id: 'pudge-dismember',
@@ -123,7 +129,9 @@ export const PUDGE: HeroDef = {
       effects: [
         { kind: 'status', status: 'stun', duration: 0.55, target: 'target', params: { tag: 'pudge-dismember-hold' } }
       ],
-      vfx: { archetype: 'channel', color: '#d14f4f', color2: '#79a32e', scale: 1 }
+      vfx: { archetype: 'channel', color: '#d14f4f', color2: '#79a32e', scale: 1 },
+      anim: 'channel-loop',
+      sound: 'impact'
     }
   ],
   talents: [
@@ -182,5 +190,6 @@ export const PUDGE: HeroDef = {
     'Stand still. This is the gentle part.'
   ],
   bounty: { xp: 320, gold: 210 },
-  recruitmentQuestId: 'recruit-pudge'
+  recruitmentQuestId: 'recruit-pudge',
+  animProfile: { rig: 'brute', castStyle: 'weapon', voiceTimbre: 'low' }
 };

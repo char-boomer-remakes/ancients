@@ -60,7 +60,9 @@ export const SNIPER: HeroDef = {
           }
         }
       ],
-      vfx: { archetype: 'storm', color: '#ffb35c', color2: '#8a8a8a', scale: 1 }
+      vfx: { archetype: 'storm', color: '#ffb35c', color2: '#8a8a8a', scale: 1 },
+      anim: 'ranged-shot',
+      sound: 'bow'
     },
     {
       id: 'sniper-headshot',
@@ -76,7 +78,9 @@ export const SNIPER: HeroDef = {
         procDamage: 'damage',
         procStatus: { status: 'slow', duration: 0.5, params: { moveSlowPct: 100, tag: 'sniper-headshot-stop' } }
       },
-      vfx: { archetype: 'projectile', color: '#ffd27f', scale: 0.4 }
+      vfx: { archetype: 'projectile', color: '#ffd27f', scale: 0.4 },
+      anim: 'ranged-shot',
+      sound: 'bow'
     },
     {
       id: 'sniper-take-aim',
@@ -87,7 +91,9 @@ export const SNIPER: HeroDef = {
         range: [100, 200, 300, 400]
       },
       passiveMods: { attackRange: 'range' },
-      vfx: { archetype: 'beam', color: '#c8e85c', scale: 0.4 }
+      vfx: { archetype: 'beam', color: '#c8e85c', scale: 0.4 },
+      anim: 'ranged-shot',
+      sound: 'bow'
     },
     {
       id: 'sniper-assassinate',
@@ -122,7 +128,9 @@ export const SNIPER: HeroDef = {
         damage: [300, 400, 500],
         castRangeVal: [2200, 2800, 3400]
       },
-      vfx: { archetype: 'beam', color: '#ff5b5b', color2: '#ffd27f', scale: 1.2 }
+      vfx: { archetype: 'beam', color: '#ff5b5b', color2: '#ffd27f', scale: 1.2 },
+      anim: 'ranged-shot',
+      sound: 'bow'
     }
   ],
   talents: [
@@ -182,5 +190,6 @@ export const SNIPER: HeroDef = {
   ],
   bounty: { xp: 300, gold: 200 },
   recruitmentQuestId: 'recruit-sniper',
-  starter: true
+  starter: true,
+  animProfile: { rig: 'ranged', castStyle: 'weapon', voiceTimbre: 'sharp' }
 };

@@ -42,7 +42,9 @@ export const LUNA: HeroDef = {
         { kind: 'damage', dtype: 'magical', amount: 'damage', target: 'target' },
         { kind: 'status', status: 'stun', duration: 'ministun', target: 'target' }
       ],
-      vfx: { archetype: 'beam', color: '#cde9ff', color2: '#7c8cff', scale: 0.8 }
+      vfx: { archetype: 'beam', color: '#cde9ff', color2: '#7c8cff', scale: 0.8 },
+      anim: 'ranged-shot',
+      sound: 'storm'
     },
     {
       id: 'luna-moon-glaives',
@@ -54,7 +56,9 @@ export const LUNA: HeroDef = {
         radius: [500, 500, 500, 500]
       },
       attackMod: { cleave: { pct: 'bouncePct', radius: 'radius' } },
-      vfx: { archetype: 'chain', color: '#d7e7ff', scale: 0.5 }
+      vfx: { archetype: 'chain', color: '#d7e7ff', scale: 0.5 },
+      anim: 'ranged-shot',
+      sound: 'blade'
     },
     {
       id: 'luna-lunar-blessing',
@@ -66,7 +70,9 @@ export const LUNA: HeroDef = {
         nightSight: [5, 10, 15, 20]
       },
       aura: { radius: 1200, affects: 'allies', mods: { damage: 'damage', visionPct: 'nightSight' } },
-      vfx: { archetype: 'global-mark', color: '#b9c7ff', scale: 0.6 }
+      vfx: { archetype: 'global-mark', color: '#b9c7ff', scale: 0.6 },
+      anim: 'staff-cast',
+      sound: 'heal'
     },
     {
       id: 'luna-eclipse',
@@ -96,7 +102,9 @@ export const LUNA: HeroDef = {
           ]
         }
       ],
-      vfx: { archetype: 'storm', color: '#dce7ff', color2: '#6f77ff', scale: 1.3 }
+      vfx: { archetype: 'storm', color: '#dce7ff', color2: '#6f77ff', scale: 1.3 },
+      anim: 'global-cast',
+      sound: 'storm'
     }
   ],
   talents: [
@@ -155,5 +163,6 @@ export const LUNA: HeroDef = {
     'Moonlight is mercy only from far away.'
   ],
   bounty: { xp: 330, gold: 220 },
-  recruitmentQuestId: 'recruit-luna'
+  recruitmentQuestId: 'recruit-luna',
+  animProfile: { rig: 'rider', castStyle: 'weapon', voiceTimbre: 'sharp' }
 };
