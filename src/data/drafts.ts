@@ -15,25 +15,25 @@ export const ELITE_DRAFT: DraftDef = {
     {
       name: 'The Tempo Caller',
       title: 'Metronome of the Mid',
-      pool: ['storm-spirit', 'ember-spirit', 'riki', 'bounty-hunter', 'slark', 'night-stalker', 'tusk'],
+      pool: ['storm-spirit', 'ember-spirit', 'riki', 'bounty-hunter', 'slark', 'night-stalker', 'tusk', 'monkey-king', 'morphling'],
       dialogue: ['I set the pace. You just try to keep up.', 'Every rotation lands on the beat — my beat.']
     },
     {
       name: 'The Roshan Timer',
       title: 'Keeper of the Pit Clock',
-      pool: ['sven', 'juggernaut', 'phantom-assassin', 'medusa', 'lifestealer', 'wraith-king', 'terrorblade'],
+      pool: ['sven', 'juggernaut', 'phantom-assassin', 'medusa', 'lifestealer', 'wraith-king', 'terrorblade', 'chaos-knight', 'phantom-lancer'],
       dialogue: ['I know exactly when the pit opens. Do you?', 'Smoke up — the timer already says we win this one.']
     },
     {
       name: 'The Spell Archivist',
       title: 'Curator of Combos',
-      pool: ['invoker', 'zeus', 'skywrath-mage', 'silencer', 'outworld-destroyer', 'tinker', 'lion'],
+      pool: ['invoker', 'zeus', 'skywrath-mage', 'silencer', 'outworld-destroyer', 'tinker', 'lion', 'rubick', 'arc-warden', 'techies'],
       dialogue: ['I keep a spell for every problem. Yours begins now.', 'Invoke, react, repeat.']
     },
     {
       name: 'The Five-Unit General',
       title: 'Commander of the Swarm',
-      pool: ['chen', 'enchantress', 'natures-prophet', 'beastmaster', 'broodmother', 'warlock', 'visage'],
+      pool: ['chen', 'enchantress', 'natures-prophet', 'beastmaster', 'broodmother', 'warlock', 'visage', 'meepo', 'brewmaster'],
       dialogue: ['You fight five heroes. I fight with fifty units.', 'Micro is just leadership at speed.']
     }
   ],

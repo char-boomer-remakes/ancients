@@ -32,13 +32,15 @@ export const ICEWRACK: RegionDef = {
     { heroId: 'jakiro', pos: { x: 8200, y: 8200 } },
     { heroId: 'tusk', pos: { x: 3900, y: 8800 } },
     { heroId: 'ancient-apparition', pos: { x: 9900, y: 2700 } },
-    { heroId: 'ogre-magi', pos: { x: 2200, y: 5000 } }
+    { heroId: 'ogre-magi', pos: { x: 2200, y: 5000 } },
+    { heroId: 'shadow-shaman', pos: { x: 7600, y: 3600 } }
   ],
   echoSpawns: [
     { id: 'iw-echo-cm', heroId: 'crystal-maiden', pos: { x: 6900, y: 7900 }, level: 15, respawnSec: 220 },
     { id: 'iw-echo-tusk', heroId: 'tusk', pos: { x: 3300, y: 9600 }, level: 15, respawnSec: 220 },
     { id: 'iw-echo-aa', heroId: 'ancient-apparition', pos: { x: 10100, y: 3400 }, level: 16, respawnSec: 240 },
-    { id: 'iw-echo-ogre', heroId: 'ogre-magi', pos: { x: 2600, y: 5600 }, level: 16, respawnSec: 240 }
+    { id: 'iw-echo-ogre', heroId: 'ogre-magi', pos: { x: 2600, y: 5600 }, level: 16, respawnSec: 240 },
+    { id: 'iw-echo-shadow-shaman', heroId: 'shadow-shaman', pos: { x: 8000, y: 4200 }, level: 17, respawnSec: 260 }
   ],
   gates: [
     { id: 'iw-to-nw', name: 'Thawing Road to Nightsilver', pos: { x: 900, y: 9800 }, radius: 520, toRegionId: 'nightsilver-woods', toPos: { x: 10150, y: 1800 } },

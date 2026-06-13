@@ -31,12 +31,14 @@ export const NIGHTSILVER_WOODS: RegionDef = {
     { heroId: 'mirana', pos: { x: 3800, y: 8500 } },
     { heroId: 'lina', pos: { x: 8300, y: 5600 } },
     { heroId: 'zeus', pos: { x: 9350, y: 7200 } },
-    { heroId: 'drow-ranger', pos: { x: 2500, y: 4400 } }
+    { heroId: 'drow-ranger', pos: { x: 2500, y: 4400 } },
+    { heroId: 'bane', pos: { x: 6200, y: 9300 } }
   ],
   echoSpawns: [
     { id: 'nw-echo-luna', heroId: 'luna', pos: { x: 7600, y: 8600 }, level: 12, respawnSec: 180 },
     { id: 'nw-echo-mirana', heroId: 'mirana', pos: { x: 4300, y: 9450 }, level: 12, respawnSec: 180 },
-    { id: 'nw-echo-lina', heroId: 'lina', pos: { x: 9100, y: 5200 }, level: 12, respawnSec: 180 }
+    { id: 'nw-echo-lina', heroId: 'lina', pos: { x: 9100, y: 5200 }, level: 12, respawnSec: 180 },
+    { id: 'nw-echo-bane', heroId: 'bane', pos: { x: 6600, y: 9800 }, level: 13, respawnSec: 200 }
   ],
   gates: [
     { id: 'nw-to-tv', name: 'South Pass to Tranquil Vale', pos: { x: 5600, y: 11250 }, radius: 500, toRegionId: 'tranquil-vale', toPos: { x: 6000, y: 1200 } },

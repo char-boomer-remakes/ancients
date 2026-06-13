@@ -11,6 +11,7 @@ import { AXE } from './heroes/axe';
 import { PHASE2_HEROES } from './heroes/phase2';
 import { PHASE3_HEROES } from './heroes/phase3';
 import { STANDARD_MISSING_HEROES } from './heroes/roster-standard';
+import { COMPLEX_MISSING_HEROES } from './heroes/roster-complex';
 import { ALL_ITEMS } from './items/index';
 import { ALL_CREEPS } from './creeps/index';
 import { TRANQUIL_VALE } from './regions/tranquil-vale';
@@ -40,7 +41,7 @@ function withElementTags(hero: HeroDef): HeroDef {
   };
 }
 
-export const ALL_HEROES: HeroDef[] = [JUGGERNAUT, CRYSTAL_MAIDEN, PUDGE, EARTHSHAKER, SNIPER, LICH, LUNA, SVEN, AXE, ...PHASE2_HEROES, ...PHASE3_HEROES, ...STANDARD_MISSING_HEROES].map(withElementTags);
+export const ALL_HEROES: HeroDef[] = [JUGGERNAUT, CRYSTAL_MAIDEN, PUDGE, EARTHSHAKER, SNIPER, LICH, LUNA, SVEN, AXE, ...PHASE2_HEROES, ...PHASE3_HEROES, ...STANDARD_MISSING_HEROES, ...COMPLEX_MISSING_HEROES].map(withElementTags);
 export const ALL_REGIONS = [TRANQUIL_VALE, NIGHTSILVER_WOODS, ICEWRACK, ...PHASE3_REGIONS];
 export { ALL_DUNGEONS };
 
@@ -63,7 +64,7 @@ export function registerAllContent(): void {
   for (const d of ALL_DUNGEONS) REG.registerDungeon(d);
   for (const d of ALL_DRAFTS) REG.registerDraft(d);
   for (const t of ALL_TRAINERS) REG.registerTrainer(t);
-  for (const id of ['invoke', 'chronosphere', 'stone-gaze', 'reincarnation', 'rearm', 'roshan-respawn', 'terror-fear', 'defile-growth', 'swarm-spread', 'refresh-cooldowns']) {
+  for (const id of ['invoke', 'chronosphere', 'stone-gaze', 'reincarnation', 'rearm', 'roshan-respawn', 'terror-fear', 'defile-growth', 'swarm-spread', 'refresh-cooldowns', 'spell-steal', 'divided-we-stand', 'tempest-double', 'morph-shift', 'primal-split', 'remote-mines']) {
     REG.registerExotic(id, () => {
       /* Phase 3 records the signature hook; Phase 4 gives it bespoke presentation. */
     });

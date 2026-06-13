@@ -65,14 +65,16 @@ export const TRANQUIL_VALE: RegionDef = {
     { heroId: 'witch-doctor', pos: { x: 5200, y: 9300 } },
     { heroId: 'omniknight', pos: { x: 4550, y: 3350 } },
     { heroId: 'windranger', pos: { x: 8250, y: 6900 } },
-    { heroId: 'phantom-assassin', pos: { x: 2650, y: 8800 } }
+    { heroId: 'phantom-assassin', pos: { x: 2650, y: 8800 } },
+    { heroId: 'marci', pos: { x: 9800, y: 8400 } }
   ],
   echoSpawns: [
     { id: 'tv-echo-juggernaut', heroId: 'juggernaut', pos: { x: 8750, y: 9100 }, level: 10, respawnSec: 160 },
     { id: 'tv-echo-pudge', heroId: 'pudge', pos: { x: 7000, y: 7850 }, level: 10, respawnSec: 160 },
     { id: 'tv-echo-sven', heroId: 'sven', pos: { x: 2500, y: 7400 }, level: 10, respawnSec: 160 },
     { id: 'tv-echo-axe', heroId: 'axe', pos: { x: 7900, y: 2700 }, level: 11, respawnSec: 160 },
-    { id: 'tv-echo-dawnbreaker', heroId: 'dawnbreaker', pos: { x: 10300, y: 6100 }, level: 12, respawnSec: 180 }
+    { id: 'tv-echo-dawnbreaker', heroId: 'dawnbreaker', pos: { x: 10300, y: 6100 }, level: 12, respawnSec: 180 },
+    { id: 'tv-echo-marci', heroId: 'marci', pos: { x: 10100, y: 8900 }, level: 12, respawnSec: 180 }
   ],
   gates: [
     { id: 'tv-to-nw', name: 'North Pass to Nightsilver Woods', pos: { x: 6000, y: 850 }, radius: 520, toRegionId: 'nightsilver-woods', toPos: { x: 5600, y: 11050 }, requiresRecruits: 1 }
