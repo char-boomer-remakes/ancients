@@ -1398,50 +1398,78 @@ export class Hud {
           </div>`;
       })
       .join('');
-    const badges = [...g.badges].map((b) => b.replace(/-/g, ' ')).join(', ') || 'none yet';
+    const j = g.journalSections();
+    const repText = j.reputation > 0 ? `+${j.reputation} · revered` : j.reputation < 0 ? `${j.reputation} · feared` : '0 · neutral';
+    const factionRows = j.factions
+      .map((f) => `
+        <div class="journal-row"><div class="jr-stage">Faction</div>
+          <div class="jr-main"><b>${f.heroName}</b> <em>${f.regionName}</em>
+          <p>You swore to this captain; the rival road is closed.</p></div></div>`)
+      .join('') || '<p class="dim">No faction pacts sworn yet.</p>';
+    const raidRows = j.raids
+      .map((r) => `
+        <div class="journal-row"><div class="jr-stage">Raid</div>
+          <div class="jr-main"><b>${r.name}</b><p>Cleared ${r.clears}×.</p></div></div>`)
+      .join('') || '<p class="dim">No raids cleared yet.</p>';
+    const eliteText = j.elite.championDown
+      ? 'Champion dethroned — the ancients answer to you now.'
+      : `Elite Five defeated: ${j.elite.defeated}/5${j.elite.defeated >= 5 ? ' — the Champion awaits.' : ''}`;
+    const badges = j.badges.map((b) => b.replace(/-/g, ' ')).join(', ') || 'none yet';
+    g.markJournalSeen([
+      ...j.raids.map((r) => `raid:${r.id}`),
+      ...j.factions.map((f) => `faction:${f.regionId}`),
+      ...j.badges.map((b) => `badge:${b}`)
+    ]);
     this.modalShell(
       'Quest Journal',
       `
       <div class="journal-summary">
-        <b>${g.region.name}</b> · badges ${badges} · recruited ${g.recruited.size}/${REG.heroes.size}
+        <b>${g.region.name}</b> · reputation ${repText} · recruited ${g.recruited.size}/${REG.heroes.size}
       </div>
-      ${rows || '<p class="dim">No open quest leads in this region yet. Find echo scars, gyms, and hero rumors to fill the journal.</p>'}`
+      <h3>Recruitment</h3>
+      ${rows || '<p class="dim">No open quest leads in this region yet. Find echo scars, gyms, and hero rumors to fill the journal.</p>'}
+      <h3>Conquest</h3>
+      <div class="journal-row"><div class="jr-stage">Elite</div><div class="jr-main"><p>${eliteText}</p></div></div>
+      ${raidRows}
+      <h3>Factions</h3>
+      ${factionRows}
+      <h3>Badges</h3>
+      <div class="journal-summary">${badges}</div>`
     );
   }
 
   private renderCodexModal(): void {
-    const g = this.game;
-    const knownHeroIds = new Set([
-      ...g.recruited,
-      ...g.party.map((r) => r.heroId),
-      ...g.region.heroSpawns.map((h) => h.heroId),
-      ...(g.region.echoSpawns ?? []).map((h) => h.heroId)
-    ]);
-    const heroes = [...knownHeroIds]
-      .map((id) => REG.hero(id))
+    const cx = this.game.codexEntries();
+    const heroes = [...cx.heroes]
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((h) => `
         <div class="codex-card">
-          <img src="${heroPortrait(h.palette, h.name[0], 48)}" alt="">
-          <div><b>${h.name}</b> <em>${h.attribute.toUpperCase()} · ${h.roles.slice(0, 2).join(' / ')}</em>
+          <img src="${heroPortrait(REG.hero(h.id).palette, h.name[0], 48)}" alt="">
+          <div><b>${h.name}</b> <em>${h.sub}</em>
           <p>${h.lore}</p></div>
         </div>`)
-      .join('');
-    const regions = Array.from(REG.regions.values())
-      .slice(0, 10)
+      .join('') || '<p class="dim">No heroes encountered yet — recruit to reveal them.</p>';
+    const regions = cx.regions
       .map((r) => `<div class="codex-note"><b>${r.name}</b><p>${r.lore}</p></div>`)
-      .join('');
-    const items = Array.from(REG.items.values())
-      .filter((i) => i.appearance || i.attackVisual)
+      .join('') || '<p class="dim">Travel the world to reveal regions.</p>';
+    const items = cx.items
       .map((i) => `<div class="codex-note"><b>${i.name}</b><p>${i.lore}</p></div>`)
-      .join('');
+      .join('') || '<p class="dim">Find or buy relics to reveal them.</p>';
+    const creeps = cx.creeps
+      .map((c) => `<div class="codex-note"><b>${c.name}</b><p>${c.lore}</p></div>`)
+      .join('') || '<p class="dim">Capture wild creatures to fill the bestiary.</p>';
+    const raids = cx.raids
+      .map((r) => `<div class="codex-note"><b>${r.name}</b> <em>${r.title}</em><p>${r.lore}</p></div>`)
+      .join('') || '<p class="dim">Clear raids to reveal their lords.</p>';
     this.modalShell(
       'Codex',
       `
       <div class="codex-grid">
         <section><h3>Known Heroes</h3>${heroes}</section>
         <section><h3>Regions</h3>${regions}</section>
-        <section><h3>Relics With Visible Power</h3>${items}</section>
+        <section><h3>Relics</h3>${items}</section>
+        <section><h3>Bestiary</h3>${creeps}</section>
+        <section><h3>Raid Lords</h3>${raids}</section>
       </div>`
     );
   }

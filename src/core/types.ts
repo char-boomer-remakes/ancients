@@ -524,6 +524,7 @@ export interface BossDef {
 export interface RaidDef {
   id: string;
   name: string;
+  title: string;               // homage subtitle (§3.13), original
   location: string;
   unlockQuest: string;
   boss: RaidBossSetup;
@@ -532,13 +533,36 @@ export interface RaidDef {
   enrageSec: number;
   loot: LootTable;
   signatureExotic?: string;
+  dialogue: string[];          // in-character boss lines (§3.13), original
+}
+
+export interface DraftMember {
+  name: string;
+  title: string;               // role-persona title (§3.13)
+  pool: string[];
+  dialogue: string[];          // in-character lines, original
 }
 
 export interface DraftDef {
   id: string;
-  members: { name: string; pool: string[] }[];
+  members: DraftMember[];
   banPickOrder: ('pick' | 'ban')[];
   champion: MacroHeroSetup[] | BossDef;
+  championName: string;        // the Champion's original persona name (§3.13)
+  championTitle: string;
+  championDialogue: string[];
+}
+
+/** Route trainers (§3.13): esports-culture archetypes that flavor a region. */
+export type TrainerArchetype = 'shoutcaster' | 'analyst' | 'streamer' | 'captain' | 'support';
+
+export interface TrainerDef {
+  id: string;
+  name: string;                // original homage name
+  title: string;               // original homage title
+  archetype: TrainerArchetype;
+  regionId: string;
+  dialogue: string[];          // in-character lines, original
 }
 
 export interface NeutralItemDef {
@@ -666,10 +690,12 @@ export interface GymDef {
   badgeId: string;
   regionId: string;
   leader: string;
+  leaderTitle: string;         // homage persona title (§3.13), original
   theme: string;
   bestOf: 3;
   enemyTeam: MacroHeroSetup[];
   enemyBonusCaptainCalls?: number;
+  dialogue: string[];          // in-character leader lines (§3.13), original
 }
 
 // ---------- Gambits (SPEC §7) ----------

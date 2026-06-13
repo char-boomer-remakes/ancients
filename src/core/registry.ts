@@ -1,4 +1,4 @@
-import type { BossDef, CreepDef, DraftDef, GymDef, HeroDef, ItemDef, NeutralItemDef, RaidDef, RecruitmentQuestDef, RegionDef, TrialDef } from './types';
+import type { BossDef, CreepDef, DraftDef, GymDef, HeroDef, ItemDef, NeutralItemDef, RaidDef, RecruitmentQuestDef, RegionDef, TrainerDef, TrialDef } from './types';
 
 // ---------------------------------------------------------------
 // Content registry. Data files register themselves; systems are
@@ -20,6 +20,7 @@ class Registry {
   raids = new Map<string, RaidDef>();
   drafts = new Map<string, DraftDef>();
   neutralItems = new Map<string, NeutralItemDef>();
+  trainers = new Map<string, TrainerDef>();
   exotics = new Map<string, ExoticImpl>();
 
   registerHero(def: HeroDef): void {
@@ -54,6 +55,9 @@ class Registry {
   }
   registerNeutralItem(def: NeutralItemDef): void {
     this.neutralItems.set(def.id, def);
+  }
+  registerTrainer(def: TrainerDef): void {
+    this.trainers.set(def.id, def);
   }
   registerExotic(id: string, impl: ExoticImpl): void {
     this.exotics.set(id, impl);
@@ -114,6 +118,11 @@ class Registry {
     if (!d) throw new Error(`unknown neutral item: ${id}`);
     return d;
   }
+  trainer(id: string): TrainerDef {
+    const d = this.trainers.get(id);
+    if (!d) throw new Error(`unknown trainer: ${id}`);
+    return d;
+  }
   clear(): void {
     this.heroes.clear();
     this.items.clear();
@@ -126,6 +135,7 @@ class Registry {
     this.raids.clear();
     this.drafts.clear();
     this.neutralItems.clear();
+    this.trainers.clear();
     this.exotics.clear();
   }
 }

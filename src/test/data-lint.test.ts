@@ -8,6 +8,8 @@ import { ALL_NEUTRAL_ITEMS } from '../data/neutral-items';
 import { ALL_BOSSES } from '../data/bosses';
 import { ALL_RAIDS } from '../data/raids';
 import { ALL_DRAFTS } from '../data/drafts';
+import { ALL_TRAINERS } from '../data/trainers';
+import { ESPORTS_DENYLIST, denylistHit } from '../data/denylist';
 import { REG } from '../core/registry';
 import { ACTIVE_ELEMENTS, elementForAbility, elementForHero, elementForItemHit } from '../core/resonance';
 import { PHASE5_STARTER_ASSETS } from '../engine/assets';
@@ -522,5 +524,68 @@ describe('data lint: anim coverage (test 19)', () => {
       expect(ANIM_GESTURES, `${a.id}: resolved gesture`).toContain(gestureForAbility(a));
       expect(SOUND_ARCHETYPES, `${a.id}: resolved sound`).toContain(soundForAbility(a));
     }
+  });
+});
+
+// ----------------------------------------------------------------
+// Test 23: lore + esports homage denylist (Phase 6 §3.13, §5)
+// ----------------------------------------------------------------
+describe('data lint: lore + esports denylist (test 23)', () => {
+  /** A named homage entity must carry an original name + title + ≥1 dialogue line, none denylisted. */
+  function expectHomage(label: string, name: string, title: string, dialogue: string[]): void {
+    expect(name.trim().length, `${label}: name`).toBeGreaterThan(0);
+    expect(title.trim().length, `${label}: title`).toBeGreaterThan(0);
+    expect(dialogue.length, `${label}: dialogue count`).toBeGreaterThanOrEqual(1);
+    for (const line of [name, title, ...dialogue]) {
+      expect(line.trim().length, `${label}: empty line`).toBeGreaterThan(0);
+      const hit = denylistHit(line);
+      expect(hit, `${label}: "${line}" contains denylisted "${hit}"`).toBeNull();
+    }
+  }
+
+  it('every gym leader has an original name + title + dialogue', () => {
+    expect(ALL_GYMS.length).toBe(8);
+    for (const gym of ALL_GYMS) expectHomage(`gym ${gym.id}`, gym.leader, gym.leaderTitle, gym.dialogue);
+  });
+
+  it('every Elite Five member and the Champion have name + title + dialogue', () => {
+    for (const draft of ALL_DRAFTS) {
+      expect(draft.members.length).toBeGreaterThanOrEqual(5);
+      for (const m of draft.members) expectHomage(`elite ${m.name}`, m.name, m.title, m.dialogue);
+      expectHomage(`champion ${draft.id}`, draft.championName, draft.championTitle, draft.championDialogue);
+    }
+  });
+
+  it('every raid boss has name + title + dialogue', () => {
+    expect(ALL_RAIDS.length).toBeGreaterThanOrEqual(4);
+    for (const raid of ALL_RAIDS) expectHomage(`raid ${raid.id}`, raid.name, raid.title, raid.dialogue);
+  });
+
+  it('every route trainer covers an archetype with name + title + dialogue', () => {
+    expect(ALL_TRAINERS.length).toBeGreaterThanOrEqual(5);
+    const archetypes = new Set(ALL_TRAINERS.map((t) => t.archetype));
+    for (const a of ['shoutcaster', 'analyst', 'streamer', 'captain', 'support']) {
+      expect(archetypes, `trainer archetype ${a}`).toContain(a);
+    }
+    for (const t of ALL_TRAINERS) {
+      expectHomage(`trainer ${t.id}`, t.name, t.title, t.dialogue);
+      expect(REG.regions.has(t.regionId), `trainer ${t.id} region`).toBe(true);
+    }
+  });
+
+  it('every codex-able entity carries lore/identity (heroes/regions/items/raids/creeps)', () => {
+    for (const h of ALL_HEROES) expect(h.lore.trim().length, `hero ${h.id} lore`).toBeGreaterThan(0);
+    for (const r of ALL_REGIONS) expect(r.lore.trim().length, `region ${r.id} lore`).toBeGreaterThan(0);
+    for (const i of ALL_ITEMS) expect(i.lore.trim().length, `item ${i.id} lore`).toBeGreaterThan(0);
+    for (const raid of ALL_RAIDS) expect(raid.name.trim().length, `raid ${raid.id} name`).toBeGreaterThan(0);
+    for (const c of ALL_CREEPS) expect(c.name.trim().length, `creep ${c.id} name`).toBeGreaterThan(0);
+  });
+
+  it('the denylist matcher catches real trademarks and handles verbatim (positive control)', () => {
+    expect(ESPORTS_DENYLIST.length).toBeGreaterThan(10);
+    expect(denylistHit('Brought to you by Team Secret')).toBe('Team Secret');
+    expect(denylistHit('and a wild Dendi appears mid')).toBe('Dendi');
+    expect(denylistHit('they lift the Aegis of Champions')).toBe('Aegis of Champions');
+    expect(denylistHit('a fully original homage line about a booming caster')).toBeNull();
   });
 });

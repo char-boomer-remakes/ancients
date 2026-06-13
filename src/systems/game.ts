@@ -295,6 +295,7 @@ export class Game {
     this.reputation = save.reputation ?? 0;
     this.codexUnlocks = new Set(save.codexUnlocks ?? []);
     this.journalSeen = new Set(save.journalSeen ?? []);
+    this.codexUnlocks.add('region:' + this.region.id); // standing in a region is the encounter (§3.14)
 
     this.party = save.party.map((heroId) => {
       const hs = save.roster.find((r) => r.heroId === heroId)!;
@@ -725,6 +726,7 @@ export class Game {
       return { won: false, result };
     }
     this.deliverRaidLoot(def, tier, raidId, clears);
+    this.codexUnlock('raid:' + raidId); // killing the raid boss is the encounter (§3.14)
     this.msg(`${def.name} cleared! (clear #${clears + 1})`, 'good');
     this.audio.playStinger('raid-clear');
     this.autosave('raid');
@@ -773,7 +775,7 @@ export class Game {
 
   private eliteDraftFor(memberIdx: number, seed: number): { player: MacroHeroSetup[]; enemy: MacroHeroSetup[]; bans: string[] } {
     const member = ELITE_DRAFT.members[memberIdx];
-    const mini: DraftDef = { id: `${ELITE_DRAFT.id}-m${memberIdx}`, members: [member], banPickOrder: ELITE_DRAFT.banPickOrder, champion: ELITE_DRAFT.champion };
+    const mini: DraftDef = { ...ELITE_DRAFT, id: `${ELITE_DRAFT.id}-m${memberIdx}`, members: [member] };
     return draftTeams(mini, [...this.recruited], seed);
   }
 
@@ -863,6 +865,69 @@ export class Game {
     }
     const pairMate = pair?.find((h) => h !== heroId);
     if (pairMate) this.msg(`${REG.hero(pairMate).name} turns away — that road is closed.`, 'info');
+  }
+
+  // ---------- codex + quest journal (§3.14) ----------
+
+  /** Reveal a codex entry on encounter — id like 'hero:lich', 'region:icewrack', 'raid:roshan-pit'. */
+  codexUnlock(id: string): void {
+    this.codexUnlocks.add(id);
+  }
+
+  /** Held relics and the current party count as "encountered" for the codex. */
+  private syncEncounterCodex(): void {
+    for (const id of this.heldUniques) this.codexUnlocks.add('item:' + id);
+    for (const r of this.party) this.codexUnlocks.add('hero:' + r.heroId);
+  }
+
+  /** Structured codex view-model — only entries unlocked on encounter (§3.14). */
+  codexEntries(): {
+    heroes: { id: string; name: string; sub: string; lore: string }[];
+    regions: { id: string; name: string; lore: string }[];
+    items: { id: string; name: string; lore: string }[];
+    creeps: { id: string; name: string; lore: string }[];
+    raids: { id: string; name: string; title: string; lore: string }[];
+  } {
+    this.syncEncounterCodex();
+    const has = (id: string): boolean => this.codexUnlocks.has(id);
+    return {
+      heroes: [...REG.heroes.values()].filter((h) => has('hero:' + h.id)).map((h) => ({ id: h.id, name: h.name, sub: `${h.attribute.toUpperCase()} · ${h.roles.slice(0, 2).join(' / ')}`, lore: h.lore })),
+      regions: [...REG.regions.values()].filter((r) => has('region:' + r.id)).map((r) => ({ id: r.id, name: r.name, lore: r.lore })),
+      items: [...REG.items.values()].filter((i) => has('item:' + i.id)).map((i) => ({ id: i.id, name: i.name, lore: i.lore })),
+      creeps: [...REG.creeps.values()].filter((c) => has('creep:' + c.id)).map((c) => ({ id: c.id, name: c.name, lore: `A ${c.tier}-tier denizen of the wilds.` })),
+      raids: [...REG.raids.values()].filter((r) => has('raid:' + r.id)).map((r) => ({ id: r.id, name: r.name, title: r.title, lore: `${r.location}. “${r.dialogue[0]}”` }))
+    };
+  }
+
+  /** Structured journal view-model: raids cleared + faction choices + reputation (§3.14). */
+  journalSections(): {
+    reputation: number;
+    badges: string[];
+    factions: { regionId: string; regionName: string; heroId: string; heroName: string }[];
+    raids: { id: string; name: string; clears: number }[];
+    elite: { defeated: number; championDown: boolean };
+  } {
+    const factions = Object.entries(this.factionChoices).map(([regionId, heroId]) => ({
+      regionId,
+      regionName: REG.regions.get(regionId)?.name ?? regionId,
+      heroId,
+      heroName: REG.heroes.get(heroId)?.name ?? heroId
+    }));
+    const raids = Object.entries(this.raidProgress)
+      .filter(([, p]) => (p?.clears ?? 0) > 0)
+      .map(([id, p]) => ({ id, name: REG.raids.get(id)?.name ?? id, clears: p.clears }));
+    return {
+      reputation: this.reputation,
+      badges: [...this.badges],
+      factions,
+      raids,
+      elite: { defeated: this.eliteFive.defeated, championDown: this.eliteFive.championDown }
+    };
+  }
+
+  /** Mark journal entries acknowledged (§3.14). */
+  markJournalSeen(ids: string[]): void {
+    for (const id of ids) this.journalSeen.add(id);
   }
 
   // ---------- neutral items + Tinker's Bench (§3.7) ----------
@@ -1609,6 +1674,7 @@ export class Game {
       }
     }
     this.recruited.add(heroId);
+    this.codexUnlock('hero:' + heroId); // recruiting is the encounter (§3.14)
     this.party.push({
       heroId,
       level: 1,
@@ -1747,6 +1813,7 @@ export class Game {
       return;
     }
     this.gold = newGold;
+    this.codexUnlock('item:' + itemId); // acquiring an item is the encounter (§3.14)
     this.msg(`Bought ${def.name}`, 'good');
   }
 
@@ -2216,6 +2283,7 @@ export class Game {
     const inst: CreepInstanceSave = { uid: newCreepInstanceId(), creepId: ev.creepId, star: 1 };
     this.caught.push(inst);
     const def = REG.creep(ev.creepId);
+    this.codexUnlock('creep:' + ev.creepId); // capturing is the encounter (§3.14)
     this.msg(`Captured ${def.name}!`, 'good');
     const { list, merges } = mergeCreeps(this.caught);
     this.caught = list;

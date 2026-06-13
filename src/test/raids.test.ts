@@ -40,8 +40,10 @@ const THRALL: SummonSpec = {
 const SCRIPTED: RaidDef = {
   id: 'test-scripted-raid',
   name: 'Scripted Proving',
+  title: 'Test Title',
   location: 'Test Arena',
   unlockQuest: 'recruit-phoenix',
+  dialogue: ['Scripted line.'],
   boss: { heroId: 'sven', level: 30, items: ['assault-cuirass'], hpScale: 4, damageScale: 0.25 },
   addWaves: [{ atHpPct: 90, summon: THRALL, count: 3 }],
   zones: [

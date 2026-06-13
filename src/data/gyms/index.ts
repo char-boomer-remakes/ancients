@@ -1,14 +1,24 @@
 import type { GymDef } from '../../core/types';
 
+// Gym leaders are original homages to Dota 2 esports archetypes (§3.13): a
+// flashy highlight carry, a draft-savant captain, a roaming 4, a teamfight
+// initiator, an attrition grinder, a combo virtuoso, a micro maestro, a
+// highland hard-engage. Names stay original; titles + lines wink at the scene.
+
 export const LUNAR_GYM: GymDef = {
   id: 'lunar-gym',
   name: 'Lunar Gym',
   badgeId: 'lunar-badge',
   regionId: 'nightsilver-woods',
   leader: 'Moonwarden Seryn',
+  leaderTitle: 'The Midnight Highlight',
   theme: 'Burst damage, night vision, and clustered nukes.',
   bestOf: 3,
   enemyBonusCaptainCalls: 1,
+  dialogue: [
+    "The crowd came to watch the moon fall. Try not to disappoint them.",
+    'Burst them down before the night even blinks.'
+  ],
   enemyTeam: [
     { heroId: 'luna', level: 14, items: ['yasha', 'dragon-lance'] },
     { heroId: 'mirana', level: 14, items: ['euls-scepter'] },
@@ -24,9 +34,14 @@ export const FROST_GYM: GymDef = {
   badgeId: 'frost-badge',
   regionId: 'icewrack',
   leader: 'Warden Blueheart',
+  leaderTitle: 'The Drafting Mind',
   theme: 'Slows, roots, silences, and channel disruption.',
   bestOf: 3,
   enemyBonusCaptainCalls: 2,
+  dialogue: [
+    "I won this fight in the pick phase. You just haven't noticed yet.",
+    'Patience freezes faster than any nova.'
+  ],
   enemyTeam: [
     { heroId: 'crystal-maiden', level: 17, items: ['glimmer-cape', 'euls-scepter'] },
     { heroId: 'jakiro', level: 17, items: ['arcane-boots'] },
@@ -42,9 +57,14 @@ export const BURROW_GYM: GymDef = {
   badgeId: 'burrow-badge',
   regionId: 'devarshi-desert',
   leader: 'Captain Dunespark',
+  leaderTitle: 'The Sand-Step Roamer',
   theme: 'Blink initiations, sand disables, and carry punish windows.',
   bestOf: 3,
   enemyBonusCaptainCalls: 2,
+  dialogue: [
+    'Position four wins the lanes you never even see.',
+    'Blink in, bury you, gone before the replay loads.'
+  ],
   enemyTeam: [
     { heroId: 'sand-king', level: 20, items: ['blink-dagger', 'arcane-boots'] },
     { heroId: 'nyx-assassin', level: 20, items: ['euls-scepter'] },
@@ -60,9 +80,14 @@ export const TIDE_GYM: GymDef = {
   badgeId: 'tide-badge',
   regionId: 'shadeshore',
   leader: 'Admiral Breakwater',
+  leaderTitle: 'The Teamfight Tide',
   theme: 'Boat timings, huge stuns, and river-fight durability.',
   bestOf: 3,
   enemyBonusCaptainCalls: 2,
+  dialogue: [
+    'One clean initiation and the whole series is mine.',
+    'Hold the river; the gold always follows the map.'
+  ],
   enemyTeam: [
     { heroId: 'kunkka', level: 22, items: ['black-king-bar', 'battlefury'] },
     { heroId: 'tidehunter', level: 22, items: ['blink-dagger', 'vladmirs-offering'] },
@@ -78,9 +103,14 @@ export const ROT_GYM: GymDef = {
   badgeId: 'rot-badge',
   regionId: 'vile-reaches',
   leader: 'Mirecaller Voss',
+  leaderTitle: 'The Attrition Captain',
   theme: 'Attrition, silences, reincarnation checks, and night pressure.',
   bestOf: 3,
   enemyBonusCaptainCalls: 3,
+  dialogue: [
+    "I don't need to win fast. I only need to win last.",
+    'Every respawn you buy is gold I get to farm.'
+  ],
   enemyTeam: [
     { heroId: 'pudge', level: 24, items: ['blink-dagger', 'vladmirs-offering'] },
     { heroId: 'lifestealer', level: 24, items: ['sange'] },
@@ -96,9 +126,14 @@ export const ARCANE_GYM: GymDef = {
   badgeId: 'arcane-badge',
   regionId: 'quoidge',
   leader: 'Archivist Callstep',
+  leaderTitle: 'The Combo Virtuoso',
   theme: 'Long-range spell chains and cooldown resets.',
   bestOf: 3,
   enemyBonusCaptainCalls: 3,
+  dialogue: [
+    'Ten spells, one window, zero mistakes.',
+    "Reset, recast, repeat — that's the whole show."
+  ],
   enemyTeam: [
     { heroId: 'invoker', level: 26, items: ['kaya', 'euls-scepter'] },
     { heroId: 'silencer', level: 26, items: ['force-staff'] },
@@ -114,9 +149,14 @@ export const WILD_GYM: GymDef = {
   badgeId: 'wild-badge',
   regionId: 'hidden-wood',
   leader: 'Keeper Greenroom',
+  leaderTitle: 'The Micro Maestro',
   theme: 'Summons, neutral conversion, and aura stacking.',
   bestOf: 3,
   enemyBonusCaptainCalls: 3,
+  dialogue: [
+    'Count my units. Now count yours.',
+    "Auras stack; egos don't."
+  ],
   enemyTeam: [
     { heroId: 'enchantress', level: 27, items: ['dragon-lance'] },
     { heroId: 'chen', level: 27, items: ['mekansm'] },
@@ -132,9 +172,14 @@ export const TITAN_GYM: GymDef = {
   badgeId: 'titan-badge',
   regionId: 'mount-joerlak',
   leader: 'Summit Marshal',
+  leaderTitle: 'The Highland Engage',
   theme: 'Huge initiations and highland carry checks.',
   bestOf: 3,
   enemyBonusCaptainCalls: 3,
+  dialogue: [
+    'From the high ground, every fight is downhill.',
+    'I commit first and apologize never.'
+  ],
   enemyTeam: [
     { heroId: 'magnus', level: 29, items: ['blink-dagger', 'black-king-bar'] },
     { heroId: 'elder-titan', level: 29, items: ['force-staff'] },
