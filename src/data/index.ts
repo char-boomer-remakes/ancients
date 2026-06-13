@@ -27,6 +27,7 @@ import { ALL_DUNGEONS } from './dungeons';
 import { ALL_DRAFTS } from './drafts';
 import { ALL_TRAINERS } from './trainers';
 import { elementForAbility, elementForHero } from '../core/resonance';
+import { EXOTIC_IMPLS, type ExoticContext } from '../core/exotics';
 import type { HeroDef } from '../core/types';
 
 function withElementTags(hero: HeroDef): HeroDef {
@@ -65,9 +66,7 @@ export function registerAllContent(): void {
   for (const d of ALL_DRAFTS) REG.registerDraft(d);
   for (const t of ALL_TRAINERS) REG.registerTrainer(t);
   for (const id of ['invoke', 'chronosphere', 'stone-gaze', 'reincarnation', 'rearm', 'roshan-respawn', 'terror-fear', 'defile-growth', 'swarm-spread', 'refresh-cooldowns', 'spell-steal', 'divided-we-stand', 'tempest-double', 'morph-shift', 'primal-split', 'remote-mines']) {
-    REG.registerExotic(id, () => {
-      /* Phase 3 records the signature hook; Phase 4 gives it bespoke presentation. */
-    });
+    REG.registerExotic(id, (ctx) => EXOTIC_IMPLS[id]?.(ctx as ExoticContext));
   }
 }
 

@@ -105,7 +105,17 @@ export const HERO_LIKENESS_PROFILES: HeroLikenessProfile[] = [
   { heroId: 'tiny', readsAs: 'walking stone giant', features: ['rock crown', 'boulder shoulders', 'tree club', 'cracked core'] },
   { heroId: 'storm-spirit', readsAs: 'round blue storm monk', features: ['wide hat', 'white moustache', 'lightning belt', 'electric orbs'] },
   { heroId: 'kunkka', readsAs: 'blue admiral swordsman', features: ['captain hat', 'naval coat', 'ghost ship wheel', 'tide sword'] },
-  { heroId: 'natures-prophet', readsAs: 'green antlered forest prophet', features: ['antlers', 'leaf cape', 'treant seed orbs', 'wood staff'] }
+  { heroId: 'natures-prophet', readsAs: 'green antlered forest prophet', features: ['antlers', 'leaf cape', 'treant seed orbs', 'wood staff'] },
+  { heroId: 'anti-mage', readsAs: 'purple twin-blade mage hunter', features: ['bald head mark', 'crescent glaives', 'purple sash', 'mana-burn glow'] },
+  { heroId: 'queen-of-pain', readsAs: 'blue-winged pain demon', features: ['bat wings', 'horned crown', 'clawed hands', 'violet scream aura'] },
+  { heroId: 'mars', readsAs: 'red-gold spear arena god', features: ['plumed helm', 'round shield', 'war spear', 'blood-red cape'] },
+  { heroId: 'monkey-king', readsAs: 'golden staff trickster king', features: ['simian mask', 'long staff', 'gold circlet', 'red-gold cape'] },
+  { heroId: 'rubick', readsAs: 'green hooded grand magus', features: ['high hood', 'green staff', 'floating spell cube', 'arcane cape'] },
+  { heroId: 'techies', readsAs: 'goblin demolition trio', features: ['blast goggles', 'mine satchel', 'rifle barrel', 'yellow bomb sparks'] },
+  { heroId: 'arc-warden', readsAs: 'blue-gold split self warden', features: ['faceless hood', 'crackling arc core', 'gold staff', 'double afterimage'] },
+  { heroId: 'meepo', readsAs: 'small shovel-clan geomancer', features: ['digging cap', 'shovel blade', 'green scarf', 'clone pips'] },
+  { heroId: 'morphling', readsAs: 'flowing blue water warrior', features: ['water body', 'crest wave', 'glowing eyes', 'ripple trail'] },
+  { heroId: 'brewmaster', readsAs: 'broad drunken elemental brawler', features: ['barrel charm', 'bare headband', 'totem keg', 'tri-element wisps'] }
 ];
 
 // PBR base material. Node-safe: MeshStandardMaterial constructs without a GL

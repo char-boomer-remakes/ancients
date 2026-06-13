@@ -10,6 +10,14 @@ This is a content plan, not an engine rewrite. The ability/status/item engine in
 `/src/core/` already covers almost everything we need; new heroes and items are
 data, plus a small number of new exotics for the genuinely scripted mechanics.
 
+**Completion update (2026-06-13):** this plan is now implemented. The roster is at
+122 heroes: the 57 missing heroes are authored, the 45 Phase 3 heroes have real
+kits through `src/data/heroes/phase3-kits.ts`, the item catalog includes the §6
+recognizable items/components, recruitment and echo placement are wired, and the
+exotic budget lands at 16/25. The final polish pass added likeness profiles for
+the iconic new heroes called out in §7.2 and real bounded core handlers for the
+registered exotics in `src/core/exotics.ts`.
+
 ---
 
 ## 1. Where we are
@@ -392,9 +400,9 @@ That is **6 new exotics**, landing total usage around **16/25**, comfortably
 under the cap. Everything else in §4 (illusions, pets, channels, zones, charges,
 links, stat shifts) composes from existing primitives with **no** exotic.
 
-Register each new id in `registerAllContent()` (`src/data/index.ts`) alongside
-the current list, and implement the hook in `/src/core/` (the same place
-`chronosphere`/`reincarnation` live). Keep `appearance`/`attackVisual` out of core.
+Each new id is registered in `registerAllContent()` (`src/data/index.ts`) alongside
+the current list. The bounded hook implementations live in `/src/core/exotics.ts`;
+`appearance`/`attackVisual` remain renderer data and are not read by core.
 
 ---
 
@@ -615,8 +623,8 @@ add raw audio imports (the no-asset guard, test 21).
 
 ## 8. Delivery plan
 
-Author in batches so each ships green (`npm test` + `npm run build`). Suggested
-order, smallest-risk first:
+Delivered in batches, each intended to ship green (`npm test` + `npm run build`).
+The implemented order was:
 
 1. **Components + boots + defensive items** (§6.1–6.3). No new heroes; unblocks
    most recipes. Update shop inventories. Gate check: recipe math + shop lint.
@@ -671,7 +679,7 @@ recruitment, swap in the real 4-ability array, re-check `anim`/`sound` per abili
 (§7), and add a `hero-kits`-style feel test for the signature mechanic (e.g.
 "Chronosphere freezes units in a zone Void must enter", "Ball Lightning costs mana
 per distance", "Reverse Polarity pulls to center then stuns"). The phase3 factory
-can stay for any hero not yet re-authored, so this ships incrementally and green.
+remains as a fallback path, but every current Phase 3 seed now has an authored kit.
 
 ---
 

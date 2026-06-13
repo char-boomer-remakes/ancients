@@ -1,4 +1,5 @@
 import type { AbilityDef, HeroBaseStats, HeroDef, StatModMap } from '../../core/types';
+import { AUTHORED_PHASE3_KITS } from './phase3-kits';
 
 type HeroSeed = {
   id: string;
@@ -155,18 +156,22 @@ function ultimate(seed: HeroSeed): AbilityDef {
   };
 }
 
-function talents(id: string): HeroDef['talents'] {
+function talents(id: string, abilities: AbilityDef[]): HeroDef['talents'] {
+  const basic = abilities.find((a) => !a.ult && a.values?.damage) ?? abilities[0];
+  const ult = abilities.find((a) => a.ult && a.values?.damage) ?? abilities.find((a) => a.ult) ?? abilities[3];
+  const basicKey = basic.values?.damage ? 'damage' : Object.keys(basic.values ?? { damage: [0] })[0];
+  const ultKey = ult.values?.damage ? 'damage' : Object.keys(ult.values ?? { damage: [0] })[0];
   return [
     { level: 10, options: [{ id: `${id}-t10a`, name: '+8 Primary Stats', mods: { str: 3, agi: 3, int: 3 } as StatModMap }, { id: `${id}-t10b`, name: '+100 Health', mods: { maxHp: 100 } }] },
     { level: 15, options: [{ id: `${id}-t15a`, name: '+30 Attack Speed', mods: { attackSpeed: 30 } }, { id: `${id}-t15b`, name: '+10% Spell Amp', mods: { spellAmpPct: 10 } }] },
-    { level: 20, options: [{ id: `${id}-t20a`, name: '+Ability Damage', abilityOverride: { abilityId: `${id}-strike`, valueKey: 'damage', mode: 'add', amount: 55 } }, { id: `${id}-t20b`, name: '+25 Move Speed', mods: { moveSpeed: 25 } }] },
-    { level: 25, options: [{ id: `${id}-t25a`, name: '+Ultimate Damage', abilityOverride: { abilityId: `${id}-ult`, valueKey: 'damage', mode: 'add', amount: 120 } }, { id: `${id}-t25b`, name: '+18 All Stats', mods: { str: 18, agi: 18, int: 18 } }] }
+    { level: 20, options: [{ id: `${id}-t20a`, name: '+Ability Damage', abilityOverride: { abilityId: basic.id, valueKey: basicKey, mode: 'add', amount: 55 } }, { id: `${id}-t20b`, name: '+25 Move Speed', mods: { moveSpeed: 25 } }] },
+    { level: 25, options: [{ id: `${id}-t25a`, name: '+Ultimate Damage', abilityOverride: { abilityId: ult.id, valueKey: ultKey, mode: 'add', amount: 120 } }, { id: `${id}-t25b`, name: '+18 All Stats', mods: { str: 18, agi: 18, int: 18 } }] }
   ];
 }
 
 function hero(seed: HeroSeed): HeroDef {
   const ranged = seed.ranged ?? seed.attribute === 'int';
-  const abilities: AbilityDef[] = [
+  const abilities: AbilityDef[] = AUTHORED_PHASE3_KITS[seed.id] ?? [
     strike({ ...seed, ranged }),
     control({ ...seed, ranged }),
     seed.summon ? summonAbility({ ...seed, ranged }) : passive({ ...seed, ranged }),
@@ -183,7 +188,7 @@ function hero(seed: HeroSeed): HeroDef {
     baseStats: baseStats(seed.attribute, ranged),
     abilities,
     skillOrder: [0, 1, 2],
-    talents: talents(seed.id),
+    talents: talents(seed.id, abilities),
     facets: [
       { id: `${seed.id}-facet-tempo`, name: 'Tempo', description: 'A Phase 3 facet that sharpens the hero identity.', mods: seed.attribute === 'str' ? { str: 6 } : seed.attribute === 'agi' ? { agi: 6 } : { int: 6 } },
       { id: `${seed.id}-facet-reach`, name: 'Reach', description: 'Adds cast range for macro and raid control.', mods: { castRange: 80 } }

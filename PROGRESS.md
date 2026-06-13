@@ -6,6 +6,12 @@ Read this first each session, then `DECISIONS.md`, then run `npm test`.
 
 Phase 6 holds Phases 2–4 to the **standalone specs'** bar, not the looser in-repo `SPEC.md`. A lot of earlier work shipped as data + pure helpers with unit tests but was never wired into the live game loop; the Phase 6 section below tracks the real bar (acceptance + the §6 test matrix). Rows in the older phase checklists that were helper-only are annotated `→ P6 Mn` and only flip to PASS once Phase 6 wires them end-to-end and proves it with an integration test.
 
+### Heroes & items finish line
+
+- 2026-06-13: `HEROES_AND_ITEMS_PLAN.md` is complete in code. The registry now covers 122 heroes: 9 original feel heroes, 11 Phase 2 heroes, 45 Phase 3 heroes re-authored through `src/data/heroes/phase3-kits.ts`, plus 57 missing roster heroes split between `roster-standard.ts` and `roster-complex.ts`.
+- 2026-06-13: The §6 item catalog is authored in `src/data/items/index.ts` with the missing components, boots, defensive, carry, support, and gated Aghanim entries; recipe/shop lint and kit smoke cover it.
+- 2026-06-13: Final polish pass added iconic new-hero likeness profiles and real bounded exotic handlers in `src/core/exotics.ts` for Spell Steal, Divided We Stand, Tempest Double, Morph Shift, Primal Split, Remote Mines, and the previously registered Phase 3 hooks. `src/test/exotics.test.ts` pins the shipped behavior.
+
 ### Performance plan pass
 
 - 2026-06-13: M1 asset manifest and budget check landed. `npm run assets:check` generated `public/assets/manifest.json` with 57 files, 10.33MB total, hash `ba33d73faafb`, under the 90MB committed-asset cap.
