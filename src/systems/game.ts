@@ -184,6 +184,7 @@ export interface SceneLike {
   setGraphics?(g: { exposure?: number; grade?: number; reducedMotion?: boolean }): void;
   /** Optional (real GameScene only): pre-compile shaders behind a loading screen. */
   prewarm?(): void;
+  dispose?(): void;
 }
 
 /** The slice of ProceduralAudio the orchestrator calls. */
@@ -192,6 +193,7 @@ export interface AudioLike {
   handleEvent(ev: SimEvent): void;
   playStinger(id: StingerId): void;
   update?(env: { biome: string; dayTime: number; inCombat: boolean; dt: number }): void;
+  dispose?(): void;
 }
 
 /** No-op scene for headless (test/CI) runs — no WebGL, no DOM. */
@@ -458,6 +460,11 @@ export class Game {
   prewarm(): void {
     this.update(0); // creates unit views + forces a full render → compiles programs
     this.scene.prewarm?.(); // compile any in-scene materials not yet drawn
+  }
+
+  dispose(): void {
+    this.scene.dispose?.();
+    this.audio.dispose?.();
   }
 
   /** Push the live-tunable graphics settings (exposure/grade/reduced-motion) to

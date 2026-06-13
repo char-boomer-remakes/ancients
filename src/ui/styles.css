@@ -94,6 +94,14 @@ html, body {
   text-shadow: 0 1px 4px #000;
   animation: loading-pulse 1.6s ease-in-out infinite;
 }
+.loading-progress {
+  min-height: 18px;
+  max-width: min(560px, 80vw);
+  color: var(--dim);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
 @keyframes loading-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .loading-rune { animation-duration: 2.4s; }

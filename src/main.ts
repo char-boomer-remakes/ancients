@@ -1,12 +1,13 @@
 import './ui/styles.css';
 import { registerAllContent } from './data';
 import { REG } from './core/registry';
-import { Game } from './systems/game';
+import { Game, resolveQuality } from './systems/game';
 import { InputController } from './systems/input';
 import { debugEnabled, mountDebugPanel } from './systems/debug';
 import { Hud } from './ui/hud';
 import { showTitle } from './ui/title';
 import { withLoading } from './ui/loading';
+import { preloadAssetGroups } from './engine/asset-loaders';
 import type { GameSave } from './core/types';
 
 registerAllContent();
@@ -20,12 +21,34 @@ let rafId = 0;
 let tickTimer = 0;
 let unmountDebug: (() => void) | null = null;
 
+const TERRAIN_PBR_SET: Record<string, string> = {
+  grass: 'Grass001',
+  forest: 'Grass001',
+  coast: 'Grass001',
+  snow: 'Snow010A',
+  desert: 'Ground080',
+  wasteland: 'Ground048'
+};
+
+function preloadPathsForRegion(regionId: string, includeEnv: boolean): string[] {
+  const region = REG.region(regionId);
+  const set = TERRAIN_PBR_SET[region.biome] ?? TERRAIN_PBR_SET.grass;
+  const paths = [
+    `textures/terrain/${set}_Color.jpg`,
+    `textures/terrain/${set}_NormalGL.jpg`,
+    `textures/terrain/${set}_Roughness.jpg`
+  ];
+  if (includeEnv) paths.push('env/vale_day_1k.hdr');
+  return paths;
+}
+
 function teardown(): void {
   cancelAnimationFrame(rafId);
   clearInterval(tickTimer);
   input?.dispose();
   hud?.dispose();
   unmountDebug?.();
+  game?.dispose();
   game = null;
   input = null;
   hud = null;
@@ -42,7 +65,14 @@ function startGame(save: GameSave): void {
   }
   // Build + warm the scene behind a loading screen so the one-time shader/env
   // compile hitch lands off-screen instead of on the first playable frame.
-  withLoading(`Entering ${regionName}…`, () => {
+  withLoading(`Entering ${regionName}…`, async (progress) => {
+    const tier = resolveQuality(save.settings.graphics?.quality);
+    await preloadAssetGroups(['terrain', 'env'], {
+      label: `${regionName} assets`,
+      skipModels: true,
+      paths: preloadPathsForRegion(save.regionId, tier !== 'low'),
+      onProgress: progress
+    });
     game = new Game(canvas, save);
     game.prewarm();
     (window as unknown as { __game: Game }).__game = game;

@@ -12,7 +12,9 @@
     "test:perf": "vitest run src/test/perf-budget.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "build:assets": "node scripts/assets/build_assets.mjs"
+    "build:assets": "node scripts/assets/build_assets.mjs",
+    "assets:manifest": "node scripts/assets/build_assets.mjs --manifest --report",
+    "assets:check": "node scripts/assets/build_assets.mjs --manifest --report --check-budgets"
   },
   "dependencies": {
     "three": "^0.184.0"

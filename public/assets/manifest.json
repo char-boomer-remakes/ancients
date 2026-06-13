@@ -1,0 +1,597 @@
+{
+  "version": 1,
+  "hash": "ba33d73faafb",
+  "generatedAt": "2026-06-13T17:58:39.805Z",
+  "assetRoot": "/assets/",
+  "totalBytes": 10835194,
+  "groups": {
+    "creep": {
+      "count": 20,
+      "bytes": 3059336
+    },
+    "env": {
+      "count": 2,
+      "bytes": 3180251
+    },
+    "terrain": {
+      "count": 26,
+      "bytes": 3772855
+    },
+    "town": {
+      "count": 9,
+      "bytes": 822752
+    }
+  },
+  "files": [
+    {
+      "path": "creeps/alpaca.glb",
+      "url": "/assets/creeps/alpaca.glb",
+      "bytes": 340456,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/bull.glb",
+      "url": "/assets/creeps/bull.glb",
+      "bytes": 344844,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/crabenemy.glb",
+      "url": "/assets/creeps/crabenemy.glb",
+      "bytes": 62156,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/demon.glb",
+      "url": "/assets/creeps/demon.glb",
+      "bytes": 113392,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/dragonevolved.glb",
+      "url": "/assets/creeps/dragonevolved.glb",
+      "bytes": 138560,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/fox.glb",
+      "url": "/assets/creeps/fox.glb",
+      "bytes": 332748,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/frog.glb",
+      "url": "/assets/creeps/frog.glb",
+      "bytes": 140836,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/ghost.glb",
+      "url": "/assets/creeps/ghost.glb",
+      "bytes": 78548,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/giant.glb",
+      "url": "/assets/creeps/giant.glb",
+      "bytes": 52088,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/glubevolved.glb",
+      "url": "/assets/creeps/glubevolved.glb",
+      "bytes": 68412,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/goblin.glb",
+      "url": "/assets/creeps/goblin.glb",
+      "bytes": 47924,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/golelingevolved.glb",
+      "url": "/assets/creeps/golelingevolved.glb",
+      "bytes": 85588,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/orc.glb",
+      "url": "/assets/creeps/orc.glb",
+      "bytes": 176892,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/orcenemy.glb",
+      "url": "/assets/creeps/orcenemy.glb",
+      "bytes": 45384,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/spider.glb",
+      "url": "/assets/creeps/spider.glb",
+      "bytes": 130436,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/stag.glb",
+      "url": "/assets/creeps/stag.glb",
+      "bytes": 317028,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/tribal.glb",
+      "url": "/assets/creeps/tribal.glb",
+      "bytes": 95396,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/velociraptor.glb",
+      "url": "/assets/creeps/velociraptor.glb",
+      "bytes": 111044,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/wolf.glb",
+      "url": "/assets/creeps/wolf.glb",
+      "bytes": 336460,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/yeti.glb",
+      "url": "/assets/creeps/yeti.glb",
+      "bytes": 41144,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "env/night_1k.hdr",
+      "url": "/assets/env/night_1k.hdr",
+      "bytes": 1745132,
+      "type": "hdr",
+      "group": "env",
+      "preloadGroup": "env",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "env/vale_day_1k.hdr",
+      "url": "/assets/env/vale_day_1k.hdr",
+      "bytes": 1435119,
+      "type": "hdr",
+      "group": "env",
+      "preloadGroup": "env",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/bush.glb",
+      "url": "/assets/props/foliage/bush.glb",
+      "bytes": 49064,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/fern.glb",
+      "url": "/assets/props/foliage/fern.glb",
+      "bytes": 58660,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/oak_1.glb",
+      "url": "/assets/props/foliage/oak_1.glb",
+      "bytes": 184216,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/oak_2.glb",
+      "url": "/assets/props/foliage/oak_2.glb",
+      "bytes": 168460,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/oak_4.glb",
+      "url": "/assets/props/foliage/oak_4.glb",
+      "bytes": 138100,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/pine_1.glb",
+      "url": "/assets/props/foliage/pine_1.glb",
+      "bytes": 109096,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/pine_2.glb",
+      "url": "/assets/props/foliage/pine_2.glb",
+      "bytes": 104704,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/pine_4.glb",
+      "url": "/assets/props/foliage/pine_4.glb",
+      "bytes": 103504,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/rock_1.glb",
+      "url": "/assets/props/foliage/rock_1.glb",
+      "bytes": 28352,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/rock_2.glb",
+      "url": "/assets/props/foliage/rock_2.glb",
+      "bytes": 27164,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/foliage/rock_3.glb",
+      "url": "/assets/props/foliage/rock_3.glb",
+      "bytes": 30588,
+      "type": "model",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/town/barrel.glb",
+      "url": "/assets/props/town/barrel.glb",
+      "bytes": 317256,
+      "type": "model",
+      "group": "town",
+      "preloadGroup": "town",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/town/blacksmith.glb",
+      "url": "/assets/props/town/blacksmith.glb",
+      "bytes": 97444,
+      "type": "model",
+      "group": "town",
+      "preloadGroup": "town",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/town/cart.glb",
+      "url": "/assets/props/town/cart.glb",
+      "bytes": 30972,
+      "type": "model",
+      "group": "town",
+      "preloadGroup": "town",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/town/house_1.glb",
+      "url": "/assets/props/town/house_1.glb",
+      "bytes": 84484,
+      "type": "model",
+      "group": "town",
+      "preloadGroup": "town",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/town/house_2.glb",
+      "url": "/assets/props/town/house_2.glb",
+      "bytes": 103180,
+      "type": "model",
+      "group": "town",
+      "preloadGroup": "town",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/town/house_3.glb",
+      "url": "/assets/props/town/house_3.glb",
+      "bytes": 43696,
+      "type": "model",
+      "group": "town",
+      "preloadGroup": "town",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/town/inn.glb",
+      "url": "/assets/props/town/inn.glb",
+      "bytes": 92748,
+      "type": "model",
+      "group": "town",
+      "preloadGroup": "town",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/town/market_stand_1.glb",
+      "url": "/assets/props/town/market_stand_1.glb",
+      "bytes": 25184,
+      "type": "model",
+      "group": "town",
+      "preloadGroup": "town",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "props/town/well.glb",
+      "url": "/assets/props/town/well.glb",
+      "bytes": 27788,
+      "type": "model",
+      "group": "town",
+      "preloadGroup": "town",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Grass001_Color.jpg",
+      "url": "/assets/textures/terrain/Grass001_Color.jpg",
+      "bytes": 201722,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Grass001_NormalGL.jpg",
+      "url": "/assets/textures/terrain/Grass001_NormalGL.jpg",
+      "bytes": 318381,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Grass001_Roughness.jpg",
+      "url": "/assets/textures/terrain/Grass001_Roughness.jpg",
+      "bytes": 250009,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Ground048_Color.jpg",
+      "url": "/assets/textures/terrain/Ground048_Color.jpg",
+      "bytes": 330044,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Ground048_NormalGL.jpg",
+      "url": "/assets/textures/terrain/Ground048_NormalGL.jpg",
+      "bytes": 333371,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Ground048_Roughness.jpg",
+      "url": "/assets/textures/terrain/Ground048_Roughness.jpg",
+      "bytes": 149899,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Ground080_Color.jpg",
+      "url": "/assets/textures/terrain/Ground080_Color.jpg",
+      "bytes": 85549,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Ground080_NormalGL.jpg",
+      "url": "/assets/textures/terrain/Ground080_NormalGL.jpg",
+      "bytes": 127359,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Ground080_Roughness.jpg",
+      "url": "/assets/textures/terrain/Ground080_Roughness.jpg",
+      "bytes": 62142,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Rock051_Color.jpg",
+      "url": "/assets/textures/terrain/Rock051_Color.jpg",
+      "bytes": 224180,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Rock051_NormalGL.jpg",
+      "url": "/assets/textures/terrain/Rock051_NormalGL.jpg",
+      "bytes": 246174,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Rock051_Roughness.jpg",
+      "url": "/assets/textures/terrain/Rock051_Roughness.jpg",
+      "bytes": 110633,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Snow010A_Color.jpg",
+      "url": "/assets/textures/terrain/Snow010A_Color.jpg",
+      "bytes": 17235,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Snow010A_NormalGL.jpg",
+      "url": "/assets/textures/terrain/Snow010A_NormalGL.jpg",
+      "bytes": 101490,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "textures/terrain/Snow010A_Roughness.jpg",
+      "url": "/assets/textures/terrain/Snow010A_Roughness.jpg",
+      "bytes": 212759,
+      "type": "texture",
+      "group": "terrain",
+      "preloadGroup": "terrain",
+      "sourceSpec": null,
+      "source": null
+    }
+  ]
+}

@@ -51,6 +51,19 @@ interface MapMarker {
 
 export type CameraMode = 'follow' | 'map';
 
+export interface GraphicsRenderStats {
+  frameMsAvg: number;
+  frameMsP95: number;
+  drawCalls: number;
+  triangles: number;
+  geometries: number;
+  textures: number;
+  programs: number | null;
+  qualityTier: QualityTier;
+  dpr: number;
+  adaptiveScale: number;
+}
+
 // Hemi is deliberately low: the PBR env map now supplies most of the ambient
 // fill, so a strong hemisphere light on top would wash the scene out.
 const DAY = {
@@ -255,6 +268,9 @@ export class GameScene {
   private weatherVel: Float32Array | null = null;
   private views = new Map<number, UnitView>();
   private heroAssets = new HeroAssetLoader();
+  private disposed = false;
+  private sceneToken = 0;
+  private readonly onResize = (): void => this.resize();
   // Live, user-tunable graphics state (GRAPHICS_SPEC §6 settings).
   private exposureBase = 0.92;
   private gradeScale = 1;
@@ -271,13 +287,17 @@ export class GameScene {
   playerTeam = 0;
   private time = 0;
   private frameParity = 0; // flips 0/1 each frame to drive reduced-LOD animation cadence
+  private frameMsSamples: number[] = [];
+  private adaptiveScale = 1;
+  private adaptiveOverBudgetSec = 0;
+  private adaptiveCooldownSec = 0;
 
   constructor(canvas: HTMLCanvasElement, region: RegionDef, quality: QualityTier = 'high') {
     const qualityCfg = qualityPreset(quality);
     this.quality = qualityCfg;
     this.biome = region.biome;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !qualityCfg.smaa });
-    this.renderer.setPixelRatio(clampedPixelRatio(window.devicePixelRatio, quality));
+    this.applyPixelRatio();
     this.renderer.shadowMap.enabled = qualityCfg.shadows;
     this.renderer.shadowMap.type = qualityCfg.shadowType === 'pcf' ? THREE.PCFShadowMap : THREE.BasicShadowMap;
     // Filmic tonemap + sRGB so PBR highlights and bloom read like Dota (§3.1).
@@ -333,7 +353,7 @@ export class GameScene {
     this.skyDome.renderOrder = -1;
     this.scene.add(this.skyDome);
 
-    this.terrain = buildTerrain(region);
+    this.terrain = buildTerrain(region, () => this.isLive());
     this.scene.add(this.terrain.group);
 
     if (qualityCfg.weatherDensity > 0) this.buildWeather(region.biome, qualityCfg.weatherDensity);
@@ -345,7 +365,16 @@ export class GameScene {
 
     if (qualityCfg.postFx) this.setupComposer(qualityCfg);
     this.resize();
-    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('resize', this.onResize);
+  }
+
+  private isLive(): boolean {
+    return !this.disposed;
+  }
+
+  private applyPixelRatio(): void {
+    const base = clampedPixelRatio(window.devicePixelRatio, this.quality.tier);
+    this.renderer.setPixelRatio(Math.max(0.75, base * this.adaptiveScale));
   }
 
   /** Build the EffectComposer stack: render → bloom → grade → output → SMAA.
@@ -446,6 +475,29 @@ export class GameScene {
     this.renderer.compile(this.scene, this.camera);
   }
 
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.sceneToken++;
+    window.removeEventListener('resize', this.onResize);
+    this.resetUnitViews();
+    this.scene.remove(this.vfx.group);
+    this.vfx.reset();
+    if (this.weather) {
+      this.scene.remove(this.weather);
+      this.weather.geometry.dispose();
+      (this.weather.material as THREE.Material).dispose();
+      this.weather = null;
+      this.weatherVel = null;
+    }
+    this.composer?.dispose();
+    this.composer = null;
+    this.scene.environment?.dispose();
+    this.scene.environment = null;
+    this.sun.shadow.map?.dispose();
+    this.renderer.dispose();
+  }
+
   /** Live-apply user graphics settings: exposure, grade strength, reduced motion. */
   setGraphics(g: { exposure?: number; grade?: number; reducedMotion?: boolean }): void {
     if (g.exposure !== undefined) {
@@ -467,7 +519,10 @@ export class GameScene {
   setQuality(tier: QualityTier): void {
     const q = qualityPreset(tier);
     this.quality = q;
-    this.renderer.setPixelRatio(clampedPixelRatio(window.devicePixelRatio, tier));
+    this.adaptiveScale = 1;
+    this.adaptiveOverBudgetSec = 0;
+    this.adaptiveCooldownSec = 0;
+    this.applyPixelRatio();
 
     this.renderer.shadowMap.enabled = q.shadows;
     this.renderer.shadowMap.type = q.shadowType === 'pcf' ? THREE.PCFShadowMap : THREE.BasicShadowMap;
@@ -520,8 +575,9 @@ export class GameScene {
    */
   private installHdrEnvironment(): void {
     if (!this.quality.envMap) return;
+    const token = this.sceneToken;
     void loadHdr('/assets/env/vale_day_1k.hdr').then((hdr) => {
-      if (!hdr || !this.renderer) return;
+      if (!hdr || !this.isLive() || token !== this.sceneToken || !this.quality.envMap) return;
       const pmrem = new THREE.PMREMGenerator(this.renderer);
       const env = pmrem.fromEquirectangular(hdr).texture;
       pmrem.dispose();
@@ -544,6 +600,7 @@ export class GameScene {
   // ---------- per-frame ----------
 
   update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number): void {
+    this.recordFrameMs(renderDt * 1000, renderDt);
     this.time += renderDt;
     this.frameParity ^= 1;
     this.syncUnits(sim, renderDt);
@@ -563,10 +620,59 @@ export class GameScene {
     else this.renderer.render(this.scene, this.camera);
   }
 
+  private recordFrameMs(frameMs: number, dt: number): void {
+    if (!Number.isFinite(frameMs) || frameMs <= 0) return;
+    this.frameMsSamples.push(frameMs);
+    if (this.frameMsSamples.length > 180) this.frameMsSamples.shift();
+    this.updateAdaptiveDpr(frameMs, dt);
+  }
+
+  private frameStats(): { avg: number; p95: number } {
+    if (!this.frameMsSamples.length) return { avg: 0, p95: 0 };
+    const sum = this.frameMsSamples.reduce((a, b) => a + b, 0);
+    const sorted = [...this.frameMsSamples].sort((a, b) => a - b);
+    return {
+      avg: sum / this.frameMsSamples.length,
+      p95: sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]
+    };
+  }
+
+  private updateAdaptiveDpr(frameMs: number, dt: number): void {
+    if (this.quality.tier === 'low' || this.quality.tier === 'medium') return;
+    this.adaptiveCooldownSec = Math.max(0, this.adaptiveCooldownSec - dt);
+    if (frameMs > 22) this.adaptiveOverBudgetSec += dt;
+    else if (frameMs < 17) this.adaptiveOverBudgetSec = Math.max(0, this.adaptiveOverBudgetSec - dt * 2);
+    if (this.adaptiveOverBudgetSec < 4 || this.adaptiveCooldownSec > 0 || this.adaptiveScale <= 0.75) return;
+    this.adaptiveScale = Math.max(0.75, this.adaptiveScale * 0.9);
+    this.applyPixelRatio();
+    this.resize();
+    this.adaptiveCooldownSec = 8;
+    this.adaptiveOverBudgetSec = 0;
+  }
+
+  graphicsStats(): GraphicsRenderStats {
+    const frames = this.frameStats();
+    const info = this.renderer.info;
+    const programs = (info as unknown as { programs?: unknown[] | null }).programs;
+    return {
+      frameMsAvg: frames.avg,
+      frameMsP95: frames.p95,
+      drawCalls: info.render.calls,
+      triangles: info.render.triangles,
+      geometries: info.memory.geometries,
+      textures: info.memory.textures,
+      programs: programs ? programs.length : null,
+      qualityTier: this.quality.tier,
+      dpr: this.renderer.getPixelRatio(),
+      adaptiveScale: this.adaptiveScale
+    };
+  }
+
   /** Drop every cached unit view + transient VFX. Used when the rendered sim
    *  is swapped (e.g. entering/leaving a live gym fight) so unit ids from the
    *  new sim never alias views built for the old one. */
   resetUnitViews(): void {
+    this.sceneToken++;
     for (const [, view] of this.views) this.scene.remove(view.rig.root);
     this.views.clear();
     this.selectedUid = -1;
@@ -678,13 +784,16 @@ export class GameScene {
     }
     applyItemAppearances(rig, this.itemAppearancesFor(u));
     this.scene.add(rig.root);
+    const token = this.sceneToken;
 
     // Pluggable rig (Phase 5): if an authored glTF is shipped for this hero, swap it
     // in once it loads; otherwise the procedural rig above stays as the fallback.
     const assetEntry = u.kind === 'hero' ? heroAssetEntry(u.heroId) : null;
     if (assetEntry) {
       void this.heroAssets.loadHero(assetEntry).then((asset) => {
-        if (asset && this.views.has(u.uid)) mountHeroModel(rig, cloneModel(asset.scene), asset.animations, assetEntry.clips);
+        if (asset && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
+          mountHeroModel(rig, cloneModel(asset.scene), asset.animations, assetEntry.clips);
+        }
       });
     }
 
@@ -695,7 +804,9 @@ export class GameScene {
       const creatureUrl = creepCreatureUrl(u.creepId, sil.build);
       if (creatureUrl) {
         void loadModelAsset(creatureUrl).then((asset) => {
-          if (asset && this.views.has(u.uid)) mountHeroModel(rig, cloneModel(asset.scene), asset.animations);
+          if (asset && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
+            mountHeroModel(rig, cloneModel(asset.scene), asset.animations);
+          }
         });
       }
     }

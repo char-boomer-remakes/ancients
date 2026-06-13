@@ -6,6 +6,13 @@ Read this first each session, then `DECISIONS.md`, then run `npm test`.
 
 Phase 6 holds Phases 2–4 to the **standalone specs'** bar, not the looser in-repo `SPEC.md`. A lot of earlier work shipped as data + pure helpers with unit tests but was never wired into the live game loop; the Phase 6 section below tracks the real bar (acceptance + the §6 test matrix). Rows in the older phase checklists that were helper-only are annotated `→ P6 Mn` and only flip to PASS once Phase 6 wires them end-to-end and proves it with an integration test.
 
+### Performance plan pass
+
+- 2026-06-13: M1 asset manifest and budget check landed. `npm run assets:check` generated `public/assets/manifest.json` with 57 files, 10.33MB total, hash `ba33d73faafb`, under the 90MB committed-asset cap.
+- 2026-06-13: Current asset groups: creep 20 files / 2.92MB, env 2 files / 3.03MB, terrain 26 files / 3.60MB, town 9 files / 803KB.
+- 2026-06-13: Loading path now preloads the active region terrain set and HDR from the manifest behind the loading screen, with byte progress when a manifest is present.
+- 2026-06-13: Dev graphics HUD under `?debug` reports frame avg/p95, draw calls, triangles, texture/program counts, active DPR/tier, loaded asset bytes, cache sizes, and cache hits.
+
 ### Phase 1 checklist (SPEC §9)
 
 | # | Item | Status |

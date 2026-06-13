@@ -29,14 +29,108 @@
 //   are loaded directly (terrain splats, sky maps, water normals).
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 const PUBLIC_ASSETS = path.join(ROOT, 'public', 'assets');
+const MANIFEST_PATH = path.join(PUBLIC_ASSETS, 'manifest.json');
+const DEFAULT_BUDGETS = {
+  maxTotalBytes: 90 * 1024 * 1024,
+  maxGroupBytes: {
+    creep: 35 * 1024 * 1024,
+    terrain: 28 * 1024 * 1024,
+    town: 18 * 1024 * 1024,
+    hero: 45 * 1024 * 1024,
+    env: 32 * 1024 * 1024,
+    ui: 5 * 1024 * 1024
+  },
+  maxFileBytesByGroup: {
+    creep: 8 * 1024 * 1024,
+    terrain: 10 * 1024 * 1024,
+    town: 8 * 1024 * 1024,
+    hero: 15 * 1024 * 1024,
+    env: 20 * 1024 * 1024,
+    ui: 4 * 1024 * 1024
+  }
+};
 
 function resolveSrc(src) {
   return path.isAbsolute(src) ? src : path.join(ROOT, src);
+}
+
+function relAssetPath(filePath) {
+  return path.relative(PUBLIC_ASSETS, filePath).split(path.sep).join('/');
+}
+
+function assetUrl(rel) {
+  return `/assets/${rel}`;
+}
+
+function assetGroup(rel) {
+  if (rel.startsWith('creeps/')) return 'creep';
+  if (rel.startsWith('heroes/')) return 'hero';
+  if (rel.startsWith('env/')) return 'env';
+  if (rel.startsWith('ui/')) return 'ui';
+  if (rel.startsWith('props/town/')) return 'town';
+  if (rel.startsWith('props/') || rel.startsWith('textures/terrain/')) return 'terrain';
+  if (rel.startsWith('textures/')) return 'terrain';
+  return 'ui';
+}
+
+function assetType(rel) {
+  const ext = path.extname(rel).slice(1).toLowerCase();
+  if (ext === 'glb' || ext === 'gltf') return 'model';
+  if (ext === 'hdr') return 'hdr';
+  if (['jpg', 'jpeg', 'png', 'webp', 'ktx2'].includes(ext)) return 'texture';
+  if (['woff', 'woff2'].includes(ext)) return 'font';
+  if (['json'].includes(ext)) return 'data';
+  return ext || 'file';
+}
+
+function formatBytes(bytes) {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)}MB`;
+  return `${(bytes / 1024).toFixed(0)}KB`;
+}
+
+function walkAssets(dir = PUBLIC_ASSETS, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, ent.name);
+    if (ent.isDirectory()) {
+      walkAssets(p, out);
+      continue;
+    }
+    const rel = relAssetPath(p);
+    if (rel === 'manifest.json' || path.basename(rel).startsWith('.')) continue;
+    out.push(rel);
+  }
+  return out.sort();
+}
+
+function sourceKey(specFile) {
+  return path.relative(ROOT, path.resolve(specFile)).split(path.sep).join('/');
+}
+
+function complexityForRoot(root) {
+  const textures = root.listTextures().map((tex) => {
+    let size = null;
+    try {
+      const s = typeof tex.getSize === 'function' ? tex.getSize() : null;
+      if (Array.isArray(s)) size = { width: s[0], height: s[1] };
+    } catch {
+      size = null;
+    }
+    return { name: tex.getName() || '', ...size };
+  });
+  return {
+    meshes: root.listMeshes().length,
+    materials: root.listMaterials().length,
+    textures: textures.length,
+    textureDimensions: textures.filter((t) => t.width && t.height),
+    animations: root.listAnimations().length
+  };
 }
 
 function stripClipName(name) {
@@ -81,9 +175,14 @@ async function processModel(io, fns, item) {
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   await io.write(outPath, doc);
-  const kb = (fs.statSync(outPath).size / 1024).toFixed(0);
-  const clips = root.listAnimations().length;
-  console.log(`  ${item.out}  ${kb}KB${clips ? ` (${clips} clips)` : ''}`);
+  const bytes = fs.statSync(outPath).size;
+  const complexity = complexityForRoot(root);
+  console.log(
+    `  ${item.out}  ${formatBytes(bytes)}` +
+    ` (${complexity.meshes} meshes, ${complexity.materials} materials` +
+    `${complexity.animations ? `, ${complexity.animations} clips` : ''})`
+  );
+  return { rel: item.out, bytes, type: 'model', complexity };
 }
 
 function processCopy(item) {
@@ -91,7 +190,98 @@ function processCopy(item) {
   const outPath = path.join(PUBLIC_ASSETS, item.out);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.copyFileSync(srcPath, outPath);
-  console.log(`  ${item.out}  ${(fs.statSync(outPath).size / 1024).toFixed(0)}KB (copy)`);
+  const bytes = fs.statSync(outPath).size;
+  console.log(`  ${item.out}  ${formatBytes(bytes)} (copy)`);
+  return { rel: item.out, bytes, type: assetType(item.out), complexity: null };
+}
+
+function buildManifest(sourceByOut) {
+  const files = walkAssets().map((rel) => {
+    const abs = path.join(PUBLIC_ASSETS, rel);
+    const meta = sourceByOut.get(rel) ?? {};
+    const bytes = fs.statSync(abs).size;
+    const group = meta.group ?? meta.preloadGroup ?? assetGroup(rel);
+    return {
+      path: rel,
+      url: assetUrl(rel),
+      bytes,
+      type: meta.assetType ?? assetType(rel),
+      group,
+      preloadGroup: meta.preloadGroup ?? group,
+      sourceSpec: meta.sourceSpec ?? null,
+      source: meta.source ?? meta.src ?? null
+    };
+  });
+  const totalBytes = files.reduce((sum, f) => sum + f.bytes, 0);
+  const groups = {};
+  for (const file of files) {
+    const g = groups[file.group] ?? { count: 0, bytes: 0 };
+    g.count++;
+    g.bytes += file.bytes;
+    groups[file.group] = g;
+  }
+  const hash = createHash('sha256')
+    .update(JSON.stringify(files.map((f) => [f.path, f.bytes, f.group, f.type])))
+    .digest('hex')
+    .slice(0, 12);
+  return {
+    version: 1,
+    hash,
+    generatedAt: new Date().toISOString(),
+    assetRoot: '/assets/',
+    totalBytes,
+    groups,
+    files
+  };
+}
+
+function writeManifest(manifest) {
+  fs.mkdirSync(PUBLIC_ASSETS, { recursive: true });
+  fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`manifest: ${path.relative(ROOT, MANIFEST_PATH)} (${manifest.files.length} files, ${formatBytes(manifest.totalBytes)}, hash ${manifest.hash})`);
+}
+
+function printReport(manifest, built) {
+  console.log('\nasset report');
+  console.log(`  total: ${formatBytes(manifest.totalBytes)} across ${manifest.files.length} files`);
+  for (const [group, stats] of Object.entries(manifest.groups).sort(([a], [b]) => a.localeCompare(b))) {
+    console.log(`  ${group}: ${stats.count} files, ${formatBytes(stats.bytes)}`);
+  }
+  const largest = [...manifest.files].sort((a, b) => b.bytes - a.bytes).slice(0, 10);
+  if (largest.length) {
+    console.log('  largest:');
+    for (const f of largest) console.log(`    ${formatBytes(f.bytes).padStart(8)}  ${f.path}`);
+  }
+  const complex = built.filter((b) => b.complexity);
+  if (complex.length) {
+    console.log('  model complexity:');
+    for (const b of complex) {
+      const c = b.complexity;
+      console.log(
+        `    ${b.rel}: ${c.meshes} meshes, ${c.materials} materials, ` +
+        `${c.textures} textures, ${c.animations} animations`
+      );
+      for (const tex of c.textureDimensions.slice(0, 6)) {
+        console.log(`      tex ${tex.name || '(unnamed)'} ${tex.width}x${tex.height}`);
+      }
+    }
+  }
+}
+
+function checkBudgets(manifest, budgets = DEFAULT_BUDGETS) {
+  const failures = [];
+  if (manifest.totalBytes > budgets.maxTotalBytes) {
+    failures.push(`total ${formatBytes(manifest.totalBytes)} > ${formatBytes(budgets.maxTotalBytes)}`);
+  }
+  for (const [group, limit] of Object.entries(budgets.maxGroupBytes)) {
+    const bytes = manifest.groups[group]?.bytes ?? 0;
+    if (bytes > limit) failures.push(`${group} group ${formatBytes(bytes)} > ${formatBytes(limit)}`);
+  }
+  for (const file of manifest.files) {
+    const limit = budgets.maxFileBytesByGroup[file.group];
+    if (limit && file.bytes > limit) failures.push(`${file.path} ${formatBytes(file.bytes)} > ${formatBytes(limit)}`);
+  }
+  return failures;
 }
 
 async function loadDeps() {
@@ -115,35 +305,72 @@ async function loadDeps() {
 }
 
 async function main() {
-  const specs = process.argv.slice(2);
-  if (!specs.length) {
-    console.error('usage: node scripts/assets/build_assets.mjs <spec.json> [...]');
+  const args = process.argv.slice(2);
+  const flags = new Set(args.filter((a) => a.startsWith('--')));
+  const specs = args.filter((a) => !a.startsWith('--'));
+  const wantsManifest = specs.length > 0 || flags.has('--manifest');
+  const wantsReport = specs.length > 0 || flags.has('--report');
+  const wantsBudgetCheck = flags.has('--check-budgets') || flags.has('--check-budget');
+
+  if (!specs.length && !wantsManifest && !wantsReport && !wantsBudgetCheck) {
+    console.error('usage: node scripts/assets/build_assets.mjs [--manifest] [--report] [--check-budgets] <spec.json> [...]');
     process.exit(1);
   }
-  const deps = await loadDeps();
-  await deps.meshopt.MeshoptEncoder.ready;
-  await deps.meshopt.MeshoptDecoder.ready;
-  const io = new deps.NodeIO()
-    .registerExtensions(deps.ALL_EXTENSIONS)
-    .registerDependencies({ 'meshopt.encoder': deps.meshopt.MeshoptEncoder, 'meshopt.decoder': deps.meshopt.MeshoptDecoder });
 
   let failures = 0;
-  for (const specFile of specs) {
-    const spec = JSON.parse(fs.readFileSync(specFile, 'utf8'));
-    console.log(`spec: ${specFile} (${spec.items.length} items)`);
-    for (const item of spec.items) {
-      try {
-        if (item.type === 'copy') processCopy(item);
-        else await processModel(io, deps, item);
-      } catch (err) {
-        failures++;
-        console.error(`  FAIL ${item.src}: ${err instanceof Error ? err.message : err}`);
+  const built = [];
+  const sourceByOut = new Map();
+
+  if (specs.length) {
+    const deps = await loadDeps();
+    await deps.meshopt.MeshoptEncoder.ready;
+    await deps.meshopt.MeshoptDecoder.ready;
+    const io = new deps.NodeIO()
+      .registerExtensions(deps.ALL_EXTENSIONS)
+      .registerDependencies({ 'meshopt.encoder': deps.meshopt.MeshoptEncoder, 'meshopt.decoder': deps.meshopt.MeshoptDecoder });
+
+    for (const specFile of specs) {
+      const specPath = sourceKey(specFile);
+      const spec = JSON.parse(fs.readFileSync(specFile, 'utf8'));
+      console.log(`spec: ${specFile} (${spec.items.length} items)`);
+      for (const item of spec.items) {
+        sourceByOut.set(item.out, {
+          sourceSpec: specPath,
+          src: item.src,
+          source: item.source,
+          group: item.group,
+          preloadGroup: item.preloadGroup,
+          assetType: item.assetType
+        });
+        try {
+          const result = item.type === 'copy' ? processCopy(item) : await processModel(io, deps, item);
+          built.push(result);
+        } catch (err) {
+          failures++;
+          console.error(`  FAIL ${item.src}: ${err instanceof Error ? err.message : err}`);
+        }
       }
     }
   }
+
   if (failures) {
     console.error(`${failures} item(s) failed`);
     process.exit(1);
+  }
+
+  if (wantsManifest || wantsReport || wantsBudgetCheck) {
+    const manifest = buildManifest(sourceByOut);
+    if (wantsManifest) writeManifest(manifest);
+    if (wantsReport) printReport(manifest, built);
+    if (wantsBudgetCheck) {
+      const budgetFailures = checkBudgets(manifest);
+      if (budgetFailures.length) {
+        console.error('\nasset budget check failed:');
+        for (const fail of budgetFailures) console.error(`  - ${fail}`);
+        process.exit(1);
+      }
+      console.log(`asset budget check passed (${formatBytes(manifest.totalBytes)} / ${formatBytes(DEFAULT_BUDGETS.maxTotalBytes)})`);
+    }
   }
   console.log('done.');
 }

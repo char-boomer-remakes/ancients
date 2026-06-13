@@ -18,6 +18,8 @@ export interface TerrainInfo {
   update?(time: number): void;
 }
 
+type SceneLiveCheck = () => boolean;
+
 // Generated grayscale ground-detail texture (GRAPHICS_SPEC §5.1): mostly white
 // so it barely darkens the painted height bands, with sparse speckle + soft
 // blotches for a hand-painted read. Browser-only; null under node tests.
@@ -102,7 +104,7 @@ const TERRAIN_PBR_SET: Record<string, string> = {
   wasteland: 'Ground048'
 };
 
-function applyTerrainPBR(mat: THREE.MeshStandardMaterial, biome: string, repeat: number): void {
+function applyTerrainPBR(mat: THREE.MeshStandardMaterial, biome: string, repeat: number, isLive: SceneLiveCheck): void {
   const set = TERRAIN_PBR_SET[biome] ?? TERRAIN_PBR_SET.grass;
   const base = `/assets/textures/terrain/${set}`;
   void Promise.all([
@@ -110,6 +112,7 @@ function applyTerrainPBR(mat: THREE.MeshStandardMaterial, biome: string, repeat:
     loadTex(`${base}_NormalGL.jpg`, { repeat }),
     loadTex(`${base}_Roughness.jpg`, { repeat })
   ]).then(([color, normal, rough]) => {
+    if (!isLive()) return;
     if (!color && !normal && !rough) return; // headless / all failed: keep the painted floor
     if (color) mat.map = color;
     if (normal) {
@@ -164,10 +167,12 @@ function swapToInstancedModels(
   fallback: THREE.Object3D[],
   urls: string[],
   matrices: THREE.Matrix4[],
-  targetHeight: number
+  targetHeight: number,
+  isLive: SceneLiveCheck
 ): void {
   if (!matrices.length || !urls.length) return;
   void Promise.all(urls.map((u) => loadModel(u))).then((scenes) => {
+    if (!isLive()) return;
     const loaded = scenes.filter((s): s is THREE.Group => !!s);
     if (!loaded.length) return; // keep the procedural fallback
     const models = loaded.map((s) => normalizedClone(s, targetHeight));
@@ -185,10 +190,12 @@ function swapToInstancedModels(
 function swapTownBuildings(
   g: THREE.Group,
   fallback: THREE.Object3D[],
-  placements: { x: number; z: number; baseY: number; rotY: number }[]
+  placements: { x: number; z: number; baseY: number; rotY: number }[],
+  isLive: SceneLiveCheck
 ): void {
   if (!placements.length) return;
   void Promise.all(modelUrls(TOWN_BASE, TOWN_BUILDINGS).map((u) => loadModel(u))).then((scenes) => {
+    if (!isLive()) return;
     const loaded = scenes.filter((s): s is THREE.Group => !!s);
     if (!loaded.length) return;
     placements.forEach((p, i) => {
@@ -210,7 +217,7 @@ function swapTownBuildings(
   });
 }
 
-export function buildTerrain(region: RegionDef): TerrainInfo {
+export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => true): TerrainInfo {
   const group = new THREE.Group();
   const sizeW = region.size / WORLD_SCALE;
   const rng = new Rng(region.seed ^ hashString(region.id));
@@ -272,7 +279,7 @@ export function buildTerrain(region: RegionDef): TerrainInfo {
   ground.position.set(sizeW / 2, 0, sizeW / 2);
   ground.receiveShadow = true;
   group.add(ground);
-  applyTerrainPBR(mat, region.biome, Math.max(8, Math.round(sizeW / 8)));
+  applyTerrainPBR(mat, region.biome, Math.max(8, Math.round(sizeW / 8)), isLive);
 
   // Animated shader water ring outside the playfield (GRAPHICS_SPEC §5.4):
   // summed sines ripple the surface and paint deeper troughs / foamy crests.
@@ -368,7 +375,7 @@ export function buildTerrain(region: RegionDef): TerrainInfo {
   trees.castShadow = true;
   group.add(trees);
   group.add(trunks);
-  swapToInstancedModels(group, [trees, trunks], modelUrls(FOLIAGE_BASE, TREE_MODELS[region.biome] ?? TREE_MODELS.grass), treeMatrices, 4.6);
+  swapToInstancedModels(group, [trees, trunks], modelUrls(FOLIAGE_BASE, TREE_MODELS[region.biome] ?? TREE_MODELS.grass), treeMatrices, 4.6, isLive);
 
   // rocks
   const rockGeo = new THREE.DodecahedronGeometry(0.8, 0);
@@ -391,10 +398,10 @@ export function buildTerrain(region: RegionDef): TerrainInfo {
   rocks.count = placedRocks;
   rocks.castShadow = true;
   group.add(rocks);
-  swapToInstancedModels(group, [rocks], modelUrls(FOLIAGE_BASE, ROCK_MODELS), rockMatrices, 1.5);
+  swapToInstancedModels(group, [rocks], modelUrls(FOLIAGE_BASE, ROCK_MODELS), rockMatrices, 1.5, isLive);
 
   // town: stone circle + simple huts + shrine crystal
-  const town = buildTown(region, heightAt);
+  const town = buildTown(region, heightAt, isLive);
   group.add(town);
 
   return {
@@ -405,7 +412,7 @@ export function buildTerrain(region: RegionDef): TerrainInfo {
   };
 }
 
-function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number): THREE.Group {
+function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number, isLive: SceneLiveCheck): THREE.Group {
   const g = new THREE.Group();
   const t = region.town.pos;
   const baseY = heightAt(t.x, t.y);
@@ -441,7 +448,7 @@ function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number
     // Buildings face the plaza centre.
     townPlacements.push({ x: hx, z: hz, baseY: heightAt(t.x + Math.cos(ang) * (r * WORLD_SCALE), t.y + Math.sin(ang) * (r * WORLD_SCALE)), rotY: ang + Math.PI });
   }
-  swapTownBuildings(g, hutMeshes, townPlacements);
+  swapTownBuildings(g, hutMeshes, townPlacements, isLive);
 
   // shrine: floating crystal on a plinth
   const sx = region.shrine.pos.x / WORLD_SCALE;

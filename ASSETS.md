@@ -16,11 +16,12 @@ The build boots and looks intentional with `public/assets/` empty. Assets are an
 
 ## Pipeline
 
-Raw packs are downloaded into `tmp/asset_src/` (gitignored, never committed) and optimized into `public/assets/` by `scripts/assets/build_assets.mjs` (gltf-transform: resample, prune, dedup, meshopt; sharp: resize to webp). One spec JSON per pack lives under `scripts/assets/specs/`. Commit only the optimized output and the spec, plus a row in the table below.
+Raw packs are downloaded into `tmp/asset_src/` (gitignored, never committed) and optimized into `public/assets/` by `scripts/assets/build_assets.mjs` (gltf-transform: resample, prune, dedup, meshopt; sharp: resize to webp). One spec JSON per pack lives under `scripts/assets/specs/`. Commit only the optimized output and the spec, plus a row in the table below. The build writes `public/assets/manifest.json` so runtime and review tools can see each shipped file, byte size, type, source spec, and preload group.
 
 ```sh
 npm i -D @gltf-transform/core @gltf-transform/extensions @gltf-transform/functions meshoptimizer sharp
 npm run build:assets -- scripts/assets/specs/<pack>.json
+npm run assets:check
 ```
 
 ## Directory layout
