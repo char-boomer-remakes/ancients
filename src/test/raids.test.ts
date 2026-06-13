@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllContent } from '../data/index';
-import { runRaidEncounter, setupRaidSim, type RaidEncounterSetup } from '../core/macro';
+import { createRaidMechanicRunner, runRaidEncounter, setupRaidSim, type RaidEncounterSetup } from '../core/macro';
 import { rollLoot } from '../core/phase3';
 import { applyDamage } from '../core/combat';
 import { freshEchoProgress } from '../core/echo';
@@ -102,6 +102,35 @@ describe('raid-mechanics (test 13)', () => {
     boss.refresh(sim.time);
     sim.run(0.5);
     expect(boss.order).toMatchObject({ kind: 'attack-unit', uid: axe.uid });
+  });
+
+  it('arms simultaneous beats but lets the boss brain start one per tick', () => {
+    const gated: RaidDef = {
+      ...SCRIPTED,
+      id: 'test-fsm-gated-raid',
+      signatureExotic: undefined,
+      enrageSec: 999,
+      addWaves: [{ atHpPct: 90, summon: THRALL, count: 2 }],
+      zones: [{ atHpPct: 90, zone: SCRIPTED.zones[0].zone }]
+    };
+    const sim = setupRaidSim({
+      seed: 77,
+      party: [{ heroId: 'sven', level: 22 }, { heroId: 'lich', level: 22 }],
+      boss: gated.boss,
+      maxSec: 30
+    });
+    const boss = sim.unitsArr.find((u) => u.team === 1 && u.ctrl.kind === 'boss')!;
+    const party = sim.unitsArr.filter((u) => u.team === 0);
+    party[0].pos = { x: 1000, y: 1000 };
+    party[1].pos = { x: 1080, y: 1000 };
+    sim.rebuildSpatial();
+
+    boss.hp = boss.stats.maxHp * 0.8; // both HP-gated beats arm together
+    const mechanics = createRaidMechanicRunner(gated, sim, boss);
+    mechanics.tick(sim);
+    expect(mechanics.fired).toHaveLength(1);
+    mechanics.tick(sim);
+    expect(mechanics.fired).toHaveLength(2);
   });
 });
 

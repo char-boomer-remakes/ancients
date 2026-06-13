@@ -8,10 +8,10 @@ import type { Unit } from './unit';
 // ============================================================
 // Boss phase-FSM (AI_OVERHAUL §5, Layer 3). A thin outer machine —
 // opening / sustained / pressure / enrage / desperation — that picks
-// a target *posture* each phase. Inside a phase the boss still uses
-// the shared utility scorer to choose the action (cast / cluster /
-// attack); the FSM only biases *who* it commits to. The scripted
-// beats in createRaidMechanicRunner stay authoritative.
+// a target posture and starts armed raid beats. Inside a phase the
+// boss still uses the shared utility scorer to choose moment actions
+// (cast / cluster / attack); the FSM decides what posture and scripted
+// mechanic pressure it commits to.
 //
 // Variety is seeded off a fork of sim.rng (deterministic, and isolated
 // so it does not perturb the global stream), so attempts differ while
@@ -20,6 +20,14 @@ import type { Unit } from './unit';
 
 export type BossPhase = 'opening' | 'sustained' | 'pressure' | 'enrage' | 'desperation';
 export type BossTargetPref = 'threat' | 'healer' | 'cluster' | 'kill';
+export type BossMechanicKind = 'add-wave' | 'zone' | 'signature' | 'enrage';
+
+export interface BossMechanicCandidate {
+  key: string;
+  kind: BossMechanicKind;
+  atHpPct: number;
+  armedAt: number;
+}
 
 export interface BossState {
   /** raid enrage timer in seconds; once crossed the boss enters the enrage phase */
@@ -33,6 +41,7 @@ export interface BossState {
 }
 
 const CLUSTER_RADIUS = 360;
+const PHASE_RANK: Record<BossPhase, number> = { opening: 0, sustained: 1, pressure: 2, desperation: 3, enrage: 4 };
 
 function enemyOf(sim: Sim, boss: Unit, o: Unit): boolean {
   return o.alive && o.team !== boss.team && o.kind !== 'npc' && !o.summary.untargetable && o.isVisibleTo(boss.team, sim.time);
@@ -62,6 +71,17 @@ function rollPref(sim: Sim, boss: Unit, phase: BossPhase, depth: number): BossTa
 
 function phaseCode(p: BossPhase): number {
   return p === 'opening' ? 1 : p === 'sustained' ? 2 : p === 'pressure' ? 3 : p === 'enrage' ? 4 : 5;
+}
+
+function ensureBossPlan(sim: Sim, boss: Unit): { phase: BossPhase; pref: BossTargetPref } | null {
+  const cfg = boss.ctrl.boss;
+  if (!cfg) return null;
+  const phase = bossPhaseOf(sim, boss);
+  if (cfg.phase !== phase || cfg.pref === undefined) {
+    cfg.phase = phase;
+    cfg.pref = rollPref(sim, boss, phase, cfg.depth);
+  }
+  return { phase, pref: cfg.pref };
 }
 
 /** Nearest enemy support: the healer the boss wants to cut off. */
@@ -112,12 +132,7 @@ export function pickBossFocus(sim: Sim, boss: Unit): Unit | null {
   const threatT = pickThreatTarget(sim, boss);
   if (!cfg) return threatT; // no brain configured: pure threat (unchanged behavior)
 
-  const depth = cfg.depth;
-  const phase = bossPhaseOf(sim, boss);
-  if (cfg.phase !== phase) {
-    cfg.phase = phase;
-    cfg.pref = rollPref(sim, boss, phase, depth);
-  }
+  ensureBossPlan(sim, boss);
 
   let chosen: Unit | null = null;
   if (cfg.pref === 'healer') chosen = reachableHealer(sim, boss);
@@ -125,4 +140,68 @@ export function pickBossFocus(sim: Sim, boss: Unit): Unit | null {
   else if (cfg.pref === 'kill') chosen = killTarget(sim, boss);
 
   return chosen ?? threatT;
+}
+
+function mechanicPhase(kind: BossMechanicKind, atHpPct: number): BossPhase {
+  if (kind === 'enrage') return 'enrage';
+  if (kind === 'signature') return 'pressure';
+  if (atHpPct >= 85) return 'opening';
+  if (atHpPct > 50) return 'sustained';
+  if (atHpPct > 18) return 'pressure';
+  return 'desperation';
+}
+
+function partyClusterCount(sim: Sim, boss: Unit): number {
+  const enemies = sim.unitsArr.filter((o) => enemyOf(sim, boss, o));
+  let best = 0;
+  for (const c of enemies) {
+    let n = 0;
+    for (const o of enemies) if (dist2(o.pos, c.pos) <= CLUSTER_RADIUS * CLUSTER_RADIUS) n++;
+    if (n > best) best = n;
+  }
+  return best;
+}
+
+function mechanicBase(kind: BossMechanicKind): number {
+  switch (kind) {
+    case 'enrage': return 100;
+    case 'signature': return 70;
+    case 'add-wave': return 55;
+    case 'zone': return 45;
+  }
+}
+
+/**
+ * Pick one armed raid beat for the boss to start this tick. Thresholds arm
+ * candidates elsewhere; this phase-FSM chooses the actual initiation so mechanics
+ * can be held for a cluster or staged instead of all firing from a side channel.
+ */
+export function pickBossMechanic(sim: Sim, boss: Unit, candidates: BossMechanicCandidate[]): string | null {
+  if (candidates.length === 0) return null;
+  const plan = ensureBossPlan(sim, boss);
+  if (!plan) return [...candidates].sort((a, b) => a.key.localeCompare(b.key))[0].key;
+
+  const clusterCount = partyClusterCount(sim, boss);
+  let best: BossMechanicCandidate | null = null;
+  let bestScore = -Infinity;
+  for (const c of candidates) {
+    const phase = mechanicPhase(c.kind, c.atHpPct);
+    if (PHASE_RANK[phase] > PHASE_RANK[plan.phase]) continue;
+
+    if ((c.kind === 'zone' || c.kind === 'signature') && clusterCount < 2 && sim.time - c.armedAt < 2) {
+      continue; // hold the area beat briefly until there is something worth hitting
+    }
+
+    let score = mechanicBase(c.kind) + PHASE_RANK[phase] * 4 + (sim.time - c.armedAt) * 3;
+    if (phase === plan.phase) score += 12;
+    if ((c.kind === 'zone' || c.kind === 'signature') && plan.pref === 'cluster') score += 18;
+    if (c.kind === 'add-wave' && (plan.pref === 'healer' || plan.phase === 'pressure')) score += 8;
+    if (c.kind === 'enrage' && plan.phase === 'enrage') score += 50;
+
+    if (score > bestScore || (score === bestScore && best !== null && c.key < best.key)) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  return best?.key ?? null;
 }

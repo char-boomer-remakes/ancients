@@ -3,6 +3,8 @@ import { registerAllContent } from '../data';
 import { setupRaidSim } from '../core/macro';
 import { healUnit } from '../core/combat';
 import { creditHealingThreat, pickThreatTarget, tauntToTop, topThreat } from '../core/threat';
+import { makeItemState } from '../core/items';
+import { REG } from '../core/registry';
 import { TUNING } from '../data/tuning';
 import type { Unit } from '../core/unit';
 
@@ -98,5 +100,22 @@ describe('aggro ceiling (swap threshold)', () => {
     expect(boss.ctrl.threat[axe.uid]).toBe(topThreat(boss.ctrl.threat));
     // with axe now tied at the top and already the held target, the ranged carry can't pull
     expect((pickThreatTarget(sim, boss) as Unit).uid).toBe(axe.uid);
+  });
+});
+
+describe('threat drops', () => {
+  it('save items can reduce a protected ally threat entry', () => {
+    const { sim, boss, get } = raid(['crystal-maiden', 'sniper']);
+    const cm = get('crystal-maiden');
+    const sniper = get('sniper');
+    const slot = cm.items.findIndex((s) => s === null);
+    cm.items[slot] = makeItemState(REG.item('glimmer-cape'));
+    cm.mana = 999;
+
+    boss.ctrl.threat = { [sniper.uid]: 1000, [cm.uid]: 500 };
+    sim.fireItemActive(cm, slot, sniper);
+
+    expect(boss.ctrl.threat[sniper.uid]).toBeCloseTo(550, 1);
+    expect(boss.ctrl.threat[cm.uid]).toBe(500);
   });
 });

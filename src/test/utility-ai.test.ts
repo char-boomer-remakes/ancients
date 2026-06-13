@@ -4,6 +4,7 @@ import { setupMacroSim } from '../core/macro';
 import { chooseUtilityOrder, pickUtilityFocus } from '../core/utility';
 import { combatProfile } from '../core/combat-profile';
 import { thinkGambit } from '../core/controllers';
+import type { EffectCtx } from '../core/effects';
 import type { MacroHeroSetup } from '../core/types';
 import type { Unit } from '../core/unit';
 
@@ -139,6 +140,55 @@ describe('team-mind converges the team on a shared focus', () => {
 
     const focusUnit = sim.unit(tm.focusUid!);
     expect(focusUnit?.team).toBe(1); // it is an enemy
+  });
+});
+
+describe('team-mind flags influence decisions', () => {
+  it('backliners hold until a frontline ally opens the fight', () => {
+    const teamA: MacroHeroSetup[] = [
+      { heroId: 'sven', level: 18 },
+      { heroId: 'sniper', level: 18 }
+    ];
+    const sim = setupMacroSim({ seed: 89, teamA, teamB: [{ heroId: 'lich', level: 18 }], maxSec: 30 });
+    const sven = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'sven')!;
+    const sniper = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'sniper')!;
+    const enemy = sim.unitsArr.find((u) => u.team === 1)!;
+    sven.pos = { x: 1900, y: 2000 };
+    sniper.pos = { x: 900, y: 2000 };
+    enemy.pos = { x: 2800, y: 2000 };
+    sim.rebuildSpatial();
+
+    expect(sim.teamMind(0).engaged).toBe(false);
+    expect(chooseUtilityOrder(sim, sniper, enemy)?.kind).toBe('hold');
+  });
+
+  it('spread flag makes stacked allies step apart', () => {
+    const sim = setupMacroSim({
+      seed: 90,
+      teamA: [{ heroId: 'sniper', level: 18 }, { heroId: 'lich', level: 18 }],
+      teamB: [{ heroId: 'axe', level: 18 }],
+      maxSec: 30
+    });
+    const sniper = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'sniper')!;
+    const ally = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'lich')!;
+    const enemy = sim.unitsArr.find((u) => u.team === 1)!;
+    sniper.pos = { x: 2000, y: 2000 };
+    ally.pos = { x: 2060, y: 2000 };
+    enemy.pos = { x: 3000, y: 2000 };
+    sim.rebuildSpatial();
+
+    const ctx: EffectCtx = { defId: 'test-zone', level: 1, vfx: { archetype: 'ground-aoe', color: '#ff7a3a' } };
+    sim.addZone({
+      caster: enemy,
+      ctx,
+      spec: { shape: 'circle', duration: 5, radius: 300, tick: { interval: 1, affects: 'enemies', effects: [{ kind: 'damage', dtype: 'magical', amount: 1, target: 'enemies-in-radius', radius: 300 }] } },
+      duration: 5,
+      pos: { ...ally.pos },
+      radius: 300
+    });
+
+    expect(sim.teamMind(0).spread).toBe(true);
+    expect(chooseUtilityOrder(sim, sniper, enemy)?.kind).toBe('move');
   });
 });
 

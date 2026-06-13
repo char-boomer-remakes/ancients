@@ -75,6 +75,20 @@ export function tauntToTop(table: ThreatTable, taunterUid: number): void {
   if ((table[taunterUid] ?? 0) < top) table[taunterUid] = top;
 }
 
+/**
+ * Threat drop for vanish/save tools. Reduces this unit's entry on every active
+ * threat table, leaving the table holder free to re-evaluate on its next think.
+ */
+export function dropThreat(sim: Sim, target: Unit, pct: number): void {
+  const keep = Math.max(0, Math.min(1, 1 - pct / 100));
+  for (const holder of sim.unitsArr) {
+    const table = holder.ctrl.threat;
+    if (!table || table[target.uid] === undefined) continue;
+    table[target.uid] *= keep;
+    if (table[target.uid] < 1) delete table[target.uid];
+  }
+}
+
 /** Optional per-encounter decay: scale every entry toward zero. Off unless a caller opts in. */
 export function decayThreat(table: ThreatTable, factor: number): void {
   if (factor >= 1) return;

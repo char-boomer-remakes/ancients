@@ -2,6 +2,7 @@ import { clamp, dist, fromAngle, norm, sub, v2 } from './math2d';
 import { applyDamage, healUnit } from './combat';
 import { REG } from './registry';
 import { STATUS_META, statusTagAuto, type StatusInstance } from './status';
+import { dropThreat } from './threat';
 import type { Unit } from './unit';
 import type { EffectNode, ElementId, StatusId, StatusParams, TargetSel, ValueRef, Vec2, VfxSpec } from './types';
 import { resolveVal } from './values';
@@ -366,6 +367,7 @@ export function applyStatus(
     sim.events.emit({ t: 'immune-block', uid: target.uid });
     return false;
   }
+  if (params?.threatDropPct) dropThreat(sim, target, params.threatDropPct);
 
   // store effect context for periodic ticks
   (inst as StatusInstance & { ectx?: EffectCtx }).ectx = ctx;

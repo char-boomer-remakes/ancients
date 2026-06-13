@@ -495,8 +495,16 @@ function scoreItemActive(sim: Sim, u: Unit, slot: number, focus: Unit | null, pr
 export function chooseUtilityOrder(sim: Sim, u: Unit, focus: Unit | null): Order | null {
   const profile = combatProfile(u);
 
-  // raid peel (AI_OVERHAUL §6): a frontliner redirects to an add threatening the backline
   if (u.ctrl.kind === 'gambit') {
+    const tm = sim.teamMind(u.team);
+    const spread = tm.spread ? spreadSpacingOrder(sim, u) : null;
+    if (spread) return spread;
+
+    if (focus && !tm.engaged && shouldHoldBackForEngage(sim, u, focus, profile) && !urgentSupportAvailable(sim, u, profile)) {
+      return { kind: 'hold' };
+    }
+
+    // raid peel (AI_OVERHAUL §6): a frontliner redirects to an add threatening the backline
     const peel = raidPeelTarget(sim, u, profile);
     if (peel) focus = peel;
   }
@@ -531,6 +539,42 @@ export function chooseUtilityOrder(sim: Sim, u: Unit, focus: Unit | null): Order
     }
   }
   return { kind: 'attack-unit', uid: focus.uid };
+}
+
+/** Spread response from team-mind: step out if another ally is stacked on top of us. */
+function spreadSpacingOrder(sim: Sim, u: Unit): Order | null {
+  let nearestPos: Vec2 | null = null;
+  let nearestD = Infinity;
+  sim.forEachNearbyUnit(u.pos, 300, (a) => {
+    if (!a.alive || a === u || a.team !== u.team || a.kind === 'npc') return;
+    const d = dist2(a.pos, u.pos);
+    if (d < nearestD) { nearestD = d; nearestPos = { ...a.pos }; }
+  });
+  if (!nearestPos || nearestD > 260 * 260) return null;
+  const away = norm(sub(u.pos, nearestPos));
+  const dir = away.x === 0 && away.y === 0 ? v2(1, 0) : away;
+  return { kind: 'move', point: add(u.pos, scale(dir, 320)) };
+}
+
+/**
+ * Engage sequencing from team-mind: backliners do not walk into danger before a
+ * frontline ally has opened the fight.
+ */
+function shouldHoldBackForEngage(sim: Sim, u: Unit, focus: Unit, profile: CombatProfile): boolean {
+  if (profile.posture !== 'backline') return false;
+  if (dist(u.pos, focus.pos) <= u.stats.attackRange * TUNING.ai.engageRangeMult) return false;
+  for (const ally of sim.unitsArr) {
+    if (!ally.alive || ally === u || ally.team !== u.team || ally.kind !== 'hero') continue;
+    if (combatProfile(ally).posture !== 'frontline') continue;
+    if (dist2(ally.pos, focus.pos) < dist2(u.pos, focus.pos)) return true;
+  }
+  return false;
+}
+
+function urgentSupportAvailable(sim: Sim, u: Unit, profile: CombatProfile): boolean {
+  if (profile.weights.saveAllies < 0.8) return false;
+  if (lowestWoundedAlly(sim, u, 850 + u.stats.castRangeBonus, TUNING.ai.saveAllyHpPct)) return true;
+  return woundedAlliesNear(sim, u, 750, 0.7) >= 2;
 }
 
 // ---------- team-mind (AI_OVERHAUL §1, Layer 1) ----------

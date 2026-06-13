@@ -2,6 +2,7 @@ import { TUNING } from '../data/tuning';
 import { REG } from './registry';
 import { Sim } from './sim';
 import { buildDefaultGambit } from './controllers';
+import { pickBossMechanic } from './boss-brain';
 import { autoPicksForLevel, buildHero } from './hero-setup';
 import { makeItemState } from './items';
 import { raidSetupFromDef } from './phase3';
@@ -353,11 +354,17 @@ export function createRaidMechanicRunner(def: RaidDef, sim: Sim, boss: Unit): Ra
 
   const fired: RaidMechanicFired[] = [];
   const done = new Set<string>();
+  const armedAt = new Map<string, number>();
   const ctx: EffectCtx = { defId: `raid:${def.id}`, level: boss.level, vfx: { archetype: 'ground-aoe', color: '#ff7a3a', color2: '#ffd27a' } };
 
   const record = (m: RaidMech) => {
     done.add(m.key);
+    armedAt.delete(m.key);
     fired.push({ kind: m.kind, id: m.sigId ?? m.key, atSec: sim.time, bossHpPct: 100 * boss.hp / Math.max(1, boss.stats.maxHp) });
+  };
+
+  const arm = (m: RaidMech, at: number) => {
+    if (!done.has(m.key) && !armedAt.has(m.key)) armedAt.set(m.key, at);
   };
 
   const spawnZone = (spec: ZoneSpec, radiusMul = 1) => {
@@ -372,18 +379,30 @@ export function createRaidMechanicRunner(def: RaidDef, sim: Sim, boss: Unit): Ra
     for (const m of mechs) {
       if (done.has(m.key)) continue;
       if (m.kind === 'enrage') {
-        if (s.time >= def.enrageSec) {
-          // hard ramp: the boss stops playing fair once the timer expires.
-          boss.externalMods.damagePct = (boss.externalMods.damagePct ?? 0) + 120;
-          boss.externalMods.attackSpeed = (boss.externalMods.attackSpeed ?? 0) + 120;
-          boss.externalMods.moveSpeedPct = (boss.externalMods.moveSpeedPct ?? 0) + 30;
-          boss.markStatsDirty();
-          boss.refresh(s.time);
-          record(m);
-        }
+        if (s.time >= def.enrageSec) arm(m, s.time);
         continue;
       }
-      if (hpPct > m.atHpPct) continue;
+      if (hpPct <= m.atHpPct) arm(m, s.time);
+    }
+
+    const candidates = mechs
+      .filter((m) => !done.has(m.key) && armedAt.has(m.key))
+      .map((m) => ({ key: m.key, kind: m.kind, atHpPct: m.atHpPct, armedAt: armedAt.get(m.key)! }));
+    const chosenKey = pickBossMechanic(s, boss, candidates);
+    if (!chosenKey) return;
+    const m = mechs.find((candidate) => candidate.key === chosenKey);
+    if (!m) return;
+
+    if (m.kind === 'enrage') {
+      // hard ramp: the boss stops playing fair once the timer expires.
+      boss.externalMods.damagePct = (boss.externalMods.damagePct ?? 0) + 120;
+      boss.externalMods.attackSpeed = (boss.externalMods.attackSpeed ?? 0) + 120;
+      boss.externalMods.moveSpeedPct = (boss.externalMods.moveSpeedPct ?? 0) + 30;
+      boss.markStatsDirty();
+      boss.refresh(s.time);
+      record(m);
+      return;
+    }
       if (m.kind === 'add-wave' && m.wave) {
         for (let i = 0; i < m.wave.count; i++) {
           const ang = (i / m.wave.count) * Math.PI * 2;
@@ -400,7 +419,6 @@ export function createRaidMechanicRunner(def: RaidDef, sim: Sim, boss: Unit): Ra
         spawnZone(SIGNATURE_ZONE, 1);
         record(m);
       }
-    }
   };
 
   return { fired, tick };
