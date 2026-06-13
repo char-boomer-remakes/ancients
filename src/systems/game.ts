@@ -42,7 +42,7 @@ import { ELITE_DRAFT } from '../data/drafts';
 import { resonanceMods } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroLoadoutSlots, HeroSave, ItemDropTable, ItemRarity, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, SimEvent, StingerId, Vec2 } from '../core/types';
+import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroLoadoutSlots, HeroSave, ItemDropTable, ItemRarity, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, RoomType, SimEvent, StingerId, Vec2 } from '../core/types';
 import { ProceduralAudio } from '../engine/audio';
 import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
@@ -1375,7 +1375,7 @@ export class Game {
     this.scene.resetUnitViews();
     const u = this.liveDungeon.drivenUnit();
     if (u) this.scene.selectedUid = u.uid;
-    this.msg(`${def.name}: room ${this.liveDungeon.room.index} opened. Clear the pack to exit.`, 'info');
+    this.msg(`${def.name}: descent opened (${this.liveDungeon.layout.depth} rooms). Exits unlock on clear.`, 'info');
     return true;
   }
 
@@ -1398,9 +1398,10 @@ export class Game {
       const id = this.liveDungeonId!;
       const tier = this.liveDungeonTier;
       const result = dungeon.result;
-      const table = dungeon.room.reward.table;
+      const clearedRooms = result.clearedRooms.map((index) => ({ index, type: dungeon.layout.rooms[index]?.type })).filter((r): r is { index: number; type: RoomType } => !!r.type);
+      const depth = dungeon.layout.depth;
       this.endLiveDungeon();
-      this.applyDungeonResult(id, tier, result.cleared, table);
+      this.applyDungeonResult(id, tier, result.cleared, clearedRooms, depth);
     }
   }
 
@@ -1413,25 +1414,29 @@ export class Game {
     if (u) this.scene.selectedUid = u.uid;
   }
 
-  private applyDungeonResult(dungeonId: string, tier: DifficultyTier, cleared: boolean, table?: ItemDropTable): void {
+  private applyDungeonResult(dungeonId: string, tier: DifficultyTier, cleared: boolean, clearedRooms: { index: number; type: RoomType }[], depth: number): void {
     const def = REG.dungeon(dungeonId);
     if (!cleared) {
       this.msg(`${def.name} ejects the party at the portal. Regroup and return.`, 'bad');
       this.autosave('dungeon');
       return;
     }
-    if (table) {
-      const roll = rollItemDrops(table, tier, {}, new Rng(stableContentSeed(`${dungeonId}:room-reward:${tier}`, Math.round(this.playtime))));
+    let rewardCount = 0;
+    for (const room of clearedRooms) {
+      const table = def.loot[room.type];
+      if (!table) continue;
+      const roll = rollItemDrops(table, tier, {}, new Rng(stableContentSeed(`${dungeonId}:room-reward:${tier}:${room.index}`, Math.round(this.playtime))));
       for (const it of roll.items) {
         const drop = bindIfNeeded(it);
         this.inventoryStash.push(drop);
         this.codexUnlock('item:' + drop.id);
       }
       if (roll.items.length > 0) {
-        this.msg(`${def.name} reward: ${roll.items.map((it) => REG.item(it.id).name).join(', ')}`, 'good');
+        rewardCount += roll.items.length;
       }
     }
-    this.msg(`${def.name} room cleared. You return to the portal.`, 'good');
+    this.msg(`${def.name} cleared: ${clearedRooms.length}/${depth} rooms, ${rewardCount} rewards. You return to the portal.`, 'good');
+    this.audio.playStinger('raid-clear');
     this.autosave('dungeon');
   }
 

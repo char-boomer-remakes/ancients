@@ -40,11 +40,13 @@ export const DEVARSHI_DESERT: RegionDef = {
     { heroId: 'nyx-assassin', pos: { x: 3400, y: 7700 } },
     { heroId: 'phantom-assassin', pos: { x: 9300, y: 5900 } },
     { heroId: 'medusa', pos: { x: 9800, y: 8300 } },
-    { heroId: 'viper', pos: { x: 2600, y: 4500 } }
+    { heroId: 'viper', pos: { x: 2600, y: 4500 } },
+    { heroId: 'venomancer', pos: { x: 5200, y: 9300 } }
   ],
   echoSpawns: [
     { id: 'dd-echo-pa', heroId: 'phantom-assassin', pos: { x: 9000, y: 6300 }, level: 18, respawnSec: 260 },
-    { id: 'dd-echo-medusa', heroId: 'medusa', pos: { x: 10100, y: 8800 }, level: 20, respawnSec: 300 }
+    { id: 'dd-echo-medusa', heroId: 'medusa', pos: { x: 10100, y: 8800 }, level: 20, respawnSec: 300 },
+    { id: 'dd-echo-venomancer', heroId: 'venomancer', pos: { x: 5600, y: 9800 }, level: 19, respawnSec: 280 }
   ],
   gates: [
     { id: 'dd-to-icewrack', name: 'Cold Caravan Road', pos: { x: 900, y: 1800 }, radius: 520, toRegionId: 'icewrack', toPos: { x: 11000, y: 2600 } },
@@ -80,11 +82,21 @@ export const SHADESHORE: RegionDef = {
     { heroId: 'tidehunter', pos: { x: 3300, y: 7900 } },
     { heroId: 'slardar', pos: { x: 9300, y: 6300 } },
     { heroId: 'naga-siren', pos: { x: 8500, y: 8800 } },
-    { heroId: 'slark', pos: { x: 2400, y: 4800 } }
+    { heroId: 'slark', pos: { x: 2400, y: 4800 } },
+    { heroId: 'abaddon', pos: { x: 4500, y: 9200 } },
+    { heroId: 'dragon-knight', pos: { x: 10200, y: 3600 } },
+    { heroId: 'mars', pos: { x: 5600, y: 4200 } },
+    { heroId: 'gyrocopter', pos: { x: 7400, y: 4700 } },
+    { heroId: 'troll-warlord', pos: { x: 2100, y: 8800 } }
   ],
   echoSpawns: [
     { id: 'ss-echo-kunkka', heroId: 'kunkka', pos: { x: 7200, y: 7900 }, level: 20, respawnSec: 300 },
-    { id: 'ss-echo-tide', heroId: 'tidehunter', pos: { x: 3100, y: 8500 }, level: 20, respawnSec: 300 }
+    { id: 'ss-echo-tide', heroId: 'tidehunter', pos: { x: 3100, y: 8500 }, level: 20, respawnSec: 300 },
+    { id: 'ss-echo-abaddon', heroId: 'abaddon', pos: { x: 4900, y: 9700 }, level: 21, respawnSec: 320 },
+    { id: 'ss-echo-dk', heroId: 'dragon-knight', pos: { x: 10600, y: 4100 }, level: 21, respawnSec: 320 },
+    { id: 'ss-echo-mars', heroId: 'mars', pos: { x: 6000, y: 4700 }, level: 21, respawnSec: 320 },
+    { id: 'ss-echo-gyro', heroId: 'gyrocopter', pos: { x: 7800, y: 5200 }, level: 21, respawnSec: 320 },
+    { id: 'ss-echo-troll', heroId: 'troll-warlord', pos: { x: 2500, y: 9300 }, level: 21, respawnSec: 320 }
   ],
   gates: [
     { id: 'ss-to-desert', name: 'Salt Road to Devarshi', pos: { x: 850, y: 6200 }, radius: 520, toRegionId: 'devarshi-desert', toPos: { x: 10800, y: 6200 } },
@@ -120,12 +132,24 @@ export const VILE_REACHES: RegionDef = {
     { heroId: 'undying', pos: { x: 9000, y: 6000 } },
     { heroId: 'doom', pos: { x: 9700, y: 8600 } },
     { heroId: 'wraith-king', pos: { x: 2700, y: 4400 } },
-    { heroId: 'night-stalker', pos: { x: 8200, y: 2700 } }
+    { heroId: 'night-stalker', pos: { x: 8200, y: 2700 } },
+    { heroId: 'alchemist', pos: { x: 5200, y: 8800 } },
+    { heroId: 'bristleback', pos: { x: 7600, y: 9300 } },
+    { heroId: 'huskar', pos: { x: 4300, y: 3400 } },
+    { heroId: 'primal-beast', pos: { x: 10400, y: 5400 } },
+    { heroId: 'underlord', pos: { x: 5600, y: 3600 } },
+    { heroId: 'bloodseeker', pos: { x: 1900, y: 7600 } }
   ],
   echoSpawns: [
     { id: 'vr-echo-pudge', heroId: 'pudge', pos: { x: 6600, y: 8000 }, level: 22, respawnSec: 320 },
     { id: 'vr-echo-doom', heroId: 'doom', pos: { x: 10100, y: 9100 }, level: 23, respawnSec: 340 },
-    { id: 'vr-echo-wk', heroId: 'wraith-king', pos: { x: 2500, y: 5000 }, level: 23, respawnSec: 340 }
+    { id: 'vr-echo-wk', heroId: 'wraith-king', pos: { x: 2500, y: 5000 }, level: 23, respawnSec: 340 },
+    { id: 'vr-echo-alchemist', heroId: 'alchemist', pos: { x: 5600, y: 9300 }, level: 23, respawnSec: 340 },
+    { id: 'vr-echo-bristleback', heroId: 'bristleback', pos: { x: 8000, y: 9800 }, level: 23, respawnSec: 340 },
+    { id: 'vr-echo-huskar', heroId: 'huskar', pos: { x: 4700, y: 3900 }, level: 23, respawnSec: 340 },
+    { id: 'vr-echo-primal', heroId: 'primal-beast', pos: { x: 10800, y: 5900 }, level: 24, respawnSec: 360 },
+    { id: 'vr-echo-underlord', heroId: 'underlord', pos: { x: 6000, y: 4100 }, level: 24, respawnSec: 360 },
+    { id: 'vr-echo-bloodseeker', heroId: 'bloodseeker', pos: { x: 2300, y: 8100 }, level: 23, respawnSec: 340 }
   ],
   gates: [
     { id: 'vr-to-shadeshore', name: 'Rot Ferry to Shadeshore', pos: { x: 900, y: 3000 }, radius: 520, toRegionId: 'shadeshore', toPos: { x: 10500, y: 8600 } },
@@ -162,11 +186,15 @@ export const QUOIDGE: RegionDef = {
     { heroId: 'outworld-destroyer', pos: { x: 9000, y: 6100 } },
     { heroId: 'skywrath-mage', pos: { x: 9800, y: 8600 } },
     { heroId: 'zeus', pos: { x: 2600, y: 4500 } },
-    { heroId: 'tinker', pos: { x: 8200, y: 3000 } }
+    { heroId: 'tinker', pos: { x: 8200, y: 3000 } },
+    { heroId: 'anti-mage', pos: { x: 4700, y: 9600 } },
+    { heroId: 'templar-assassin', pos: { x: 10800, y: 5200 } }
   ],
   echoSpawns: [
     { id: 'qc-echo-invoker', heroId: 'invoker', pos: { x: 6900, y: 8200 }, level: 24, respawnSec: 360 },
-    { id: 'qc-echo-zeus', heroId: 'zeus', pos: { x: 2800, y: 5100 }, level: 24, respawnSec: 360 }
+    { id: 'qc-echo-zeus', heroId: 'zeus', pos: { x: 2800, y: 5100 }, level: 24, respawnSec: 360 },
+    { id: 'qc-echo-antimage', heroId: 'anti-mage', pos: { x: 5100, y: 10100 }, level: 25, respawnSec: 380 },
+    { id: 'qc-echo-ta', heroId: 'templar-assassin', pos: { x: 11000, y: 5700 }, level: 25, respawnSec: 380 }
   ],
   gates: [
     { id: 'qc-to-vile', name: 'Scholar Road to Vile Reaches', pos: { x: 850, y: 8800 }, radius: 520, toRegionId: 'vile-reaches', toPos: { x: 10500, y: 3000 } },
@@ -203,11 +231,13 @@ export const HIDDEN_WOOD: RegionDef = {
     { heroId: 'beastmaster', pos: { x: 9700, y: 8800 } },
     { heroId: 'broodmother', pos: { x: 2500, y: 4700 } },
     { heroId: 'warlock', pos: { x: 7800, y: 2800 } },
-    { heroId: 'visage', pos: { x: 4500, y: 3000 } }
+    { heroId: 'visage', pos: { x: 4500, y: 3000 } },
+    { heroId: 'hoodwink', pos: { x: 10400, y: 5200 } }
   ],
   echoSpawns: [
     { id: 'hw-echo-prophet', heroId: 'natures-prophet', pos: { x: 9500, y: 6700 }, level: 25, respawnSec: 380 },
-    { id: 'hw-echo-brood', heroId: 'broodmother', pos: { x: 2300, y: 5200 }, level: 25, respawnSec: 380 }
+    { id: 'hw-echo-brood', heroId: 'broodmother', pos: { x: 2300, y: 5200 }, level: 25, respawnSec: 380 },
+    { id: 'hw-echo-hoodwink', heroId: 'hoodwink', pos: { x: 10800, y: 5700 }, level: 26, respawnSec: 400 }
   ],
   gates: [
     { id: 'hw-to-quoidge', name: 'Green Library Gate', pos: { x: 850, y: 6200 }, radius: 520, toRegionId: 'quoidge', toPos: { x: 10600, y: 6200 } },
@@ -244,11 +274,17 @@ export const MOUNT_JOERLAK: RegionDef = {
     { heroId: 'treant-protector', pos: { x: 9700, y: 8800 } },
     { heroId: 'centaur-warrunner', pos: { x: 2500, y: 4700 } },
     { heroId: 'storm-spirit', pos: { x: 8000, y: 2800 } },
-    { heroId: 'ember-spirit', pos: { x: 4500, y: 3000 } }
+    { heroId: 'ember-spirit', pos: { x: 4500, y: 3000 } },
+    { heroId: 'spirit-breaker', pos: { x: 10800, y: 7600 } },
+    { heroId: 'razor', pos: { x: 6200, y: 10400 } },
+    { heroId: 'ursa', pos: { x: 1700, y: 7600 } }
   ],
   echoSpawns: [
     { id: 'mj-echo-magnus', heroId: 'magnus', pos: { x: 7000, y: 8300 }, level: 27, respawnSec: 400 },
-    { id: 'mj-echo-tiny', heroId: 'tiny', pos: { x: 9600, y: 6600 }, level: 27, respawnSec: 400 }
+    { id: 'mj-echo-tiny', heroId: 'tiny', pos: { x: 9600, y: 6600 }, level: 27, respawnSec: 400 },
+    { id: 'mj-echo-spirit-breaker', heroId: 'spirit-breaker', pos: { x: 11000, y: 8100 }, level: 28, respawnSec: 420 },
+    { id: 'mj-echo-razor', heroId: 'razor', pos: { x: 6600, y: 10800 }, level: 28, respawnSec: 420 },
+    { id: 'mj-echo-ursa', heroId: 'ursa', pos: { x: 2100, y: 8100 }, level: 28, respawnSec: 420 }
   ],
   gates: [
     { id: 'mj-to-hidden', name: 'Root Road to Hidden Wood', pos: { x: 850, y: 9200 }, radius: 520, toRegionId: 'hidden-wood', toPos: { x: 10500, y: 2800 } },
@@ -283,12 +319,16 @@ export const MAD_MOON_CRATER: RegionDef = {
     { heroId: 'faceless-void', pos: { x: 4200, y: 9700 } },
     { heroId: 'terrorblade', pos: { x: 10400, y: 7800 } },
     { heroId: 'phoenix', pos: { x: 11200, y: 4300 } },
-    { heroId: 'io', pos: { x: 3400, y: 4200 } }
+    { heroId: 'io', pos: { x: 3400, y: 4200 } },
+    { heroId: 'clinkz', pos: { x: 11800, y: 9900 } },
+    { heroId: 'weaver', pos: { x: 5200, y: 11800 } }
   ],
   echoSpawns: [
     { id: 'mm-echo-spectre', heroId: 'spectre', pos: { x: 7900, y: 9700 }, level: 30, respawnSec: 480 },
     { id: 'mm-echo-void', heroId: 'faceless-void', pos: { x: 3900, y: 10200 }, level: 30, respawnSec: 480 },
-    { id: 'mm-echo-terrorblade', heroId: 'terrorblade', pos: { x: 10800, y: 8300 }, level: 30, respawnSec: 480 }
+    { id: 'mm-echo-terrorblade', heroId: 'terrorblade', pos: { x: 10800, y: 8300 }, level: 30, respawnSec: 480 },
+    { id: 'mm-echo-clinkz', heroId: 'clinkz', pos: { x: 12200, y: 10400 }, level: 30, respawnSec: 480 },
+    { id: 'mm-echo-weaver', heroId: 'weaver', pos: { x: 5600, y: 12200 }, level: 30, respawnSec: 480 }
   ],
   gates: [
     { id: 'mm-to-joerlak', name: 'Mad Moon Stair to Joerlak', pos: { x: 850, y: 6000 }, radius: 520, toRegionId: 'mount-joerlak', toPos: { x: 10600, y: 6000 } }

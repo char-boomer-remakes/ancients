@@ -203,27 +203,52 @@ function dungeonSave(): GameSave {
   return save;
 }
 
-describe('dungeon session D1', () => {
-  it('enters from a portal, clears one generated room, grants loot, and exits', () => {
-    const g = Game.headless(dungeonSave());
-    const before = g.inventoryStash.length;
-
-    expect(g.tryInteract()).toBe(true);
-    expect(g.liveDungeon).toBeTruthy();
+describe('dungeon session D1/D2', () => {
+  function clearCurrentRoom(g: Game): void {
     const session = g.liveDungeon!;
-    expect(session.def.id).toBe('frost-hollow');
-    expect(session.enemyUids.length).toBeGreaterThan(0);
-
     const hero = session.drivenUnit()!;
     for (const uid of [...session.enemyUids]) {
       const enemy = session.sim.unit(uid);
       if (enemy?.alive) applyDamage(session.sim, hero, enemy, 1e9, 'physical');
       g.update(0.05);
     }
+  }
+
+  it('locks exits until a room is clear, then advances the descent to the guardian', () => {
+    const g = Game.headless(dungeonSave());
+    expect(g.startDungeon('frost-hollow', 'normal', { seed: 1001 })).toBe(true);
+    const session = g.liveDungeon!;
+    const firstRoom = session.room.index;
+    expect(session.enemyUids.length).toBeGreaterThan(0);
+
+    g.update(0.05);
+    expect(g.liveDungeon?.room.index).toBe(firstRoom);
+
+    clearCurrentRoom(g);
+    expect(g.liveDungeon).toBeTruthy();
+    expect(g.liveDungeon!.room.index).toBeGreaterThan(firstRoom);
+  });
+
+  it('enters from a portal, clears a multi-room run, grants rewards, and exits', () => {
+    const g = Game.headless(dungeonSave());
+    const before = g.inventoryStash.length;
+
+    expect(g.tryInteract()).toBe(true);
+    expect(g.liveDungeon).toBeTruthy();
+    expect(g.liveDungeon!.def.id).toBe('frost-hollow');
+    const depth = g.liveDungeon!.layout.depth;
+    const visited = new Set<number>();
+
+    while (g.liveDungeon) {
+      visited.add(g.liveDungeon.room.index);
+      clearCurrentRoom(g);
+    }
 
     expect(g.liveDungeon).toBeNull();
+    expect(visited.size).toBeGreaterThan(1);
     expect(g.inventoryStash.length).toBeGreaterThan(before);
-    expect(g.toasts.some((t) => t.text.includes('Frost Hollow room cleared'))).toBe(true);
+    expect(g.toasts.some((t) => t.text.includes('Frost Hollow cleared'))).toBe(true);
+    expect(g.toasts.some((t) => t.text.includes(`${depth}/${depth} rooms`))).toBe(true);
   });
 
   it('ejects cleanly on a one-room wipe without saving mid-run state', () => {
