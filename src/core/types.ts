@@ -12,6 +12,7 @@ export type Team = number; // 0 = player, 1 = wild/enemy, arbitrary in arenas
 export type Attribute = 'str' | 'agi' | 'int' | 'uni';
 export type DamageType = 'physical' | 'magical' | 'pure';
 export type ElementId = 'pyro' | 'hydro' | 'electro' | 'cryo' | 'geo' | 'dendro' | 'anemo' | 'neutral';
+export type ActiveElement = Exclude<ElementId, 'neutral'>;
 
 export type UnitKind = 'hero' | 'creep' | 'summon' | 'ward' | 'npc';
 
@@ -298,6 +299,17 @@ export interface AudioSettings {
   muted: boolean;
 }
 
+// Quality tier mirrors engine/performance QualityTier; kept as a local string union
+// so core stays free of any engine/render import (boundary guard).
+export type GraphicsQuality = 'auto' | 'low' | 'medium' | 'high' | 'ultra';
+
+export interface GraphicsSettings {
+  quality: GraphicsQuality;
+  exposure: number;      // tonemapping exposure, 0.5..1.5 (default 0.92)
+  grade: number;         // color-grade strength, 0..1.5 (default 1)
+  reducedMotion: boolean; // freezes ambient particle/water motion
+}
+
 export type StingerId = 'capture' | 'merge' | 'levelup' | 'badge' | 'raid-clear';
 
 // ---------- Abilities ----------
@@ -473,6 +485,7 @@ export interface CreepDef {
   silhouette: SilhouetteSpec;
   palette: [string, string, string];
   aggroRadius?: number;        // default from tuning
+  elementalShield?: { element: ActiveElement; hp: number; weakTo: ActiveElement[]; weakMult: number };
   animProfile?: AnimProfile;
 }
 
@@ -587,6 +600,7 @@ export interface CampDef {
   pos: Vec2;
   radius: number;
   respawnSec: number;
+  leyLine?: { resinCost: number; bonusGold: number; bonusXp: number };
 }
 export interface EchoSpawnDef {
   id: string;
@@ -606,6 +620,52 @@ export interface GateDef {
   /** Route opens only after this many heroes have been recruited (Phase 6 §3.4). */
   requiresRecruits?: number;
 }
+export type ChestTier = 'common' | 'rich' | 'precious' | 'luxurious';
+export type ChestGate =
+  | { kind: 'none' }
+  | { kind: 'camp'; campId: string }
+  | { kind: 'puzzle'; puzzleId: string };
+export interface ChestDef {
+  id: string;
+  pos: Vec2;
+  tier: ChestTier;
+  gate?: ChestGate;
+  loot: { gold?: number; items?: string[]; shardCount?: number };
+}
+export interface WaypointDef {
+  id: string;
+  name: string;
+  pos: Vec2;
+  radius?: number;
+}
+export interface DiscoveryDef {
+  id: string;
+  pos: Vec2;
+  radius: number;
+  hint: string;
+  reveals: string;
+}
+export interface ElementSourceDef {
+  id: string;
+  pos: Vec2;
+  radius: number;
+  element: ActiveElement;
+  carriable?: boolean;
+}
+export interface ElementPuzzleDef {
+  id: string;
+  kind: 'brazier-chain' | 'freeze-platform' | 'relay' | 'burn-brush' | 'wind-seed';
+  nodes: Vec2[];
+  requires: ActiveElement;
+  radius?: number;
+  timeLimitSec?: number;
+  reveals: string;
+}
+export interface WaterZoneDef {
+  id: string;
+  poly: Vec2[];
+  deep?: boolean;
+}
 export interface RegionDef {
   id: string;
   name: string;
@@ -624,6 +684,16 @@ export interface RegionDef {
   secretShop?: { pos: Vec2; inventory: string[] };
   bosses?: string[];
   raids?: string[];
+  elevation?: { tiers: number[] };
+  climbPoints?: { id: string; pos: Vec2; fromTier: number; toTier: number }[];
+  glidePoints?: { id: string; pos: Vec2; fromTier: number }[];
+  waterZones?: WaterZoneDef[];
+  chests?: ChestDef[];
+  shards?: { id: string; pos: Vec2 }[];
+  waypoints?: WaypointDef[];
+  discoveries?: DiscoveryDef[];
+  elementSources?: ElementSourceDef[];
+  elementPuzzles?: ElementPuzzleDef[];
   props: { treeDensity: number; rockDensity: number };
   gateHint?: string;
 }
@@ -845,7 +915,16 @@ export interface GameSave {
   reputation: number;                     // karma (Phase 6 §3.2), default 0
   codexUnlocks: string[];                 // entry ids revealed on encounter (§3.14)
   journalSeen: string[];                  // acknowledged journal entries (§3.14)
-  settings: { quickcast: boolean; resonance?: boolean; minimap?: boolean; audio: AudioSettings };
+  stamina?: number;
+  discovered?: string[];
+  openedChests?: string[];
+  collectedShards?: string[];
+  solvedPuzzles?: string[];
+  shardsTurnedIn?: Record<string, number>;
+  explorationPct?: Record<string, number>;
+  resin?: number;
+  resinUpdatedAt?: number;
+  settings: { quickcast: boolean; resonance?: boolean; minimap?: boolean; audio: AudioSettings; graphics?: GraphicsSettings };
 }
 
 // ---------- Sim interface available to effect interpreters ----------

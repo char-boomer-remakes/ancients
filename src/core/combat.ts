@@ -36,7 +36,7 @@ export function applyDamage(
     amount *= 1 + source.stats.spellAmpPct / 100;
   }
   if (source && source.team !== victim.team && sim.resonanceEnabled && isActiveElement(opts.element)) {
-    const reaction = applyElement(sim, source, victim, opts.element, amount);
+    const reaction = applyElementAura(sim, source, victim, opts.element, amount);
     amount *= reaction.damageMultiplier;
   }
   if (dtype === 'physical' && !opts.ignoreArmor) amount *= armorMultiplier(victim.stats.armor);
@@ -44,6 +44,20 @@ export function applyDamage(
   amount *= 1 - victim.stats.damageTakenReductionPct / 100;
   if (opts.fromAttack) amount *= 1 - victim.stats.attackDamageTakenReductionPct / 100;
   if (amount <= 0) return 0;
+
+  if (victim.elementalShield && victim.elementalShield.hp > 0) {
+    const shield = victim.elementalShield;
+    const weakHit = sim.resonanceEnabled && isActiveElement(opts.element) && shield.weakTo.includes(opts.element);
+    const shieldDamage = amount * (weakHit ? shield.weakMult : 1);
+    const before = shield.hp;
+    shield.hp = Math.max(0, shield.hp - shieldDamage);
+    sim.events.emit({ t: 'damage', uid: victim.uid, from: source?.uid ?? -1, amount: Math.round(Math.min(before, shieldDamage)), dtype });
+    if (shield.hp > 0) return 0;
+    shield.vulnerableUntil = sim.time + 3;
+    const absorbedBase = before / (weakHit ? shield.weakMult : 1);
+    amount = Math.max(0, amount - absorbedBase);
+    if (amount <= 0) return 0;
+  }
 
   victim.hp -= amount;
   const isEnemy = source !== null && source.team !== victim.team;
@@ -97,7 +111,7 @@ function applyReactionStatus(sim: Sim, source: Unit, target: Unit, reactionId: s
   if (applied) sim.events.emit({ t: 'status-apply', uid: target.uid, status: 'buff', duration });
 }
 
-function applyElement(sim: Sim, source: Unit, target: Unit, element: ActiveElement, baseAmount: number): { damageMultiplier: number } {
+export function applyElementAura(sim: Sim, source: Unit, target: Unit, element: ActiveElement, baseAmount = 1, resolveReactions = true): { damageMultiplier: number } {
   const now = sim.time;
   for (const key of Object.keys(target.elementAuras) as ActiveElement[]) {
     if ((target.elementAuras[key]?.until ?? 0) <= now) delete target.elementAuras[key];
@@ -106,7 +120,7 @@ function applyElement(sim: Sim, source: Unit, target: Unit, element: ActiveEleme
   const existing = (Object.keys(target.elementAuras) as ActiveElement[]).find((e) => e !== element);
   const reaction = existing ? reactionFor(existing, element) : null;
   let damageMultiplier = 1;
-  if (reaction) {
+  if (resolveReactions && reaction) {
     damageMultiplier = reaction.damageMultiplier ?? 1;
     const scale = 1 + source.stats.spellAmpPct / 100;
     sim.events.emit({ t: 'reaction', uid: target.uid, from: source.uid, reaction: reaction.id, elements: [existing!, element] });
@@ -235,7 +249,7 @@ export function attackImpact(sim: Sim, attacker: Unit, victim: Unit): void {
     for (const it of attacker.items) {
       if (!it) continue;
       const element = elementForItemHit(REG.item(it.defId));
-      if (element) applyElement(sim, attacker, victim, element, Math.max(1, dealt || total));
+      if (element) applyElementAura(sim, attacker, victim, element, Math.max(1, dealt || total));
     }
   }
 

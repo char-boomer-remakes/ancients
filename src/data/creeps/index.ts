@@ -225,6 +225,7 @@ export const HARPY_STORMCRAFTER: CreepDef = {
   bounty: { xp: 76, gold: 50 },
   silhouette: { build: 'bird', scale: 0.8, head: 'bare', weapon: 'none', extras: ['wings'] },
   palette: ['#e0d56a', '#6a6f9f', '#ffffff'],
+  elementalShield: { element: 'electro', hp: 120, weakTo: ['cryo', 'pyro'], weakMult: 3 },
   aggroRadius: 650
 };
 

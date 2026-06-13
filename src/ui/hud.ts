@@ -9,7 +9,7 @@ import { abilityIcon, itemIcon, heroPortrait } from '../engine/icons';
 import { WORLD_SCALE } from '../engine/scale';
 import { Game } from '../systems/game';
 import type { InputController } from '../systems/input';
-import type { GambitAction, GambitCondition, GambitRule, GambitTargetMode, ItemDef, SimEvent } from '../core/types';
+import type { GambitAction, GambitCondition, GambitRule, GambitTargetMode, GraphicsSettings, ItemDef, SimEvent } from '../core/types';
 import * as THREE from 'three';
 
 // ------------------------------------------------------------------
@@ -179,17 +179,28 @@ export class Hud {
     const now = performance.now();
     const goldPop = now < this.goldPopUntil;
     const streakActive = now < this.goldStreakUntil && this.goldStreak > 1;
+    const staminaPct = Math.round((g.stamina / TUNING.traversal.staminaMax) * 100);
+    const resin = Math.floor(g.resin);
+    const exploration = g.explorationFor();
     this.topBar.innerHTML = `
       <span class="region">${g.region.name}</span>
-      <span class="clock ${isNight ? 'night' : 'day'}">${isNight ? 'Night' : 'Day'} ${clockPct}%</span>
+      <span class="daynight" title="${isNight ? 'Night' : 'Day'} ${clockPct}%">
+        <span class="dn-dial"><span class="dn-marker ${isNight ? 'moon' : 'sun'}" style="transform:rotate(${(t * 360 - 90).toFixed(1)}deg)"></span></span>
+        <span class="clock ${isNight ? 'night' : 'day'}">${isNight ? 'Night' : 'Day'} ${clockPct}%</span>
+      </span>
       <span class="gold-counter ${goldPop ? 'pop' : ''}" data-gold-counter>
         <span class="coin-icon">◆</span>
         <span class="gold-amount">${Math.floor(this.displayGold)}</span><span class="gold-unit">g</span>
         ${streakActive ? `<span class="gold-streak">×${this.goldStreak}</span>` : ''}
       </span>
+      <span class="stamina-chip" title="Stamina: sprint and dash">
+        <span>STA</span><b>${staminaPct}%</b><i><em style="width:${staminaPct}%"></em></i>
+      </span>
+      <span class="explore-chip" title="Region exploration">${exploration}% explored</span>
+      <span class="resin-chip" title="Soft pacing resource">${resin}/${TUNING.resin.max} moonflow</span>
       <button class="top-btn" data-open="journal">Journal</button>
       <button class="top-btn" data-open="codex">Codex</button>
-      <span class="keys-hint">RMB move/attack · A-click attack-move · Shift queues · S stop · QWER cast · ZXCV items · 1-5 swap · T capture · G interact · B shop · Tab party · M map</span>
+      <span class="keys-hint">RMB move/attack · Alt sprint · Space dash · A-click attack-move · Shift queues · S stop · QWER cast · ZXCV items · 1-5 swap · T capture · G interact · B shop · Tab party · M map</span>
     `;
   }
 
@@ -221,6 +232,14 @@ export class Hud {
     for (const echo of g.region.echoSpawns ?? []) dot(echo.pos.x, echo.pos.y, 2.2, '#8fe8ff', true);
     for (const gate of g.region.gates ?? []) dot(gate.pos.x, gate.pos.y, 2.7, '#7aff9a', true);
     for (const gym of g.region.gyms ?? []) dot(gym.pos.x, gym.pos.y, 3, '#ff9ad5', true);
+    for (const wp of g.region.waypoints ?? []) dot(wp.pos.x, wp.pos.y, 2.5, g.discovered.has(wp.id) ? '#7af7ff' : '#446b73', true);
+    for (const chest of g.region.chests ?? []) {
+      if (!g.openedChests.has(chest.id)) dot(chest.pos.x, chest.pos.y, 2, '#ffd86a', true);
+    }
+    for (const shard of g.region.shards ?? []) {
+      if (!g.collectedShards.has(shard.id)) dot(shard.pos.x, shard.pos.y, 1.8, '#d990ff');
+    }
+    for (const src of g.region.elementSources ?? []) dot(src.pos.x, src.pos.y, 1.8, '#ff9f57');
     dot(g.region.town.pos.x, g.region.town.pos.y, 4, '#ffd86a', true);
     dot(g.region.shrine.pos.x, g.region.shrine.pos.y, 2.4, '#67d7ff');
     const u = g.activeUnit();
@@ -1550,6 +1569,17 @@ export class Hud {
           <label class="opt-row">SFX volume <input type="range" id="opt-sfx-volume" min="0" max="1" step="0.05" value="${g.settings.audio.sfx}"></label>
           <label class="opt-row">Voice volume <input type="range" id="opt-voice-volume" min="0" max="1" step="0.05" value="${g.settings.audio.voice}"></label>
           <label class="opt-row">Stinger volume <input type="range" id="opt-stinger-volume" min="0" max="1" step="0.05" value="${g.settings.audio.stinger}"></label>
+          <h3>Graphics</h3>
+          <label class="opt-row">Quality
+            <select id="opt-quality">
+              ${(['auto', 'low', 'medium', 'high', 'ultra'] as const)
+                .map((q) => `<option value="${q}"${(g.settings.graphics?.quality ?? 'auto') === q ? ' selected' : ''}>${q[0].toUpperCase() + q.slice(1)}</option>`)
+                .join('')}
+            </select>
+          </label>
+          <label class="opt-row">Exposure <input type="range" id="opt-exposure" min="0.5" max="1.5" step="0.02" value="${g.settings.graphics?.exposure ?? 0.92}"></label>
+          <label class="opt-row">Color grade <input type="range" id="opt-grade" min="0" max="1.5" step="0.05" value="${g.settings.graphics?.grade ?? 1}"></label>
+          <label class="opt-row"><input type="checkbox" id="opt-reduced-motion" ${g.settings.graphics?.reducedMotion ? 'checked' : ''}> Reduced motion (ambient FX)</label>
           <button class="btn" id="open-journal">Quest Journal</button>
           <button class="btn" id="open-codex">Codex</button>
           <button class="btn" id="export-save">Export save (JSON)</button>
@@ -1600,6 +1630,21 @@ export class Hud {
     this.modal.querySelector('#opt-stinger-volume')?.addEventListener('input', (e) => {
       g.settings.audio.stinger = Number((e.target as HTMLInputElement).value);
       g.audio.setSettings(g.settings);
+    });
+    this.modal.querySelector('#opt-quality')?.addEventListener('change', (e) => {
+      g.setQualityTier((e.target as HTMLSelectElement).value as GraphicsSettings['quality']);
+    });
+    this.modal.querySelector('#opt-exposure')?.addEventListener('input', (e) => {
+      if (g.settings.graphics) g.settings.graphics.exposure = Number((e.target as HTMLInputElement).value);
+      g.applyGraphics();
+    });
+    this.modal.querySelector('#opt-grade')?.addEventListener('input', (e) => {
+      if (g.settings.graphics) g.settings.graphics.grade = Number((e.target as HTMLInputElement).value);
+      g.applyGraphics();
+    });
+    this.modal.querySelector('#opt-reduced-motion')?.addEventListener('change', (e) => {
+      if (g.settings.graphics) g.settings.graphics.reducedMotion = (e.target as HTMLInputElement).checked;
+      g.applyGraphics();
     });
     this.modal.querySelector('#export-save')?.addEventListener('click', () => g.exportSave());
     this.modal.querySelector('#open-journal')?.addEventListener('click', () => this.toggleModal('journal'));

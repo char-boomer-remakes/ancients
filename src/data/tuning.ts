@@ -98,6 +98,38 @@ export const TUNING = {
   resonanceSwapCooldownSec: 1.2,
   resonanceElementGaugeSec: 4,
 
+  // --- Genshin-overworld locomotion / traversal (GAMEPLAY_OVERHAUL G1/G3) ---
+  locomotion: {
+    walkSpeedMult: 0.55,
+    sprintSpeedMult: 1.5,
+    dashSpeed: 1150,
+    dashDurationSec: 0.22,
+    dashCost: 55,
+    dashCooldownSec: 0.9
+  },
+  traversal: {
+    staminaMax: 240,
+    sprintDrainPerSec: 18,
+    climbDrainPerSec: 24,
+    swimDrainPerSec: 14,
+    staminaRegenPerSec: 25,
+    regenDelaySec: 0.6
+  },
+  exploration: {
+    pickupRadius: 180,
+    waypointRadius: 260,
+    chestInteractRadius: 260,
+    puzzleNodeRadius: 230,
+    shrineShardQuota: 3,
+    shardRewardGold: 225,
+    explorationThresholdRewardGold: 175
+  },
+  resin: {
+    max: 180,
+    regenPerSec: 180 / (8 * 60 * 60),
+    dryLootGoldPct: 0.25
+  },
+
   // --- capture (deterministic, SPEC §5) ---
   capture: {
     small:   { hpPct: 0.30, channelSec: 2.5 },

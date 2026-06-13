@@ -62,6 +62,52 @@ export const TRANQUIL_VALE: RegionDef = {
     { id: 'tv-to-nw', name: 'North Pass to Nightsilver Woods', pos: { x: 6000, y: 850 }, radius: 520, toRegionId: 'nightsilver-woods', toPos: { x: 5600, y: 11050 }, requiresRecruits: 1 }
   ],
   gyms: [],
+  elevation: { tiers: [0, 160] },
+  climbPoints: [
+    { id: 'tv-dawn-ridge-rope', pos: { x: 3300, y: 3400 }, fromTier: 0, toTier: 1 }
+  ],
+  glidePoints: [
+    { id: 'tv-dawn-ridge-glide', pos: { x: 3600, y: 3050 }, fromTier: 1 }
+  ],
+  waterZones: [
+    { id: 'tv-south-brook', poly: [{ x: 6900, y: 8500 }, { x: 8000, y: 8450 }, { x: 8100, y: 9100 }, { x: 7000, y: 9200 }] }
+  ],
+  waypoints: [
+    { id: 'tv-waypoint-dawnshade', name: 'Dawnshade Waystone', pos: { x: 6200, y: 6500 } },
+    { id: 'tv-waypoint-north-pass', name: 'North Pass Waystone', pos: { x: 5950, y: 1400 } },
+    { id: 'tv-waypoint-dawn-ridge', name: 'Dawn Ridge Waystone', pos: { x: 3450, y: 3150 } }
+  ],
+  chests: [
+    { id: 'tv-chest-open-meadow', pos: { x: 6650, y: 7050 }, tier: 'common', loot: { gold: 90, items: ['tango'] } },
+    { id: 'tv-chest-kobold-cache', pos: { x: 4520, y: 5480 }, tier: 'rich', gate: { kind: 'camp', campId: 'tv-kobold-1' }, loot: { gold: 160, items: ['boots-of-speed'] } },
+    { id: 'tv-chest-dawn-ridge', pos: { x: 3550, y: 3020 }, tier: 'precious', gate: { kind: 'puzzle', puzzleId: 'tv-brazier-chain' }, loot: { gold: 240, items: ['magic-wand'], shardCount: 1 } }
+  ],
+  shards: [
+    { id: 'tv-shard-shepherd-stone', pos: { x: 6900, y: 6800 } },
+    { id: 'tv-shard-old-well', pos: { x: 5720, y: 5900 } },
+    { id: 'tv-shard-ridge-root', pos: { x: 3180, y: 3520 } },
+    { id: 'tv-shard-north-spark', pos: { x: 6120, y: 1880 } }
+  ],
+  discoveries: [
+    { id: 'tv-discovery-north-glint', pos: { x: 5900, y: 2100 }, radius: 360, hint: 'Something glints past the north ridge.', reveals: 'tv-waypoint-north-pass' },
+    { id: 'tv-discovery-ridge-cache', pos: { x: 3300, y: 3500 }, radius: 320, hint: 'A rope climbs toward a sealed ridge cache.', reveals: 'tv-chest-dawn-ridge' }
+  ],
+  elementSources: [
+    { id: 'tv-pyro-brazier-west', pos: { x: 3300, y: 3260 }, radius: 180, element: 'pyro', carriable: true },
+    { id: 'tv-pyro-brazier-east', pos: { x: 3800, y: 3140 }, radius: 180, element: 'pyro', carriable: true },
+    { id: 'tv-hydro-spring', pos: { x: 7480, y: 8820 }, radius: 260, element: 'hydro' }
+  ],
+  elementPuzzles: [
+    {
+      id: 'tv-brazier-chain',
+      kind: 'brazier-chain',
+      nodes: [{ x: 3300, y: 3260 }, { x: 3560, y: 3160 }, { x: 3800, y: 3140 }],
+      requires: 'pyro',
+      radius: 220,
+      timeLimitSec: 12,
+      reveals: 'tv-chest-dawn-ridge'
+    }
+  ],
   props: { treeDensity: 0.7, rockDensity: 0.3 },
   gateHint: 'The northern pass leads to Nightsilver Woods.'
 };

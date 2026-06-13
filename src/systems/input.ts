@@ -62,8 +62,10 @@ export class InputController {
       this.game.scene.zoomBy((e as WheelEvent).deltaY);
     }, this.canvas);
     on('keydown', (e) => this.onKeyDown(e as KeyboardEvent));
+    on('keyup', (e) => this.onKeyUp(e as KeyboardEvent));
     on('blur', () => {
       this.rmbHeld = false;
+      this.game.setSprintHeld(false);
     });
   }
 
@@ -168,6 +170,10 @@ export class InputController {
 
   private onKeyDown(e: KeyboardEvent): void {
     const key = e.key.toLowerCase();
+    if (e.code === 'AltLeft' || e.code === 'AltRight') {
+      this.game.setSprintHeld(true);
+      return;
+    }
     if (key === 'escape') {
       if (this.targeting.kind !== 'none') {
         this.targeting = { kind: 'none' };
@@ -260,6 +266,11 @@ export class InputController {
       case 's':
         g.orderStop();
         return;
+      case ' ':
+      case 'spacebar':
+        e.preventDefault();
+        g.tryDash(this.hoverGround ?? undefined);
+        return;
       case 'm':
         g.scene.toggleCameraMode();
         return;
@@ -280,6 +291,12 @@ export class InputController {
         e.preventDefault();
         g.saveToSlot(0);
         return;
+    }
+  }
+
+  private onKeyUp(e: KeyboardEvent): void {
+    if (e.code === 'AltLeft' || e.code === 'AltRight') {
+      this.game.setSprintHeld(false);
     }
   }
 

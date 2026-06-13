@@ -43,6 +43,52 @@ export const NIGHTSILVER_WOODS: RegionDef = {
     { id: 'nw-to-icewrack', name: 'Frost Road to Icewrack', pos: { x: 10600, y: 1600 }, radius: 500, toRegionId: 'icewrack', toPos: { x: 1600, y: 9800 }, requiredBadge: 'lunar-badge' }
   ],
   gyms: [{ gymId: 'lunar-gym', pos: { x: 6100, y: 3000 }, radius: 650 }],
+  elevation: { tiers: [0, 140, 280] },
+  climbPoints: [
+    { id: 'nw-moonroot-climb', pos: { x: 4300, y: 9000 }, fromTier: 0, toTier: 1 },
+    { id: 'nw-high-bough-climb', pos: { x: 8050, y: 7800 }, fromTier: 1, toTier: 2 }
+  ],
+  glidePoints: [
+    { id: 'nw-silver-bough-glide', pos: { x: 8200, y: 7600 }, fromTier: 2 }
+  ],
+  waterZones: [
+    { id: 'nw-moonpool', poly: [{ x: 6900, y: 4700 }, { x: 7700, y: 4550 }, { x: 7850, y: 5200 }, { x: 7050, y: 5350 }], deep: true }
+  ],
+  waypoints: [
+    { id: 'nw-waypoint-moonwake', name: 'Moonwake Waystone', pos: { x: 5800, y: 6500 } },
+    { id: 'nw-waypoint-lunar-gym', name: 'Lunar Steps Waystone', pos: { x: 6250, y: 3600 } },
+    { id: 'nw-waypoint-silver-bough', name: 'Silver Bough Waystone', pos: { x: 8350, y: 7480 } }
+  ],
+  chests: [
+    { id: 'nw-chest-moonpool-bank', pos: { x: 7600, y: 5400 }, tier: 'rich', loot: { gold: 170, items: ['clarity'] } },
+    { id: 'nw-chest-satyr-relic', pos: { x: 4900, y: 9300 }, tier: 'precious', gate: { kind: 'camp', campId: 'nw-satyr-1' }, loot: { gold: 260, items: ['yasha'], shardCount: 1 } },
+    { id: 'nw-chest-frozen-bridge', pos: { x: 7320, y: 4940 }, tier: 'luxurious', gate: { kind: 'puzzle', puzzleId: 'nw-freeze-moonpool' }, loot: { gold: 420, items: ['maelstrom'], shardCount: 2 } }
+  ],
+  shards: [
+    { id: 'nw-shard-moonwake', pos: { x: 5400, y: 6020 } },
+    { id: 'nw-shard-wolf-den', pos: { x: 3080, y: 8120 } },
+    { id: 'nw-shard-silver-bough', pos: { x: 8260, y: 7420 } },
+    { id: 'nw-shard-frost-road', pos: { x: 10100, y: 2050 } }
+  ],
+  discoveries: [
+    { id: 'nw-discovery-moonpool', pos: { x: 7000, y: 5200 }, radius: 380, hint: 'Moonwater hardens under frost.', reveals: 'nw-freeze-moonpool' },
+    { id: 'nw-discovery-silver-bough', pos: { x: 8000, y: 7850 }, radius: 360, hint: 'A high bough catches the wind toward a hidden waystone.', reveals: 'nw-waypoint-silver-bough' }
+  ],
+  elementSources: [
+    { id: 'nw-cryo-moonstone', pos: { x: 7020, y: 5060 }, radius: 220, element: 'cryo', carriable: true },
+    { id: 'nw-hydro-moonpool', pos: { x: 7420, y: 4920 }, radius: 300, element: 'hydro' },
+    { id: 'nw-anemo-seed', pos: { x: 8120, y: 7700 }, radius: 230, element: 'anemo', carriable: true }
+  ],
+  elementPuzzles: [
+    {
+      id: 'nw-freeze-moonpool',
+      kind: 'freeze-platform',
+      nodes: [{ x: 7320, y: 4940 }],
+      requires: 'cryo',
+      radius: 260,
+      reveals: 'nw-chest-frozen-bridge'
+    }
+  ],
   props: { treeDensity: 1.0, rockDensity: 0.25 },
   gateHint: 'The Frost Road opens after the Lunar Badge.'
 };

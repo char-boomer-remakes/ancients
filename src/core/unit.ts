@@ -12,6 +12,7 @@ import type {
   AbilityDef,
   AnimGesture,
   AnimProfile,
+  ActiveElement,
   AttackModSpec,
   Attribute,
   CreepDef,
@@ -132,6 +133,7 @@ export class Unit {
   aggroRadius?: number;
   /** renderer hint for summons/wards (heroes and creeps resolve via REG) */
   visual?: { silhouette: SilhouetteSpec; palette: [string, string, string] };
+  elementalShield?: { element: ActiveElement; hp: number; maxHp: number; weakTo: ActiveElement[]; weakMult: number; vulnerableUntil: number };
 
   attribute: Attribute;
   base: HeroBaseStats;
@@ -558,6 +560,16 @@ export function makeCreepUnit(def: CreepDef, opts: { team: Team; pos: Vec2; star
   u.star = star;
   u.tier = def.tier;
   u.capturable = !!opts.wild;
+  if (def.elementalShield) {
+    u.elementalShield = {
+      element: def.elementalShield.element,
+      hp: def.elementalShield.hp * sm,
+      maxHp: def.elementalShield.hp * sm,
+      weakTo: [...def.elementalShield.weakTo],
+      weakMult: def.elementalShield.weakMult,
+      vulnerableUntil: -1
+    };
+  }
   u.bounty = { xp: def.bounty.xp * sm, gold: def.bounty.gold * sm };
   // creeps: fixed pools, no attribute scaling
   u.externalMods = {

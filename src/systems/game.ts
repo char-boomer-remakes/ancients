@@ -2,6 +2,7 @@ import { TUNING } from '../data/tuning';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { Unit } from '../core/unit';
+import { applyElementAura } from '../core/combat';
 import { autoPicksForLevel, buildHero } from '../core/hero-setup';
 import { spawnHeroEchoUnit } from '../core/echo-unit';
 import { TrialRunner, trialGateOpen, type TrialGateCtx, type TrialOutcome } from '../core/trials';
@@ -27,15 +28,17 @@ import {
   tomePurchase,
   type LootRoll
 } from '../core/phase3';
-import { defaultAudioSettings, defaultPhase4SaveFields, migratePhase4Save } from '../core/phase4';
+import { defaultAudioSettings, defaultGraphicsSettings, defaultPhase4SaveFields } from '../core/phase4';
+import { defaultPhase5SaveFields, migratePhase5Save } from '../core/phase5';
+import { type QualityTier } from '../engine/performance';
 import { mergeCreeps, newCreepInstanceId, validateEntourage } from '../core/capture';
 import { computeBuyPlan, executeBuy, itemSaveOf, itemStateFromSave, sellValue, sortInventory } from '../core/items';
 import { runRaidBattle, runRaidEncounter, runMacroBattle, type RaidEncounterResult } from '../core/macro';
 import { ELITE_DRAFT } from '../data/drafts';
 import { resonanceMods } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
-import { dist } from '../core/math2d';
-import type { BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, EchoProgress, GambitRule, GameSave, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, SimEvent, StingerId, Vec2 } from '../core/types';
+import { dist, fromAngle, norm, sub } from '../core/math2d';
+import type { ActiveElement, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, EchoProgress, GambitRule, GameSave, GraphicsSettings, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, SimEvent, StingerId, Vec2 } from '../core/types';
 import { ProceduralAudio } from '../engine/audio';
 import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
@@ -54,7 +57,7 @@ export const GATED_TOP_TIER: ReadonlySet<string> = new Set([
 // camps, capture/entourage, shop, shrine, day clock, save/load.
 // ------------------------------------------------------------------
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 const SLOT_KEYS = ['ancients.save.1', 'ancients.save.2', 'ancients.save.3'];
 const AUTO_KEY = 'ancients.save.auto';
 
@@ -111,6 +114,7 @@ function neutralPassiveMods(neutralId: string | undefined): Record<string, numbe
 export function newGameSave(starterHeroId: string): GameSave {
   const region = REG.region('tranquil-vale');
   const phase3 = defaultPhase3SaveFields();
+  const phase5 = defaultPhase5SaveFields(0);
   return {
     version: SAVE_VERSION,
     name: REG.hero(starterHeroId).name,
@@ -151,8 +155,22 @@ export function newGameSave(starterHeroId: string): GameSave {
     campRespawn: {},
     ...phase3,
     ...defaultPhase4SaveFields(),
-    settings: { quickcast: true, resonance: false, minimap: true, audio: defaultAudioSettings() }
+    ...phase5,
+    explorationPct: { [region.id]: 0 },
+    discovered: ['tv-waypoint-dawnshade'],
+    settings: { quickcast: true, resonance: true, minimap: true, audio: defaultAudioSettings(), graphics: defaultGraphicsSettings() }
   };
+}
+
+/** Map the user's graphics-quality choice to a concrete render tier. 'auto'
+ *  reads the device (cores + DPR); the runtime perf budget can still downshift. */
+export function resolveQuality(q: GraphicsSettings['quality'] | undefined): QualityTier {
+  if (q && q !== 'auto') return q;
+  const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  if (cores >= 8 && dpr >= 1.5) return 'ultra';
+  if (cores >= 4) return 'high';
+  return 'medium';
 }
 
 /** The slice of GameScene the orchestrator calls; lets tests run headless. */
@@ -161,6 +179,11 @@ export interface SceneLike {
   terrain: { obstacles: { pos: Vec2; radius: number }[] };
   pushEvent(ev: SimEvent, sim: Sim): void;
   update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number): void;
+  /** Optional (real GameScene only): live graphics-settings hooks (§6). */
+  setQuality?(tier: QualityTier): void;
+  setGraphics?(g: { exposure?: number; grade?: number; reducedMotion?: boolean }): void;
+  /** Optional (real GameScene only): pre-compile shaders behind a loading screen. */
+  prewarm?(): void;
 }
 
 /** The slice of ProceduralAudio the orchestrator calls. */
@@ -229,6 +252,21 @@ export class Game {
   reputation = 0;
   codexUnlocks = new Set<string>();
   journalSeen = new Set<string>();
+  stamina = TUNING.traversal.staminaMax;
+  discovered = new Set<string>();
+  openedChests = new Set<string>();
+  collectedShards = new Set<string>();
+  solvedPuzzles = new Set<string>();
+  shardsTurnedIn: Record<string, number> = {};
+  explorationPct: Record<string, number> = {};
+  resin = TUNING.resin.max;
+  resinUpdatedAt = 0;
+  sprintHeld = false;
+  private sprintModUid = -1;
+  private dashReadyAt = 0;
+  private staminaRegenReadyAt = 0;
+  private carriedElement: { element: ActiveElement; until: number } | null = null;
+  private puzzleProgress = new Map<string, { lit: Set<number>; startedAt: number }>();
 
   /** active recruitment trial (Phase 6 §3.1) */
   activeTrial: TrialRunner | null = null;
@@ -265,7 +303,7 @@ export class Game {
 
   constructor(canvas: HTMLCanvasElement | null, save: GameSave, deps?: GameDeps) {
     this.region = REG.region(save.regionId);
-    this.scene = (deps?.scene ?? new GameScene(canvas as HTMLCanvasElement, this.region)) as unknown as GameScene;
+    this.scene = (deps?.scene ?? new GameScene(canvas as HTMLCanvasElement, this.region, resolveQuality(save.settings.graphics?.quality))) as unknown as GameScene;
     this.audio = (deps?.audio ?? new ProceduralAudio(this.settings)) as unknown as ProceduralAudio;
     this.sim = new Sim({
       seed: save.worldSeed,
@@ -295,6 +333,16 @@ export class Game {
     this.reputation = save.reputation ?? 0;
     this.codexUnlocks = new Set(save.codexUnlocks ?? []);
     this.journalSeen = new Set(save.journalSeen ?? []);
+    this.stamina = Math.max(0, Math.min(TUNING.traversal.staminaMax, save.stamina ?? TUNING.traversal.staminaMax));
+    this.discovered = new Set(save.discovered ?? []);
+    this.openedChests = new Set(save.openedChests ?? []);
+    this.collectedShards = new Set(save.collectedShards ?? []);
+    this.solvedPuzzles = new Set(save.solvedPuzzles ?? []);
+    this.shardsTurnedIn = { ...(save.shardsTurnedIn ?? {}) };
+    this.explorationPct = { ...(save.explorationPct ?? {}) };
+    this.resin = Math.max(0, Math.min(TUNING.resin.max, save.resin ?? TUNING.resin.max));
+    this.resinUpdatedAt = save.resinUpdatedAt ?? save.playtimeSec;
+    this.regenResinToPlaytime();
     this.codexUnlocks.add('region:' + this.region.id); // standing in a region is the encounter (§3.14)
 
     this.party = save.party.map((heroId) => {
@@ -345,14 +393,16 @@ export class Game {
       quickcast: save.settings.quickcast,
       resonance: save.settings.resonance ?? false,
       minimap: save.settings.minimap ?? true,
-      audio: { ...defaultAudioSettings(), ...save.settings.audio }
+      audio: { ...defaultAudioSettings(), ...save.settings.audio },
+      graphics: { ...defaultGraphicsSettings(), ...save.settings.graphics }
     };
     this.sim.resonanceEnabled = this.settings.resonance ?? false;
     this.audio.setSettings(this.settings);
     this.refreshResonanceMods(true);
+    this.applyGraphics();
   }
 
-  settings: GameSave['settings'] = { quickcast: true, resonance: false, minimap: true, audio: defaultAudioSettings() };
+  settings: GameSave['settings'] = { quickcast: true, resonance: true, minimap: true, audio: defaultAudioSettings(), graphics: defaultGraphicsSettings() };
 
   // ---------- helpers ----------
 
@@ -360,9 +410,67 @@ export class Game {
     return this.party[this.activeIdx]?.unit ?? null;
   }
 
+  setSprintHeld(held: boolean): void {
+    this.sprintHeld = held;
+  }
+
+  private regenResinToPlaytime(): void {
+    const elapsed = Math.max(0, this.playtime - this.resinUpdatedAt);
+    if (elapsed <= 0) return;
+    this.resin = Math.min(TUNING.resin.max, this.resin + elapsed * TUNING.resin.regenPerSec);
+    this.resinUpdatedAt = this.playtime;
+  }
+
+  explorationFor(regionId = this.region.id): number {
+    return this.explorationPct[regionId] ?? this.computeExplorationPct(regionId);
+  }
+
+  private computeExplorationPct(regionId: string): number {
+    const region = REG.region(regionId);
+    const total =
+      (region.waypoints?.length ?? 0) +
+      (region.chests?.length ?? 0) +
+      (region.shards?.length ?? 0) +
+      (region.discoveries?.length ?? 0) +
+      (region.elementPuzzles?.length ?? 0);
+    if (total <= 0) return 0;
+    let done = 0;
+    for (const w of region.waypoints ?? []) if (this.discovered.has(w.id)) done++;
+    for (const c of region.chests ?? []) if (this.openedChests.has(c.id)) done++;
+    for (const s of region.shards ?? []) if (this.collectedShards.has(s.id)) done++;
+    for (const d of region.discoveries ?? []) if (this.discovered.has(d.id)) done++;
+    for (const p of region.elementPuzzles ?? []) if (this.solvedPuzzles.has(p.id)) done++;
+    const pct = Math.round((done / total) * 100);
+    this.explorationPct[regionId] = pct;
+    return pct;
+  }
+
   msg(text: string, kind: Toast['kind'] = 'info'): void {
     this.toasts.push({ text, kind, at: performance.now() / 1000 });
     if (this.toasts.length > 60) this.toasts.splice(0, this.toasts.length - 60);
+  }
+
+  /** Warm the renderer behind a loading screen: build the first unit views and
+   *  force the first render so the post stack + PBR programs compile now instead
+   *  of hitching the first interactive frame (GRAPHICS_SPEC §9.4). No-op headless. */
+  prewarm(): void {
+    this.update(0); // creates unit views + forces a full render → compiles programs
+    this.scene.prewarm?.(); // compile any in-scene materials not yet drawn
+  }
+
+  /** Push the live-tunable graphics settings (exposure/grade/reduced-motion) to
+   *  the scene. Cheap — safe to call on every slider change. No-op headless. */
+  applyGraphics(): void {
+    const g = this.settings.graphics ?? defaultGraphicsSettings();
+    this.scene.setGraphics?.({ exposure: g.exposure, grade: g.grade, reducedMotion: g.reducedMotion });
+  }
+
+  /** Change the render quality tier at runtime (heavy: rebuilds the post stack,
+   *  shadows, weather). Persists the choice in settings. No-op headless. */
+  setQualityTier(quality: GraphicsSettings['quality']): void {
+    if (this.settings.graphics) this.settings.graphics.quality = quality;
+    this.scene.setQuality?.(resolveQuality(quality));
+    this.applyGraphics();
   }
 
   private emitPresentationEvent(ev: SimEvent, routeNow = false): void {
@@ -461,7 +569,56 @@ export class Game {
     return (this.region.gyms ?? []).find((g) => dist(u.pos, g.pos) <= g.radius) ?? null;
   }
 
+  nearbyChest(): NonNullable<RegionDef['chests']>[number] | null {
+    const u = this.activeUnit();
+    if (!u) return null;
+    return (this.region.chests ?? []).find((c) => !this.openedChests.has(c.id) && dist(u.pos, c.pos) <= TUNING.exploration.chestInteractRadius) ?? null;
+  }
+
+  private chestGateOpen(chest: NonNullable<RegionDef['chests']>[number]): boolean {
+    const gate = chest.gate ?? { kind: 'none' as const };
+    if (gate.kind === 'none') return true;
+    if (gate.kind === 'puzzle') return this.solvedPuzzles.has(gate.puzzleId);
+    const st = this.camps.get(gate.campId);
+    return !!st && st.respawnAt > 0 && st.uids.length === 0;
+  }
+
+  openNearbyChest(): boolean {
+    const chest = this.nearbyChest();
+    if (!chest) return false;
+    if (!this.chestGateOpen(chest)) {
+      this.msg(chest.gate?.kind === 'camp' ? 'The cache is bound to a nearby camp.' : 'An elemental seal holds this chest shut.', 'bad');
+      return true;
+    }
+    this.openedChests.add(chest.id);
+    if (chest.loot.gold) this.awardGold(chest.loot.gold, `chest:${chest.tier}`, chest.pos, true);
+    for (const itemId of chest.loot.items ?? []) {
+      this.inventoryStash.push({ id: itemId });
+      this.msg(`Chest found: ${REG.item(itemId).name}`, 'good');
+    }
+    for (let i = 0; i < (chest.loot.shardCount ?? 0); i++) this.collectedShards.add(`${chest.id}:shard:${i}`);
+    this.msg(`${chest.tier[0].toUpperCase()}${chest.tier.slice(1)} chest opened`, 'good');
+    this.refreshExplorationRewards();
+    return true;
+  }
+
+  offerShardsAtShrine(): boolean {
+    const u = this.activeUnit();
+    if (!u || dist(u.pos, this.region.shrine.pos) > 500) return false;
+    const turned = this.shardsTurnedIn[this.region.id] ?? 0;
+    const available = this.collectedShards.size - turned;
+    const quota = TUNING.exploration.shrineShardQuota;
+    if (available < quota) return false;
+    this.shardsTurnedIn[this.region.id] = turned + quota;
+    this.awardGold(TUNING.exploration.shardRewardGold, 'shrine-offering', this.region.shrine.pos, true);
+    this.msg(`Mad Moon shards offered (${this.shardsTurnedIn[this.region.id]} total)`, 'good');
+    this.refreshExplorationRewards();
+    return true;
+  }
+
   tryInteract(): boolean {
+    if (this.openNearbyChest()) return true;
+    if (this.offerShardsAtShrine()) return true;
     const gym = this.nearbyGym();
     if (gym) {
       if (!this.gymStartGuard(gym.gymId)) return false;
@@ -498,6 +655,29 @@ export class Game {
     save.savedAt = Date.now();
     this.msg(`Traveling to ${target.name}...`, 'info');
     window.dispatchEvent(new CustomEvent('ancients:load', { detail: save }));
+    return true;
+  }
+
+  fastTravelToWaypoint(waypointId: string): boolean {
+    const waypoint = (this.region.waypoints ?? []).find((w) => w.id === waypointId);
+    if (!waypoint) {
+      this.msg('Unknown waystone', 'bad');
+      return false;
+    }
+    if (!this.discovered.has(waypoint.id)) {
+      this.msg(`${waypoint.name} has not been activated`, 'bad');
+      return false;
+    }
+    if (this.inCombat()) {
+      this.msg('Cannot fast travel in combat', 'bad');
+      return false;
+    }
+    const u = this.activeUnit();
+    if (!u) return false;
+    u.pos = { ...waypoint.pos };
+    u.prevPos = { ...waypoint.pos };
+    this.scene.selectedUid = u.uid;
+    this.msg(`Fast traveled to ${waypoint.name}`, 'good');
     return true;
   }
 
@@ -1432,6 +1612,37 @@ export class Game {
     this.sim.order(u.uid, { kind: 'stop' });
   }
 
+  tryDash(point?: Vec2): boolean {
+    const u = this.activeUnit();
+    if (!u || !u.alive) return false;
+    if (u.summary.rooted || u.summary.stunned || u.summary.cycloned || u.summary.sleeping || u.summary.frozen) {
+      this.msg('Cannot dash while rooted or disabled', 'bad');
+      return false;
+    }
+    if (this.sim.time < this.dashReadyAt) {
+      this.msg(`Dash ready in ${(this.dashReadyAt - this.sim.time).toFixed(1)}s`, 'bad');
+      return false;
+    }
+    if (this.stamina < TUNING.locomotion.dashCost) {
+      this.msg('Not enough stamina', 'bad');
+      return false;
+    }
+    const toPoint = point && dist(u.pos, point) > 1 ? norm(sub(point, u.pos)) : fromAngle(u.facing);
+    const dir = toPoint.x === 0 && toPoint.y === 0 ? fromAngle(u.facing) : toPoint;
+    this.stamina = Math.max(0, this.stamina - TUNING.locomotion.dashCost);
+    this.staminaRegenReadyAt = this.sim.time + TUNING.traversal.regenDelaySec;
+    this.dashReadyAt = this.sim.time + TUNING.locomotion.dashCooldownSec;
+    u.forced.push({
+      kind: 'forced',
+      dir,
+      speed: TUNING.locomotion.dashSpeed,
+      until: this.sim.time + TUNING.locomotion.dashDurationSec
+    });
+    u.castingUntil = this.sim.time + TUNING.locomotion.dashDurationSec;
+    u.castGesture = 'dash';
+    return true;
+  }
+
   castAbility(slot: number, opts: { uid?: number; point?: Vec2; queued?: boolean }): void {
     const u = this.activeUnit();
     if (!u || !u.alive) return;
@@ -2016,7 +2227,16 @@ export class Game {
       reputation: this.reputation,
       codexUnlocks: [...this.codexUnlocks],
       journalSeen: [...this.journalSeen],
-      settings: { ...this.settings, audio: { ...this.settings.audio } }
+      stamina: this.stamina,
+      discovered: [...this.discovered],
+      openedChests: [...this.openedChests],
+      collectedShards: [...this.collectedShards],
+      solvedPuzzles: [...this.solvedPuzzles],
+      shardsTurnedIn: { ...this.shardsTurnedIn },
+      explorationPct: { ...this.explorationPct },
+      resin: this.resin,
+      resinUpdatedAt: this.resinUpdatedAt,
+      settings: { ...this.settings, audio: { ...this.settings.audio }, graphics: { ...defaultGraphicsSettings(), ...this.settings.graphics } }
     };
   }
 
@@ -2086,9 +2306,9 @@ export class Game {
   static migrateSave(s: unknown): GameSave | null {
     if (!s || typeof s !== 'object') return null;
     const v = s as Partial<GameSave>;
-    if (v.version === 2 || v.version === 3 || v.version === SAVE_VERSION) {
-      // v2/v3 -> v3 shape (phase 3 fields), then v3 -> v4 (audio channels, karma, codex/journal)
-      const migrated = migratePhase4Save(migratePhase3Save(v as unknown as { version: number; [k: string]: unknown }));
+    if (v.version === 2 || v.version === 3 || v.version === 4 || v.version === SAVE_VERSION) {
+      // v2/v3 -> v3 shape, v4 audio/codex fields, then v5 exploration/stamina fields.
+      const migrated = migratePhase5Save(migratePhase3Save(v as unknown as { version: number; [k: string]: unknown }));
       return Game.validateSave(migrated) ? migrated : null;
     }
     return null;
@@ -2134,6 +2354,17 @@ export class Game {
     if (typeof v.reputation !== 'number') return false;
     if (!Array.isArray(v.codexUnlocks) || !v.codexUnlocks.every((id) => typeof id === 'string')) return false;
     if (!Array.isArray(v.journalSeen) || !v.journalSeen.every((id) => typeof id === 'string')) return false;
+    if (typeof v.stamina !== 'number' || v.stamina < 0 || v.stamina > TUNING.traversal.staminaMax) return false;
+    if (!Array.isArray(v.discovered) || !v.discovered.every((id) => typeof id === 'string')) return false;
+    if (!Array.isArray(v.openedChests) || !v.openedChests.every((id) => typeof id === 'string')) return false;
+    if (!Array.isArray(v.collectedShards) || !v.collectedShards.every((id) => typeof id === 'string')) return false;
+    if (!Array.isArray(v.solvedPuzzles) || !v.solvedPuzzles.every((id) => typeof id === 'string')) return false;
+    if (!v.shardsTurnedIn || typeof v.shardsTurnedIn !== 'object') return false;
+    if (!Object.values(v.shardsTurnedIn).every((n) => typeof n === 'number' && n >= 0)) return false;
+    if (!v.explorationPct || typeof v.explorationPct !== 'object') return false;
+    if (!Object.values(v.explorationPct).every((n) => typeof n === 'number' && n >= 0 && n <= 100)) return false;
+    if (typeof v.resin !== 'number' || v.resin < 0 || v.resin > TUNING.resin.max) return false;
+    if (typeof v.resinUpdatedAt !== 'number' || v.resinUpdatedAt < 0) return false;
     if (typeof v.activeIdx !== 'number' || v.activeIdx < 0 || v.activeIdx >= v.party.length) return false;
     if (!v.settings || typeof v.settings.quickcast !== 'boolean') return false;
     if (v.settings.resonance !== undefined && typeof v.settings.resonance !== 'boolean') return false;
@@ -2366,6 +2597,117 @@ export class Game {
     }
   }
 
+  private setSprintMod(u: Unit | null, enabled: boolean): void {
+    if (!u) return;
+    const amount = (TUNING.locomotion.sprintSpeedMult - 1) * 100;
+    const active = this.sprintModUid === u.uid;
+    if (enabled === active) return;
+    u.externalMods.moveSpeedPct = (u.externalMods.moveSpeedPct ?? 0) + (enabled ? amount : -amount);
+    u.markStatsDirty();
+    u.refresh(this.sim.time);
+    this.sprintModUid = enabled ? u.uid : -1;
+  }
+
+  private updateLocomotion(dt: number): void {
+    const u = this.activeUnit();
+    if (!u || !u.alive) {
+      this.sprintModUid = -1;
+      return;
+    }
+    if (this.sprintModUid !== -1 && this.sprintModUid !== u.uid) this.sprintModUid = -1;
+    const moving = u.order.kind === 'move' || u.order.kind === 'attack-move' || u.order.kind === 'attack-unit';
+    const sprinting = this.sprintHeld && moving && this.stamina > 0 && !u.summary.rooted && !u.summary.stunned && !u.summary.cycloned && !u.summary.sleeping && !u.summary.frozen;
+    this.setSprintMod(u, sprinting);
+    if (sprinting) {
+      this.stamina = Math.max(0, this.stamina - TUNING.traversal.sprintDrainPerSec * dt);
+      this.staminaRegenReadyAt = this.sim.time + TUNING.traversal.regenDelaySec;
+      if (this.stamina <= 0) this.setSprintMod(u, false);
+      return;
+    }
+    this.setSprintMod(u, false);
+    if (this.sim.time >= this.staminaRegenReadyAt) {
+      this.stamina = Math.min(TUNING.traversal.staminaMax, this.stamina + TUNING.traversal.staminaRegenPerSec * dt);
+    }
+  }
+
+  private updateWorldElements(): void {
+    const u = this.activeUnit();
+    if (!u || !u.alive) return;
+    for (const src of this.region.elementSources ?? []) {
+      if (dist(u.pos, src.pos) > src.radius) continue;
+      if (src.carriable) this.carriedElement = { element: src.element, until: this.sim.time + TUNING.resonanceElementGaugeSec };
+      if (!this.sim.resonanceEnabled) continue;
+      applyElementAura(this.sim, u, u, src.element, 1, false);
+      for (const target of this.sim.unitsInRadius(src.pos, src.radius, (o) => o.team !== u.team)) {
+        applyElementAura(this.sim, u, target, src.element, 1, true);
+      }
+    }
+    if (this.carriedElement && this.carriedElement.until <= this.sim.time) this.carriedElement = null;
+    if (this.carriedElement) this.updateElementPuzzles(this.carriedElement.element);
+  }
+
+  private updateElementPuzzles(element: ActiveElement): void {
+    const u = this.activeUnit();
+    if (!u) return;
+    for (const puzzle of this.region.elementPuzzles ?? []) {
+      if (this.solvedPuzzles.has(puzzle.id) || puzzle.requires !== element) continue;
+      const radius = puzzle.radius ?? TUNING.exploration.puzzleNodeRadius;
+      const progress = this.puzzleProgress.get(puzzle.id) ?? { lit: new Set<number>(), startedAt: this.sim.time };
+      if (puzzle.timeLimitSec && this.sim.time - progress.startedAt > puzzle.timeLimitSec) {
+        progress.lit.clear();
+        progress.startedAt = this.sim.time;
+      }
+      puzzle.nodes.forEach((node, idx) => {
+        if (dist(u.pos, node) <= radius) progress.lit.add(idx);
+      });
+      this.puzzleProgress.set(puzzle.id, progress);
+      if (progress.lit.size >= puzzle.nodes.length) {
+        this.solvedPuzzles.add(puzzle.id);
+        this.discovered.add(puzzle.reveals);
+        this.msg(`Elemental puzzle solved: ${puzzle.kind.replace('-', ' ')}`, 'good');
+        this.refreshExplorationRewards();
+      }
+    }
+  }
+
+  private updateDiscovery(): void {
+    const u = this.activeUnit();
+    if (!u || !u.alive) return;
+    for (const wp of this.region.waypoints ?? []) {
+      const radius = wp.radius ?? TUNING.exploration.waypointRadius;
+      if (!this.discovered.has(wp.id) && dist(u.pos, wp.pos) <= radius) {
+        this.discovered.add(wp.id);
+        this.msg(`Waystone activated: ${wp.name}`, 'good');
+      }
+    }
+    for (const shard of this.region.shards ?? []) {
+      if (!this.collectedShards.has(shard.id) && dist(u.pos, shard.pos) <= TUNING.exploration.pickupRadius) {
+        this.collectedShards.add(shard.id);
+        this.msg('Mad Moon shard recovered', 'good');
+      }
+    }
+    for (const d of this.region.discoveries ?? []) {
+      if (!this.discovered.has(d.id) && dist(u.pos, d.pos) <= d.radius) {
+        this.discovered.add(d.id);
+        this.discovered.add(d.reveals);
+        this.msg(d.hint, 'info');
+      }
+    }
+    this.refreshExplorationRewards();
+  }
+
+  private refreshExplorationRewards(): void {
+    const pct = this.computeExplorationPct(this.region.id);
+    for (const threshold of [25, 50, 75, 100]) {
+      const token = `explore:${this.region.id}:${threshold}`;
+      if (pct >= threshold && !this.discovered.has(token)) {
+        this.discovered.add(token);
+        this.awardGold(TUNING.exploration.explorationThresholdRewardGold, `exploration:${threshold}`, undefined, true);
+        this.msg(`${this.region.name} ${threshold}% explored`, 'good');
+      }
+    }
+  }
+
   // ---------- main update ----------
 
   update(realDt: number): void {
@@ -2379,8 +2721,11 @@ export class Game {
     }
     const dt = Math.min(realDt, 0.1);
     this.playtime += dt;
+    this.regenResinToPlaytime();
     this.dayTime = (this.dayTime + dt / TUNING.dayLengthSec) % 1;
     this.refreshDayNightMods();
+    this.updateLocomotion(dt);
+    this.updateWorldElements();
 
     // fixed-step sim
     this.accumulator += dt;
@@ -2478,6 +2823,7 @@ export class Game {
     this.updateCamps();
     this.updateEchoes();
     this.updateShrine(dt);
+    this.updateDiscovery();
     this.advanceQueuedOrder();
 
     // town-entry autosave

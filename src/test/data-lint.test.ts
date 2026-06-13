@@ -344,6 +344,12 @@ describe('data lint: creeps', () => {
       expect(creep.bounty.xp).toBeGreaterThan(0);
       expect(creep.animProfile, `${creep.id}: animProfile required`).toBeDefined();
       expect(creep.animProfile!.rig).toBeTruthy();
+      if (creep.elementalShield) {
+        expect(ACTIVE_ELEMENTS, `${creep.id}: shield element`).toContain(creep.elementalShield.element);
+        expect(creep.elementalShield.hp).toBeGreaterThan(0);
+        expect(creep.elementalShield.weakMult).toBeGreaterThan(1);
+        for (const element of creep.elementalShield.weakTo) expect(ACTIVE_ELEMENTS, `${creep.id}: shield weakness ${element}`).toContain(element);
+      }
       const exoticIds: string[] = [];
       for (const a of creep.abilities) lintAbility(a, creep.id, exoticIds, true);
       expect(exoticIds.length).toBe(0);
@@ -392,6 +398,43 @@ describe('data lint: regions', () => {
       }
       for (const raidId of region.raids ?? []) {
         expect(REG.raids.has(raidId), `${region.id}: raid ${raidId}`).toBe(true);
+      }
+      const poiIds = new Set<string>([
+        ...(region.chests ?? []).map((c) => c.id),
+        ...(region.waypoints ?? []).map((w) => w.id),
+        ...(region.discoveries ?? []).map((d) => d.id),
+        ...(region.elementPuzzles ?? []).map((p) => p.id)
+      ]);
+      for (const chest of region.chests ?? []) {
+        expect(chest.pos.x, `${region.id}: chest ${chest.id} x`).toBeGreaterThan(0);
+        expect(chest.pos.x, `${region.id}: chest ${chest.id} x`).toBeLessThan(region.size);
+        expect(['common', 'rich', 'precious', 'luxurious']).toContain(chest.tier);
+        for (const itemId of chest.loot.items ?? []) expect(REG.items.has(itemId), `${region.id}: chest loot ${itemId}`).toBe(true);
+        const gate = chest.gate;
+        if (gate?.kind === 'camp') expect(region.camps.some((c) => c.id === gate.campId), `${region.id}: chest gate camp ${gate.campId}`).toBe(true);
+        if (gate?.kind === 'puzzle') expect(region.elementPuzzles?.some((p) => p.id === gate.puzzleId), `${region.id}: chest gate puzzle ${gate.puzzleId}`).toBe(true);
+      }
+      for (const shard of region.shards ?? []) {
+        expect(shard.pos.x, `${region.id}: shard ${shard.id} x`).toBeGreaterThan(0);
+        expect(shard.pos.x, `${region.id}: shard ${shard.id} x`).toBeLessThan(region.size);
+      }
+      for (const waypoint of region.waypoints ?? []) {
+        expect(waypoint.name, `${region.id}: waypoint ${waypoint.id} name`).toBeTruthy();
+        expect(waypoint.pos.x, `${region.id}: waypoint ${waypoint.id} x`).toBeGreaterThan(0);
+        expect(waypoint.pos.x, `${region.id}: waypoint ${waypoint.id} x`).toBeLessThan(region.size);
+      }
+      for (const discovery of region.discoveries ?? []) {
+        expect(discovery.hint, `${region.id}: discovery ${discovery.id} hint`).toBeTruthy();
+        expect(poiIds.has(discovery.reveals), `${region.id}: discovery reveal ${discovery.reveals}`).toBe(true);
+      }
+      for (const source of region.elementSources ?? []) {
+        expect(ACTIVE_ELEMENTS, `${region.id}: element source ${source.id}`).toContain(source.element);
+      }
+      for (const puzzle of region.elementPuzzles ?? []) {
+        expect(ACTIVE_ELEMENTS, `${region.id}: puzzle ${puzzle.id}`).toContain(puzzle.requires);
+        expect(['brazier-chain', 'freeze-platform', 'relay', 'burn-brush', 'wind-seed']).toContain(puzzle.kind);
+        expect(poiIds.has(puzzle.reveals), `${region.id}: puzzle reveal ${puzzle.reveals}`).toBe(true);
+        expect(puzzle.nodes.length, `${region.id}: puzzle ${puzzle.id} nodes`).toBeGreaterThan(0);
       }
     });
   }
