@@ -6,14 +6,16 @@ The project keeps procedural models/icons/VFX as the always-available fallback, 
 
 ## Current State
 
-Phases 1-5 are playable and passing. The current build includes:
+Phases 1-6 are playable and passing; Phase 6 (the integration pass that holds Phases 2-4 to the standalone spec bar) is spec-complete. The current build includes:
 
 - A deterministic, renderer-independent combat core that runs at a fixed 30 Hz.
-- Ten regions, 64 data-driven heroes, 60+ items, 36 creeps, 8 gyms, Elite Five draft data, bosses, raids, neutral items, and save v3 progression.
+- Ten regions, 65 data-driven heroes, 78 items, 36 creeps, 8 gyms, four raids, Elite Five and Champion conquest, bosses, neutral items, dungeons, an Armory bench for bound loot, and save v6 progression.
 - Dota-inspired abilities, statuses, items, cooldowns, projectiles, capture, creep merging, entourage fielding, XP, gold, save/load, badge-gated travel, gambits, macro gyms, and raids.
 - A polished Three.js overworld with gameplay/map camera modes, hero-specific likeness overlays, item appearance geometry, attack VFX, minimap, journal, codex, floating combat text, and richer procedural SFX.
-- Optional Phase 5 Resonance mode with elemental reactions, party resonance buffs, shorter quick-swap pacing, attack-move, stop, and shift-queued orders.
-- Headless vitest coverage for data linting, combat determinism, capture/merge behavior, boundary checks, item identity, saves, macro/raid simulation, Phase 3 systems, and Phase 5 resonance.
+- Phase 5 Resonance mode (enabled by default, toggle off for vanilla Dota) with elemental reactions, party resonance buffs, shorter quick-swap pacing, attack-move, stop, and shift-queued orders.
+- Headless vitest coverage for data linting, combat determinism, capture/merge behavior, boundary checks, item identity, saves, macro/raid simulation, Phase 3 systems, Phase 5 resonance, dungeon generation, and the Phase 6 integration playthrough.
+
+Active work past Phase 6 lives in the overhaul docs (`LOOT_OVERHAUL.md`, `DUNGEON_OVERHAUL.md`, `MARQUEE_AND_ARMORY_ADDENDUM.md`, `HEROES_AND_ITEMS_PLAN.md`).
 
 See `SPEC.md` for the full design target, `PROGRESS.md` for the current acceptance status, and `DECISIONS.md` for implementation calls made along the way.
 

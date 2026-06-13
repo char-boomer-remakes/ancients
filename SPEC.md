@@ -172,7 +172,7 @@ Reputation is a simple karma counter moved by quest choices; it gates the reputa
 
 ## 9. PHASES & ACCEPTANCE (each phase ships playable)
 
-Content staging: P1 = 6 heroes / 15 items / 1 region / 6 creep types → P2 = 20 / 30 / 3 regions / 12 creeps, gyms 1–2 → P3 = 60 / 50 / 10 regions / 25 creeps / 8 gyms + Elite Five + all four raids → P4 = polish → P5 (bonus, post-ship) = Resonance, an opt-in Genshin-style elemental party layer.
+Content staging: P1 = 6 heroes / 15 items / 1 region / 6 creep types → P2 = 20 / 30 / 3 regions / 12 creeps, gyms 1–2 → P3 = 60 / 50 / 10 regions / 25 creeps / 8 gyms + Elite Five + all four raids → P4 = polish → P5 (bonus, post-ship) = Resonance, a Genshin-style elemental party layer (ships enabled by default, reversible to vanilla Dota via a settings toggle).
 
 ### Phase 1 — Core loop
 
@@ -204,11 +204,11 @@ Item visuals are done when: equipping a weapon-class item swaps the hero's held 
 
 ### Phase 5 — Resonance, Feel & Fidelity (bonus, post-ship)
 
-Three post-ship thrusts: a Genshin-style elemental party layer (**Resonance**), a combat **feel** pass (animation, sound, attack-move), and a **graphics overhaul** that takes heroes from stylized placeholders to faithful Dota 2 likenesses. Resonance is opt-in; the feel and graphics work apply to the whole game. None of it touches the headless core (§1.1) — it is all engine-side, driven by the same sim events.
+Three post-ship thrusts: a Genshin-style elemental party layer (**Resonance**), a combat **feel** pass (animation, sound, attack-move), and a **graphics overhaul** that takes heroes from stylized placeholders to faithful Dota 2 likenesses. Resonance ships enabled by default but is reversible to vanilla Dota via a settings toggle; the feel and graphics work apply to the whole game. None of it touches the headless core (§1.1) — it is all engine-side, driven by the same sim events.
 
 #### Resonance — Genshin-style elemental party combat
 
-A stretch layer bolted onto the shipped game — **opt-in, additive, and reversible** (a settings toggle returns vanilla Dota). It never rewrites a hero's kit (the §6 Hero Feel Fidelity rule still holds: a hero's abilities, delivery, and decisions are untouched) and it spends **zero exotic slots** — every mechanic below is a generic extension of the status / trigger / aura engine (§2), driven by data, exactly like `repeat`, target-selectors, and the unified trigger system were added without exotics. Because it builds ahead of ship, it lives outside the §0 "a phase is done only when its checklist passes" gating until P1–P4 are complete; treat it as a labeled stretch goal, not a blocker.
+A stretch layer bolted onto the shipped game — **additive and reversible**: it ships enabled by default, and a settings toggle returns vanilla Dota. It never rewrites a hero's kit (the §6 Hero Feel Fidelity rule still holds: a hero's abilities, delivery, and decisions are untouched) and it spends **zero exotic slots** — every mechanic below is a generic extension of the status / trigger / aura engine (§2), driven by data, exactly like `repeat`, target-selectors, and the unified trigger system were added without exotics. Because it builds ahead of ship, it lives outside the §0 "a phase is done only when its checklist passes" gating until P1–P4 are complete; treat it as a labeled stretch goal, not a blocker.
 
 **Scope (respect the §4 layer split).** Elements, reactions, and resonance apply in the **micro overworld and raids** — the exploration / Diablo / party-swap loop, which is where Genshin's fantasy actually lives. **Gyms and the Elite Five stay pure-Dota macro** so competitive drafting and feel fidelity aren't muddied by a reaction meta. Resonance *may* be enabled in macro as a separate ruleset later, logged in `DECISIONS.md` if so.
 
@@ -245,7 +245,7 @@ Reaction magnitude scales off the triggering unit's level and spell amplificatio
 - **Dendro** — +reaction damage.
 A party with no shared pair gets a small generic **Harmony** bonus, so a rainbow team trades raw power for flexibility and reaction coverage. This is the literal "some heroes legitimately party well with others" system, and it makes party-building a real overworld decision on top of the existing roster tensions.
 
-**5. Swap-driven rotations.** Lean the existing 1–5 hero swap (§6) into Genshin's quick-swap. In this opt-in mode the swap cooldown is shortened and **off-field persistence** is honored — a swapped-out hero's zones, summons, and wards keep ticking (already supported; just don't tear them down on swap) — so you apply Hydro with hero A, swap to Cryo hero B, and **Freeze**. An optional swap-cancel grace keeps a swap from eating an in-progress cast. The §6 50%-cooldown floor and 4s swap timer are relaxed *only* in this mode and stay intact for the base game.
+**5. Swap-driven rotations.** Lean the existing 1–5 hero swap (§6) into Genshin's quick-swap. In Resonance mode the swap cooldown is shortened and **off-field persistence** is honored — a swapped-out hero's zones, summons, and wards keep ticking (already supported; just don't tear them down on swap) — so you apply Hydro with hero A, swap to Cryo hero B, and **Freeze**. An optional swap-cancel grace keeps a swap from eating an in-progress cast. The §6 50%-cooldown floor and 4s swap timer are relaxed *only* in this mode and stay intact for the base game.
 
 **6. Light traversal (optional within the bonus).** Genshin is also exploration. Add **stamina** (sprint/dash, stamina-gated climb) and a few **elemental world interactions** reusing the §3 condition/terrain system: pyro burns brush and rope bridges to open paths, hydro+cryo freezes water into walkable platforms, electro powers shrine puzzles. Keep it region-flagged and minimal — flavor, not a second game.
 

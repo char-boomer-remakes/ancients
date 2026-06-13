@@ -72,7 +72,7 @@ Phase 6 holds Phases 2–4 to the **standalone specs'** bar, not the looser in-r
 | 6 | Elite Five draft and Champion data registered; deterministic draft test passes | PASS — M5 wires the gauntlet + Champion win path; M10 clears five + Champion end-to-end |
 | 7 | Day/night effects for Night Stalker, Luna, and night vision | PASS |
 | 8 | Neutral items, Tinker Bench reroll/enchant, buyback/Tome/respec gold sinks | PASS — wired live in P6 M4 (overworld drops, neutral slot, town-services UI) |
-| 9 | Save v3 migration and round-trip for Phase 3 fields | PASS (superseded by save v4, P6 M1) |
+| 9 | Save v3 migration and round-trip for Phase 3 fields | PASS (superseded by save v6: v4 audio/karma, v5 exploration, v6 Armory loadouts) |
 | 10 | Tests/build/browser smoke | PASS |
 
 ### Phase 3 demo script
@@ -114,7 +114,7 @@ Phase 4's **animation gesture player** (drives every ability/item active from `a
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | Optional Resonance mode setting, saved and disabled by default | PASS |
+| 1 | Resonance mode setting, saved and enabled by default (toggle off for vanilla Dota) | PASS |
 | 2 | Hero/ability element tags cover the registered roster | PASS |
 | 3 | Generic reaction table resolves Vaporize, Melt, Overload, Superconduct, Electro-Charged, Freeze, Swirl, Crystallize, and Burning | PASS |
 | 4 | Headless sim tests apply elements and verify Vaporize, Freeze, and Superconduct deterministically | PASS |
@@ -127,7 +127,7 @@ Phase 4's **animation gesture player** (drives every ability/item active from `a
 
 ### Phase 5 demo script
 
-1. Run `npm run dev`, start or load a game, open `Esc` → **Menu**, and enable **Resonance mode**.
+1. Run `npm run dev`, start or load a game; **Resonance mode** is on by default (open `Esc` → **Menu** to toggle it off for vanilla Dota).
 2. Build or recruit an elemental party such as Lina + a Hydro hero, then fight a camp in the overworld.
 3. Apply Hydro then Pyro to trigger **Vaporize**, or Hydro then Cryo to trigger **Freeze**; reaction events produce floating numbers/SFX.
 4. Use `A` then click past a camp to attack-move into it; hold `Shift` while issuing a second move/cast/item order to queue it.
@@ -174,9 +174,9 @@ Phase 4's **animation gesture player** (drives every ability/item active from `a
 
 | # | Item | Status |
 |---|------|--------|
-| G1 | Save **v4** round-trips; v3→v4 and v2→v4 migrate cleanly | PASS — M1 |
+| G1 | Save **v6** round-trips; v3→v6 and v2→v6 migrate cleanly | PASS — M1 shipped v4; later extended to v5 (exploration) and v6 (Armory loadouts) |
 | G2 | All §6 tests pass; `npm test` + `npm run build` green | PASS — M10 (759 tests + build green) |
-| G3 | Full playthrough: new game → all 8 badges → four raids → Elite Five → Champion, no blockers | PASS — M10 (headless ship-gate test threads the whole path + a v4 round-trip; `src/test/playthrough.test.ts`) |
+| G3 | Full playthrough: new game → all 8 badges → four raids → Elite Five → Champion, no blockers | PASS — M10 (headless ship-gate test threads the whole path + a v6 round-trip; `src/test/playthrough.test.ts`) |
 | G4 | `PROGRESS.md` reconciled to the standalone bar; demo (§8) + perf numbers recorded | PASS — M10 (Phase 2/3/4 rows reflect the standalone bar; demo §8 + perf numbers recorded below) |
 
 ### Phase 6 §6 test matrix
@@ -207,7 +207,7 @@ Phase 4's **animation gesture player** (drives every ability/item active from `a
 | 22 | bark-trigger — at least one bark fires from the sim core on a wired trigger | PASS — M7 |
 | 23 | lore + esports denylist — codex refs resolve; every leader/Elite/Champion/boss/trainer has name+title+dialogue; denylist rejects real names | PASS — M8 |
 | 24 | codex/journal state — entries unlock on encounter; journal reflects raids/factions/reputation | PASS — M8 |
-| 25 | save-v4-roundtrip — v4 reloads identically; v3→v4 and v2→v4 default cleanly | PASS — M1 |
+| 25 | save-roundtrip — v6 reloads identically; v3→v6 and v2→v6 default cleanly (`src/test/save-migration.test.ts`) | PASS — M1 |
 | 26 | perf-harness — 30-unit/200-projectile scene steps with no steady-state hot-path allocation; frame time recorded here | PASS — M9 (steady-state alloc 0; numbers above) |
 
 ### Phase 6 demo script (phase6 spec §8)
@@ -218,7 +218,7 @@ Phase 4's **animation gesture player** (drives every ability/item active from `a
 4. Capture a high-tier neutral; take its **neutral item** into the dedicated slot; at the **Tinker's Bench** reroll it and enchant three duplicates up a tier; **buyback** after a wipe and burn a **Tome** on a lagging recruit.
 5. Enter a **raid**: field five, press **1–5** to switch drivers, dodge a telegraphed **zone**, survive an **add wave**, **taunt** to redirect the boss, clear it for a loot roll; kill **Roshan**, grab the **Aegis**, die once to consume it.
 6. At the Tower of the Ancients, run **draft** (pick/ban), beat an **Elite** member, then the **Champion**.
-7. Cast signature abilities — each shows its **gesture animation** and a distinct **synthesized sound**, with an in-character **bark**; open the **codex** (an entry that unlocked on encounter, a venue name that winks at a famous event) and the **journal** (raids/factions/reputation). Adjust an audio channel and mute. Run the **perf harness** (30 units, 200 projectiles) and show the frame time in budget. Save, reload (**v4**), confirm everything persists.
+7. Cast signature abilities — each shows its **gesture animation** and a distinct **synthesized sound**, with an in-character **bark**; open the **codex** (an entry that unlocked on encounter, a venue name that winks at a famous event) and the **journal** (raids/factions/reputation). Adjust an audio channel and mute. Run the **perf harness** (30 units, 200 projectiles) and show the frame time in budget. Save, reload (**v6**), confirm everything persists.
 
 ### Phase 6 perf numbers (recorded at M9)
 
@@ -288,3 +288,4 @@ Cross-cutting render/UI overhaul to make the look read as Dota 2 while keeping t
 - 2026-06-13: Dungeon overhaul D1 landed: registered `frost-hollow`, added an Icewrack dungeon portal, and added `systems/dungeon-session.ts` as a live one-room dungeon session beside gyms/raids. `Game.startDungeon` now enters a generated combat room, routes input/rendering through the dungeon sim, rolls creep drops on room kills, grants the room reward on clear, and ejects cleanly on wipe. Focused verification green: `npm test -- src/test/dungeon.test.ts src/test/data-lint.test.ts src/test/boundary.test.ts` (588 tests) and `npm run build`. Full `npm test` is currently blocked by separate dirty `raid-ai` work outside D1.
 - 2026-06-13: Loot overhaul L3/L4 landed: boss loot tables are now themed by boss identity (agility carries anchor Butterfly/Skadi, strength titans Heart/Assault, intelligence bosses Scythe/Refresher/Aghs) instead of the hero-id hash; every item resolves a rarity; `exclusiveTo` reservations are enforced by the shared source predicate used by shops and the Black Market; owned-hero echoes can drop attribute-themed components. Added Black Market systems actions (`blackMarketRecipeWheel`, `blackMarketRelicWheel`) plus bound Armory salvage into `essence`, save persistence/migration for the new counters, and a first faucet retune (`postCapXpToGold` plus deepest region multipliers). Verification green: `npm run typecheck`, focused economy/save/data tests (574 tests), full `npm test` (37 files, 824 tests), `npm run build`, and edited-file lints clean.
 - 2026-06-13: Addendum L8 landed: the Armory now addresses any owned hero by `heroId`, not just the fielded party, and save/build preserves benched roster records. Added v6 save migration with `loadouts`, bench-wide equip/reclaim/reclaim-all, `saveHeroLoadout`/`applyHeroLoadout`, `gearFieldLoadouts`, contention reporting for single-copy claims, and an `armoryView()` view-model. Town Services now renders a bench Armory panel with per-hero equip, reclaim, save/apply loadout, salvage, essence, and gear-field actions. Verification green: `npm run typecheck`, focused economy/save tests (29 tests), full `npm test` (37 files, 835 tests), `npm run build`, and edited-file lints clean.
+- 2026-06-13: Dungeon overhaul D2 landed: `DungeonSession` now walks the generated layout as a multi-room descent instead of ending after the first populated room. Combat/elite rooms lock exits until packs die, passive rooms resolve in sequence, rest rooms heal, and the final boss room spawns the dungeon `guardian` as a scaled boss-controller encounter. `Game` now ends a live dungeon only after guardian clear or wipe, rolls reward tables for every cleared room, returns the party to the portal, and the HUD shows live room number/type, selected driver, remaining foes, and exits. Verification green: `npm run typecheck`, focused dungeon tests (7 tests), full `npm test` (37 files, 903 tests), `npm run build`, and edited-file lints clean.
