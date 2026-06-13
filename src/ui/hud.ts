@@ -35,12 +35,14 @@ export class Hud {
   private toastCol: HTMLElement;
   private captureBar: HTMLElement;
   private floaterLayer: HTMLElement;
+  private minimap: HTMLCanvasElement;
+  private minimapCtx: CanvasRenderingContext2D;
   private modal: HTMLElement;
   private hint: HTMLElement;
 
   private floaters: Floater[] = [];
   private shownToasts = 0;
-  private modalKind: 'none' | 'party' | 'shop' | 'menu' | 'talents' = 'none';
+  private modalKind: 'none' | 'party' | 'shop' | 'menu' | 'talents' | 'journal' | 'codex' = 'none';
   private captureUntil = 0;
   private captureDur = 1;
   private vec = new THREE.Vector3();
@@ -54,6 +56,7 @@ export class Hud {
     this.root.innerHTML = `
       <div id="top-bar"></div>
       <div id="party-col"></div>
+      <canvas id="minimap" width="160" height="160"></canvas>
       <div id="toast-col"></div>
       <div id="floater-layer"></div>
       <div id="capture-bar" class="hidden"><div class="fill"></div><span>Binding...</span></div>
@@ -67,6 +70,8 @@ export class Hud {
     this.toastCol = this.root.querySelector('#toast-col')!;
     this.captureBar = this.root.querySelector('#capture-bar')!;
     this.floaterLayer = this.root.querySelector('#floater-layer')!;
+    this.minimap = this.root.querySelector('#minimap')!;
+    this.minimapCtx = this.minimap.getContext('2d')!;
     this.modal = this.root.querySelector('#modal-root')!;
     this.hint = this.root.querySelector('#hud-hint')!;
 
@@ -79,6 +84,13 @@ export class Hud {
       this.toggleModal('shop');
     };
     input.onToggleMenu = () => this.toggleModal('menu');
+    input.onToggleJournal = () => this.toggleModal('journal');
+    input.onToggleCodex = () => this.toggleModal('codex');
+    this.topBar.addEventListener('click', (e) => {
+      const open = (e.target as HTMLElement).closest('[data-open]') as HTMLElement | null;
+      const kind = open?.dataset.open as 'journal' | 'codex' | undefined;
+      if (kind) this.toggleModal(kind);
+    });
   }
 
   // ---------- per frame ----------
@@ -87,6 +99,7 @@ export class Hud {
     this.renderTopBar();
     this.renderParty();
     this.renderHeroPanel();
+    this.renderMinimap();
     this.renderToasts();
     this.handleEvents(this.game.frameEvents);
     this.updateFloaters();
@@ -111,8 +124,47 @@ export class Hud {
       <span class="region">${g.region.name}</span>
       <span class="clock ${isNight ? 'night' : 'day'}">${isNight ? 'Night' : 'Day'} ${clockPct}%</span>
       <span class="gold">${Math.floor(g.gold)} g</span>
-      <span class="keys-hint">RMB move/attack · QWER cast · ZXCV items · 1-5 swap · T capture · G interact · B shop · Tab party · M map · Esc menu</span>
+      <button class="top-btn" data-open="journal">Journal</button>
+      <button class="top-btn" data-open="codex">Codex</button>
+      <span class="keys-hint">RMB move/attack · QWER cast · ZXCV items · 1-5 swap · T capture · G interact · B shop · Tab party · M map · J journal · K codex · Esc menu</span>
     `;
+  }
+
+  private renderMinimap(): void {
+    const g = this.game;
+    const ctx = this.minimapCtx;
+    const s = this.minimap.width;
+    const scale = s / g.region.size;
+    const dot = (x: number, y: number, r: number, color: string, stroke = false): void => {
+      ctx.beginPath();
+      ctx.arc(x * scale, y * scale, r, 0, Math.PI * 2);
+      if (stroke) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
+    };
+    const bg = { grass: '#263b26', snow: '#dce8f2', desert: '#7a5d32', wasteland: '#3a2930', coast: '#23465c', forest: '#1f3d2e' }[g.region.biome];
+    ctx.clearRect(0, 0, s, s);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, s, s);
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.strokeRect(0.5, 0.5, s - 1, s - 1);
+    for (const camp of g.region.camps) dot(camp.pos.x, camp.pos.y, 1.6, '#db6b55');
+    for (const spawn of g.region.heroSpawns) dot(spawn.pos.x, spawn.pos.y, 2.4, '#b88cff', true);
+    for (const echo of g.region.echoSpawns ?? []) dot(echo.pos.x, echo.pos.y, 2.2, '#8fe8ff', true);
+    for (const gate of g.region.gates ?? []) dot(gate.pos.x, gate.pos.y, 2.7, '#7aff9a', true);
+    for (const gym of g.region.gyms ?? []) dot(gym.pos.x, gym.pos.y, 3, '#ff9ad5', true);
+    dot(g.region.town.pos.x, g.region.town.pos.y, 4, '#ffd86a', true);
+    dot(g.region.shrine.pos.x, g.region.shrine.pos.y, 2.4, '#67d7ff');
+    const u = g.activeUnit();
+    if (u) {
+      dot(u.pos.x, u.pos.y, 3.3, '#ffffff');
+      dot(u.pos.x, u.pos.y, 5.2, '#ffd86a', true);
+    }
   }
 
   // ---------- party frames ----------
@@ -400,7 +452,7 @@ export class Hud {
 
   // ---------- modals ----------
 
-  toggleModal(kind: 'party' | 'shop' | 'menu' | 'talents'): void {
+  toggleModal(kind: 'party' | 'shop' | 'menu' | 'talents' | 'journal' | 'codex'): void {
     if (this.modalKind === kind) {
       this.closeModal();
       return;
@@ -413,6 +465,8 @@ export class Hud {
     if (kind === 'shop') this.renderShopModal();
     if (kind === 'menu') this.renderMenuModal();
     if (kind === 'talents') this.renderTalentModal();
+    if (kind === 'journal') this.renderJournalModal();
+    if (kind === 'codex') this.renderCodexModal();
   }
 
   closeModal(): void {
@@ -615,6 +669,94 @@ export class Hud {
     if (goldEl) goldEl.textContent = `${Math.floor(this.game.gold)} g`;
   }
 
+  // --- journal / codex ---
+
+  private renderJournalModal(): void {
+    const g = this.game;
+    const regionHeroIds = new Set([
+      ...g.region.heroSpawns.map((h) => h.heroId),
+      ...(g.region.echoSpawns ?? []).map((h) => h.heroId),
+      ...g.party.map((r) => r.heroId)
+    ]);
+    const rows = Array.from(REG.quests.values())
+      .filter((q) => {
+        const progress = g.questProgress[q.id];
+        return progress?.stage !== 'bound' && (progress || regionHeroIds.has(q.heroId));
+      })
+      .slice(0, 18)
+      .map((q) => {
+        const hero = REG.hero(q.heroId);
+        const progress = g.questProgress[q.id] ?? { stage: 'unfound', attunement: 0, trialCompletions: 0 };
+        const stageText = {
+          unfound: 'Rumor',
+          found: 'Trial',
+          'trial-complete': 'Binding Duel',
+          bound: 'Recruited'
+        }[progress.stage];
+        const body = progress.stage === 'unfound'
+          ? q.findText
+          : progress.stage === 'found'
+            ? q.trialText
+            : q.bindText;
+        return `
+          <div class="journal-row">
+            <div class="jr-stage">${stageText}</div>
+            <div class="jr-main">
+              <b>${hero.name}</b> <em>${REG.region(hero.region).name}</em>
+              <p>${body}</p>
+              <span>Attunement ${progress.attunement} · trials ${progress.trialCompletions}</span>
+            </div>
+          </div>`;
+      })
+      .join('');
+    const badges = [...g.badges].map((b) => b.replace(/-/g, ' ')).join(', ') || 'none yet';
+    this.modalShell(
+      'Quest Journal',
+      `
+      <div class="journal-summary">
+        <b>${g.region.name}</b> · badges ${badges} · recruited ${g.recruited.size}/${REG.heroes.size}
+      </div>
+      ${rows || '<p class="dim">No open quest leads in this region yet. Find echo scars, gyms, and hero rumors to fill the journal.</p>'}`
+    );
+  }
+
+  private renderCodexModal(): void {
+    const g = this.game;
+    const knownHeroIds = new Set([
+      ...g.recruited,
+      ...g.party.map((r) => r.heroId),
+      ...g.region.heroSpawns.map((h) => h.heroId),
+      ...(g.region.echoSpawns ?? []).map((h) => h.heroId)
+    ]);
+    const heroes = [...knownHeroIds]
+      .map((id) => REG.hero(id))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((h) => `
+        <div class="codex-card">
+          <img src="${heroPortrait(h.palette, h.name[0], 48)}" alt="">
+          <div><b>${h.name}</b> <em>${h.attribute.toUpperCase()} · ${h.roles.slice(0, 2).join(' / ')}</em>
+          <p>${h.lore}</p></div>
+        </div>`)
+      .join('');
+    const regions = Array.from(REG.regions.values())
+      .slice(0, 10)
+      .map((r) => `<div class="codex-note"><b>${r.name}</b><p>${r.lore}</p></div>`)
+      .join('');
+    const items = Array.from(REG.items.values())
+      .filter((i) => i.appearance || i.attackVisual)
+      .map((i) => `<div class="codex-note"><b>${i.name}</b><p>${i.lore}</p></div>`)
+      .join('');
+    this.modalShell(
+      'Codex',
+      `
+      <div class="codex-grid">
+        <section><h3>Known Heroes</h3>${heroes}</section>
+        <section><h3>Regions</h3>${regions}</section>
+        <section><h3>Relics With Visible Power</h3>${items}</section>
+      </div>`
+    );
+  }
+
   // --- talents ---
 
   private renderTalentModal(): void {
@@ -685,6 +827,8 @@ export class Hud {
         <section>
           <h3>Options</h3>
           <label class="opt-row"><input type="checkbox" id="opt-quickcast" ${g.settings.quickcast ? 'checked' : ''}> Quick-cast at cursor</label>
+          <button class="btn" id="open-journal">Quest Journal</button>
+          <button class="btn" id="open-codex">Codex</button>
           <button class="btn" id="export-save">Export save (JSON)</button>
           <label class="btn" for="import-file">Import save<input type="file" id="import-file" accept=".json" hidden></label>
           <button class="btn warn" id="quit-title">Quit to title</button>
@@ -712,6 +856,8 @@ export class Hud {
       g.settings.quickcast = (e.target as HTMLInputElement).checked;
     });
     this.modal.querySelector('#export-save')?.addEventListener('click', () => g.exportSave());
+    this.modal.querySelector('#open-journal')?.addEventListener('click', () => this.toggleModal('journal'));
+    this.modal.querySelector('#open-codex')?.addEventListener('click', () => this.toggleModal('codex'));
     this.modal.querySelector('#import-file')?.addEventListener('change', (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;

@@ -29,6 +29,8 @@ export class InputController {
   onToggleParty: () => void = () => {};
   onToggleShop: () => void = () => {};
   onToggleMenu: () => void = () => {};
+  onToggleJournal: () => void = () => {};
+  onToggleCodex: () => void = () => {};
 
   private rmbHeld = false;
   private lastMoveOrderAt = 0;
@@ -190,6 +192,15 @@ export class InputController {
       } else {
         this.targeting = { kind: 'ability', slot: abilityIdx };
       }
+      return;
+    }
+
+    if (key === 'j') {
+      this.onToggleJournal();
+      return;
+    }
+    if (key === 'k') {
+      this.onToggleCodex();
       return;
     }
 

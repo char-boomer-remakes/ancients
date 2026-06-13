@@ -257,6 +257,37 @@ export interface VfxSpec {
   scale?: number;
 }
 
+// ---------- Phase 4-ready animation/audio data hooks ----------
+export type AnimGesture =
+  | 'melee-swing'
+  | 'ranged-shot'
+  | 'staff-cast'
+  | 'ground-slam'
+  | 'dash'
+  | 'channel-loop'
+  | 'summon-gesture'
+  | 'item-use'
+  | 'global-cast';
+
+export type SoundArchetype =
+  | 'blade'
+  | 'bow'
+  | 'impact'
+  | 'frost'
+  | 'fire'
+  | 'storm'
+  | 'void'
+  | 'heal'
+  | 'summon'
+  | 'item'
+  | 'roar';
+
+export interface AnimProfile {
+  rig: string;
+  castStyle: string;
+  voiceTimbre: string;
+}
+
 // ---------- Abilities ----------
 export interface AbilityDef {
   id: string;
@@ -290,6 +321,8 @@ export interface AbilityDef {
   triggers?: TriggerSpec[];
   piercesImmunity?: boolean;
   vfx: VfxSpec;
+  anim?: AnimGesture;
+  sound?: SoundArchetype;
 }
 
 // ---------- Talents / Facets / Aghs ----------
@@ -333,6 +366,36 @@ export interface SilhouetteSpec {
   extras?: ('cape' | 'shoulderpads' | 'horns' | 'tusks' | 'crown' | 'quiver' | 'belt' | 'wings')[];
 }
 
+export type ItemWeaponVisualKind =
+  | NonNullable<SilhouetteSpec['weapon']>
+  | 'broad-cleaver'
+  | 'glowing-blade'
+  | 'long-pole'
+  | 'storm-haft';
+
+export type ItemAppearancePart = 'pauldrons' | 'heart-core' | 'frost-shards' | 'boot-trail' | 'wing-blades';
+
+export interface ItemAppearanceSpec {
+  weapon?: { kind: ItemWeaponVisualKind; color?: string; emissive?: string };
+  parts?: ItemAppearancePart[];
+  tint?: string;
+  aura?: { archetype: VfxArchetype; color: string; color2?: string };
+}
+
+export type AttackVisualKind =
+  | 'cleave-sweep'
+  | 'ranged-conversion'
+  | 'lightning-bounce'
+  | 'tinted-impact'
+  | 'crit-lunge';
+
+export interface AttackVisualSpec {
+  kind: AttackVisualKind;
+  color: string;
+  color2?: string;
+  scale?: number;
+}
+
 // ---------- Heroes ----------
 export interface HeroBaseStats {
   str: number; agi: number; int: number;
@@ -369,6 +432,7 @@ export interface HeroDef {
   bounty: { xp: number; gold: number };
   starter?: boolean;
   recruitmentQuestId?: string;
+  animProfile?: AnimProfile;
 }
 
 // ---------- Creeps ----------
@@ -387,6 +451,7 @@ export interface CreepDef {
   silhouette: SilhouetteSpec;
   palette: [string, string, string];
   aggroRadius?: number;        // default from tuning
+  animProfile?: AnimProfile;
 }
 
 // ---------- Items ----------
@@ -409,6 +474,62 @@ export interface ItemDef {
   damageLockoutSec?: number;   // Blink Dagger: unusable after taking enemy damage
   lore: string;
   glyph?: string;              // icon generator hint
+  appearance?: ItemAppearanceSpec;
+  attackVisual?: AttackVisualSpec[];
+}
+
+// ---------- Phase 3 bosses / raids / draft / economy ----------
+export type DifficultyTier = 'normal' | 'nightmare' | 'hell';
+
+export interface LootTable {
+  guaranteed: string[];
+  assembledPool: string[];
+  dropPct: Record<DifficultyTier, number>;
+  pity: number;
+}
+
+export interface BossDef {
+  id: string;
+  heroId: string;
+  region: string;
+  rank: 'boss' | 'mini-boss';
+  phases?: { atHpPct: number; onEnter: EffectNode[]; gambitBias?: string }[];
+  loot: LootTable;
+  tiers: DifficultyTier[];
+}
+
+export interface RaidDef {
+  id: string;
+  name: string;
+  location: string;
+  unlockQuest: string;
+  boss: RaidBossSetup;
+  addWaves: { atHpPct: number; summon: SummonSpec; count: number }[];
+  zones: { atHpPct: number; zone: ZoneSpec }[];
+  enrageSec: number;
+  loot: LootTable;
+  signatureExotic?: string;
+}
+
+export interface DraftDef {
+  id: string;
+  members: { name: string; pool: string[] }[];
+  banPickOrder: ('pick' | 'ban')[];
+  champion: MacroHeroSetup[] | BossDef;
+}
+
+export interface NeutralItemDef {
+  id: string;
+  name: string;
+  tier: 1 | 2 | 3 | 4 | 5;
+  passiveMods?: StatModMap;
+  attackMod?: AttackModSpec;
+  aura?: AuraSpec;
+  active?: AbilityDef;
+  enchantsInto?: string;
+  dropFromTier: CreepTier;
+  lore: string;
+  glyph?: string;
 }
 
 // ---------- Regions ----------
@@ -451,6 +572,9 @@ export interface RegionDef {
   echoSpawns?: EchoSpawnDef[];
   gates?: GateDef[];
   gyms?: { gymId: string; pos: Vec2; radius: number }[];
+  secretShop?: { pos: Vec2; inventory: string[] };
+  bosses?: string[];
+  raids?: string[];
   props: { treeDensity: number; rockDensity: number };
   gateHint?: string;
 }
@@ -462,7 +586,14 @@ export type TrialKind =
   | 'relic-fetch'
   | 'survive-night'
   | 'frost-exam'
-  | 'skillshot-exam';
+  | 'skillshot-exam'
+  | 'combo-exam'
+  | 'persuasion-gauntlet'
+  | 'assassination-contract'
+  | 'faction-choice'
+  | 'lore-riddle'
+  | 'raid-recruit'
+  | 'roster-legend';
 
 export interface TrialDef {
   id: string;
@@ -542,6 +673,11 @@ export interface MacroHeroSetup {
   gambits?: GambitRule[];
 }
 
+export interface RaidBossSetup extends MacroHeroSetup {
+  hpScale?: number;
+  damageScale?: number;
+}
+
 // ---------- Orders ----------
 export type Order =
   | { kind: 'stop' }
@@ -592,6 +728,7 @@ export interface HeroSave {
   level: number;
   xp: number;
   items: (ItemSave | null)[];   // 6 slots
+  neutralSlot: ItemSave | null;
   gambits?: GambitRule[];
   talentPicks: (0 | 1 | null)[]; // 4 tiers
   echo?: EchoProgress;
@@ -622,6 +759,7 @@ export interface GameSave {
   activeIdx: number;
   roster: HeroSave[];
   stash: ItemSave[];
+  inventoryStash: ItemSave[];
   caught: CreepInstanceSave[];
   fielded: string[];            // creep instance uids, ≤3
   recruited: string[];
@@ -630,6 +768,13 @@ export interface GameSave {
   defeatedGyms: string[];
   echoRespawn: Record<string, number>; // echo spawn id -> seconds remaining
   campRespawn: Record<string, number>; // camp id -> seconds remaining
+  difficulty: Record<string, { tier: DifficultyTier; dryClears: number }>;
+  raidProgress: Record<string, { clears: number; dryStreak: number; aegisHeld?: boolean; roshanRespawnAt?: number }>;
+  eliteFive: { defeated: number; championDown: boolean };
+  factionChoices: Record<string, string>;
+  heldUniques: string[];
+  neutralStash: { id: string; count: number }[];
+  goldSinks: { buybacks: number; tomesUsed: number; respecs: number };
   settings: { quickcast: boolean };
 }
 

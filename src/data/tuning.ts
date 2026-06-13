@@ -51,6 +51,28 @@ export const TUNING = {
   lastHitBonusPct: 0.15,      // gold AND xp bonus for player-controlled last hit
   participantWindowSec: 10,
   deathGoldLossPct: 0.10,
+  regionRewardMult: {
+    'tranquil-vale': 1.0,
+    'nightsilver-woods': 1.12,
+    icewrack: 1.25,
+    'devarshi-desert': 1.42,
+    shadeshore: 1.6,
+    'vile-reaches': 1.82,
+    quoidge: 2.05,
+    'hidden-wood': 2.3,
+    'mount-joerlak': 2.6,
+    'mad-moon-crater': 3.0
+  },
+  tierRewardMult: { normal: 1.0, nightmare: 1.65, hell: 2.45 },
+  creepTierRewardMult: { small: 1.0, medium: 1.35, large: 1.85, ancient: 2.6 },
+  creepStarBountyMult: [1.0, 1.75, 2.8],
+  neutralDropPctByTier: { small: 0.10, medium: 0.14, large: 0.20, ancient: 0.28 },
+  tinkersBench: { rerollCost: 225, reclaimCost: 150, enchantCost: 600 },
+  buybackBaseCost: 350,
+  tomeXp: 420,
+  tomeCost: 275,
+  respecCost: 500,
+  healServiceCost: 120,
 
   // --- hero swap (SPEC §6) ---
   swapCooldownSec: 4,
@@ -85,6 +107,12 @@ export const TUNING = {
   raidBossHpScale: 5,
   raidBossDamageScale: 1.25,
   raidBossRadiusScale: 1.7,
+  bossTierScale: {
+    normal: { hp: 1.0, damage: 1.0, armor: 1.0 },
+    nightmare: { hp: 1.65, damage: 1.28, armor: 1.18 },
+    hell: { hp: 2.45, damage: 1.65, armor: 1.35 }
+  },
+  bossAssembledDropPct: { normal: 0.08, nightmare: 0.16, hell: 0.30 },
 
   // --- macro arena ---
   arenaWidth: 4200,

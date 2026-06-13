@@ -4,8 +4,12 @@ import { ALL_GYMS } from '../data/gyms/index';
 import { ALL_QUESTS, ALL_TRIALS } from '../data/quests/index';
 import { ALL_ITEMS } from '../data/items/index';
 import { ALL_CREEPS } from '../data/creeps/index';
+import { ALL_NEUTRAL_ITEMS } from '../data/neutral-items';
+import { ALL_BOSSES } from '../data/bosses';
+import { ALL_RAIDS } from '../data/raids';
+import { ALL_DRAFTS } from '../data/drafts';
 import { REG } from '../core/registry';
-import type { AbilityDef, EffectNode, ValueRef, VfxArchetype } from '../core/types';
+import type { AbilityDef, AnimGesture, AttackVisualKind, EffectNode, ItemAppearancePart, ItemWeaponVisualKind, SoundArchetype, ValueRef, VfxArchetype } from '../core/types';
 import { abilityMaxLevel } from '../core/values';
 
 // ============================================================
@@ -24,6 +28,17 @@ const STATUS_IDS = [
   'stun', 'root', 'silence', 'hex', 'slow', 'disarm', 'blind', 'fear', 'taunt',
   'invis', 'magic-immune', 'break', 'cyclone', 'sleep', 'frozen', 'buff'
 ];
+
+const ANIM_GESTURES: AnimGesture[] = ['melee-swing', 'ranged-shot', 'staff-cast', 'ground-slam', 'dash', 'channel-loop', 'summon-gesture', 'item-use', 'global-cast'];
+const SOUND_ARCHETYPES: SoundArchetype[] = ['blade', 'bow', 'impact', 'frost', 'fire', 'storm', 'void', 'heal', 'summon', 'item', 'roar'];
+const GATED_TOP_TIER = ['divine-rapier', 'butterfly', 'scythe-of-vyse', 'heart-of-tarrasque', 'eye-of-skadi', 'refresher-orb', 'aghanims-scepter', 'aegis-of-the-immortal', 'refresher-shard', 'cheese'];
+const ITEM_WEAPON_VISUALS: ItemWeaponVisualKind[] = ['none', 'sword', 'staff', 'hook', 'totem', 'rifle', 'cleaver', 'broad-cleaver', 'glowing-blade', 'long-pole', 'storm-haft'];
+const ITEM_APPEARANCE_PARTS: ItemAppearancePart[] = ['pauldrons', 'heart-core', 'frost-shards', 'boot-trail', 'wing-blades'];
+const ATTACK_VISUALS: AttackVisualKind[] = ['cleave-sweep', 'ranged-conversion', 'lightning-bounce', 'tinted-impact', 'crit-lunge'];
+
+function expectHex(color: string, where: string): void {
+  expect(color, where).toMatch(/^#[0-9a-fA-F]{6}$/);
+}
 
 function checkValueRef(ref: ValueRef | undefined, def: AbilityDef, where: string): void {
   if (ref === undefined || typeof ref === 'number') return;
@@ -90,7 +105,9 @@ function walkEffects(effects: EffectNode[] | undefined, def: AbilityDef, where: 
 function lintAbility(def: AbilityDef, where: string, exoticIds: string[]): void {
   expect(def.id, `${where}: ability id`).toBeTruthy();
   expect(VFX_ARCHETYPES, `${where}/${def.id}: vfx archetype '${def.vfx.archetype}'`).toContain(def.vfx.archetype);
-  expect(def.vfx.color, `${where}/${def.id}: vfx color`).toMatch(/^#[0-9a-fA-F]{6}$/);
+  expectHex(def.vfx.color, `${where}/${def.id}: vfx color`);
+  if (def.anim) expect(ANIM_GESTURES, `${where}/${def.id}: anim '${def.anim}'`).toContain(def.anim);
+  if (def.sound) expect(SOUND_ARCHETYPES, `${where}/${def.id}: sound '${def.sound}'`).toContain(def.sound);
   walkEffects(def.effects, def, `${where}/${def.id}`, exoticIds);
   if (def.channel) {
     checkValueRef(def.channel.duration, def, `${where}/${def.id}>channel`);
@@ -114,8 +131,9 @@ function lintAbility(def: AbilityDef, where: string, exoticIds: string[]): void 
 }
 
 describe('data lint: heroes', () => {
-  it('has the Phase 2 roster of 20', () => {
-    expect(ALL_HEROES.length).toBeGreaterThanOrEqual(20);
+  it('has the Phase 3 roster floor and Aghs coverage', () => {
+    expect(ALL_HEROES.length).toBeGreaterThanOrEqual(60);
+    expect(ALL_HEROES.filter((h) => h.aghanim?.implemented).length).toBeGreaterThanOrEqual(15);
   });
 
   for (const hero of ALL_HEROES) {
@@ -133,7 +151,13 @@ describe('data lint: heroes', () => {
         expect(hero.barks.length).toBeGreaterThanOrEqual(6);
         expect(hero.baseStats.moveSpeed).toBeGreaterThan(200);
         expect(hero.baseStats.turnRate).toBeGreaterThan(0.2);
+        if (hero.animProfile) {
+          expect(hero.animProfile.rig).toBeTruthy();
+          expect(hero.animProfile.castStyle).toBeTruthy();
+          expect(hero.animProfile.voiceTimbre).toBeTruthy();
+        }
         if (hero.recruitmentQuestId) expect(REG.quests.has(hero.recruitmentQuestId), `${hero.id}: quest ${hero.recruitmentQuestId}`).toBe(true);
+        if (!hero.starter) expect(ALL_QUESTS.some((q) => q.heroId === hero.id), `${hero.id}: missing recruitment chain`).toBe(true);
         const ults = hero.abilities.filter((a) => a.ult);
         expect(ults.length, `${hero.id} needs exactly 1 ult`).toBe(1);
       });
@@ -198,7 +222,30 @@ describe('data lint: items', () => {
       if (item.active) {
         const exoticIds: string[] = [];
         lintAbility(item.active, `item:${item.id}`, exoticIds);
-        expect(exoticIds.length).toBe(0);
+        for (const id of exoticIds) expect(REG.exotics.has(id), `item exotic ${id}`).toBe(true);
+      }
+      if (item.appearance) {
+        const app = item.appearance;
+        if (app.weapon) {
+          expect(ITEM_WEAPON_VISUALS, `${item.id}: weapon visual ${app.weapon.kind}`).toContain(app.weapon.kind);
+          if (app.weapon.color) expectHex(app.weapon.color, `${item.id}: weapon color`);
+          if (app.weapon.emissive) expectHex(app.weapon.emissive, `${item.id}: weapon emissive`);
+        }
+        for (const part of app.parts ?? []) {
+          expect(ITEM_APPEARANCE_PARTS, `${item.id}: appearance part ${part}`).toContain(part);
+        }
+        if (app.tint) expectHex(app.tint, `${item.id}: tint`);
+        if (app.aura) {
+          expect(VFX_ARCHETYPES, `${item.id}: aura ${app.aura.archetype}`).toContain(app.aura.archetype);
+          expectHex(app.aura.color, `${item.id}: aura color`);
+          if (app.aura.color2) expectHex(app.aura.color2, `${item.id}: aura color2`);
+        }
+      }
+      for (const visual of item.attackVisual ?? []) {
+        expect(ATTACK_VISUALS, `${item.id}: attack visual ${visual.kind}`).toContain(visual.kind);
+        expectHex(visual.color, `${item.id}: attack visual color`);
+        if (visual.color2) expectHex(visual.color2, `${item.id}: attack visual color2`);
+        if (visual.scale !== undefined) expect(visual.scale, `${item.id}: attack visual scale`).toBeGreaterThan(0);
       }
       if (item.charges !== undefined) expect(item.charges).toBeGreaterThanOrEqual(0);
     });
@@ -209,11 +256,25 @@ describe('data lint: items', () => {
       expect(REG.items.has(id), id).toBe(true);
     }
   });
+
+  it('gated top-tier items exist and are not sold in normal shops', () => {
+    for (const id of GATED_TOP_TIER) expect(REG.items.has(id), id).toBe(true);
+    const normalShopItems = new Set(ALL_REGIONS.flatMap((r) => r.shopInventory));
+    for (const id of GATED_TOP_TIER) expect(normalShopItems.has(id), `${id} should not be purchasable`).toBe(false);
+  });
+
+  it('has Phase 4 item appearance and attack override coverage', () => {
+    expect(ALL_ITEMS.filter((i) => i.appearance).length).toBeGreaterThanOrEqual(6);
+    expect(ALL_ITEMS.filter((i) => (i.attackVisual?.length ?? 0) > 0).length).toBeGreaterThanOrEqual(6);
+    expect(REG.item('battlefury').appearance?.weapon?.kind).toBe('broad-cleaver');
+    expect(REG.item('divine-rapier').appearance?.weapon?.kind).toBe('glowing-blade');
+    expect(REG.item('assault-cuirass').appearance?.parts).toContain('pauldrons');
+  });
 });
 
 describe('data lint: creeps', () => {
-  it('has 12 creep types across tiers', () => {
-    expect(ALL_CREEPS.length).toBeGreaterThanOrEqual(12);
+  it('has the Phase 3 neutral roster across tiers', () => {
+    expect(ALL_CREEPS.length).toBeGreaterThanOrEqual(30);
     const tiers = new Set(ALL_CREEPS.map((c) => c.tier));
     expect(tiers.has('small')).toBe(true);
     expect(tiers.has('ancient')).toBe(true);
@@ -224,6 +285,7 @@ describe('data lint: creeps', () => {
       expect(creep.stats.maxHp).toBeGreaterThan(0);
       expect(creep.palette.length).toBe(3);
       expect(creep.bounty.xp).toBeGreaterThan(0);
+      if (creep.animProfile) expect(creep.animProfile.rig).toBeTruthy();
       const exoticIds: string[] = [];
       for (const a of creep.abilities) lintAbility(a, creep.id, exoticIds);
       expect(exoticIds.length).toBe(0);
@@ -232,8 +294,8 @@ describe('data lint: creeps', () => {
 });
 
 describe('data lint: regions', () => {
-  it('has the Phase 2 three-region world', () => {
-    expect(ALL_REGIONS.length).toBeGreaterThanOrEqual(3);
+  it('has the Phase 3 ten-region world', () => {
+    expect(ALL_REGIONS.length).toBeGreaterThanOrEqual(10);
   });
 
   for (const region of ALL_REGIONS) {
@@ -264,6 +326,15 @@ describe('data lint: regions', () => {
       for (const itemId of region.shopInventory) {
         expect(REG.items.has(itemId), `${region.id}: shop item ${itemId}`).toBe(true);
       }
+      for (const itemId of region.secretShop?.inventory ?? []) {
+        expect(REG.items.has(itemId), `${region.id}: secret shop item ${itemId}`).toBe(true);
+      }
+      for (const bossId of region.bosses ?? []) {
+        expect(REG.bosses.has(bossId), `${region.id}: boss ${bossId}`).toBe(true);
+      }
+      for (const raidId of region.raids ?? []) {
+        expect(REG.raids.has(raidId), `${region.id}: raid ${raidId}`).toBe(true);
+      }
     });
   }
 
@@ -275,9 +346,9 @@ describe('data lint: regions', () => {
 });
 
 describe('data lint: gyms and trials', () => {
-  it('has gyms 1-2 and at least 6 bespoke trial types', () => {
-    expect(ALL_GYMS.length).toBeGreaterThanOrEqual(2);
-    expect(new Set(ALL_TRIALS.map((t) => t.kind)).size).toBeGreaterThanOrEqual(6);
+  it('has eight gyms and at least 12 bespoke trial types', () => {
+    expect(ALL_GYMS.length).toBeGreaterThanOrEqual(8);
+    expect(new Set(ALL_TRIALS.map((t) => t.kind)).size).toBeGreaterThanOrEqual(12);
   });
 
   for (const gym of ALL_GYMS) {
@@ -300,6 +371,36 @@ describe('data lint: gyms and trials', () => {
       expect(quest?.trialId).toBe(trial.id);
     });
   }
+});
+
+describe('data lint: Phase 3 registries', () => {
+  it('bosses, raids, drafts, and neutral items resolve', () => {
+    expect(ALL_BOSSES.length).toBeGreaterThanOrEqual(30);
+    for (const boss of ALL_BOSSES) {
+      expect(REG.heroes.has(boss.heroId), `${boss.id}: hero`).toBe(true);
+      expect(REG.regions.has(boss.region), `${boss.id}: region`).toBe(true);
+      for (const id of [...boss.loot.guaranteed, ...boss.loot.assembledPool]) expect(REG.items.has(id), `${boss.id}: loot ${id}`).toBe(true);
+    }
+    expect(ALL_RAIDS.length).toBe(4);
+    for (const raid of ALL_RAIDS) {
+      expect(REG.heroes.has(raid.boss.heroId), `${raid.id}: boss hero`).toBe(true);
+      expect(REG.quests.has(raid.unlockQuest), `${raid.id}: unlock`).toBe(true);
+      for (const id of [...raid.loot.guaranteed, ...raid.loot.assembledPool]) expect(REG.items.has(id), `${raid.id}: loot ${id}`).toBe(true);
+      if (raid.signatureExotic) expect(REG.exotics.has(raid.signatureExotic), `${raid.id}: exotic`).toBe(true);
+    }
+    expect(ALL_DRAFTS.length).toBeGreaterThanOrEqual(1);
+    for (const draft of ALL_DRAFTS) {
+      for (const member of draft.members) for (const heroId of member.pool) expect(REG.heroes.has(heroId), `${draft.id}: pool ${heroId}`).toBe(true);
+    }
+    expect(ALL_NEUTRAL_ITEMS.length).toBeGreaterThanOrEqual(15);
+    for (const item of ALL_NEUTRAL_ITEMS) {
+      if (item.enchantsInto) expect(REG.neutralItems.has(item.enchantsInto), `${item.id}: enchantsInto`).toBe(true);
+      if (item.active) {
+        const exoticIds: string[] = [];
+        lintAbility(item.active, `neutral:${item.id}`, exoticIds);
+      }
+    }
+  });
 });
 
 describe('data lint: exotic budget', () => {

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { SilhouetteSpec } from '../core/types';
+import type { ItemAppearanceSpec, ItemWeaponVisualKind, SilhouetteSpec } from '../core/types';
 
 // ------------------------------------------------------------------
 // Procedural unit models (SPEC §3): primitive-built, palette-driven,
@@ -16,7 +16,10 @@ export interface UnitRig {
   legL?: THREE.Object3D;
   legR?: THREE.Object3D;
   weapon?: THREE.Object3D;
+  rightHand?: THREE.Object3D;
+  itemLayer: THREE.Group;
   height: number;
+  scale: number;
   materials: THREE.MeshLambertMaterial[];
 }
 
@@ -41,9 +44,11 @@ export function buildUnitRig(sil: SilhouetteSpec, palette: [string, string, stri
 
   const root = new THREE.Group();
   const body = new THREE.Group();
+  const itemLayer = new THREE.Group();
   root.add(body);
+  root.add(itemLayer);
 
-  const rig: UnitRig = { root, body, height: 1.8 * s, materials };
+  const rig: UnitRig = { root, body, itemLayer, height: 1.8 * s, scale: s, materials };
 
   switch (sil.build) {
     case 'ward': {
@@ -252,6 +257,7 @@ export function buildUnitRig(sil: SilhouetteSpec, palette: [string, string, stri
       body.add(armL, armR);
       rig.armL = armL;
       rig.armR = armR;
+      rig.rightHand = armR;
 
       // legs (hidden under robe)
       if (!robed) {
@@ -293,8 +299,8 @@ export function buildUnitRig(sil: SilhouetteSpec, palette: [string, string, stri
   }
 }
 
-function buildWeapon(
-  kind: SilhouetteSpec['weapon'],
+export function buildWeapon(
+  kind: SilhouetteSpec['weapon'] | ItemWeaponVisualKind,
   s: number,
   matS: THREE.MeshLambertMaterial,
   matA: THREE.MeshLambertMaterial
@@ -350,8 +356,162 @@ function buildWeapon(
       g.add(blade);
       break;
     }
+    case 'broad-cleaver': {
+      const blade = mesh(new THREE.BoxGeometry(0.92 * s, 0.52 * s, 0.06 * s), matS);
+      blade.position.x = 0.48 * s;
+      const bite = mesh(new THREE.BoxGeometry(0.26 * s, 0.16 * s, 0.07 * s), lam('#1d2430'));
+      bite.position.set(0.82 * s, 0.2 * s, 0);
+      const guard = mesh(new THREE.BoxGeometry(0.07 * s, 0.38 * s, 0.08 * s), matA);
+      guard.position.x = 0.1 * s;
+      g.add(blade, bite, guard);
+      break;
+    }
+    case 'glowing-blade': {
+      const blade = mesh(new THREE.BoxGeometry(1.05 * s, 0.16 * s, 0.05 * s), lam('#ffe27d', 0x3a3008));
+      blade.position.x = 0.58 * s;
+      const halo = mesh(
+        new THREE.BoxGeometry(1.16 * s, 0.26 * s, 0.06 * s),
+        new THREE.MeshBasicMaterial({ color: '#fff2b8', transparent: true, opacity: 0.26, depthWrite: false })
+      );
+      halo.position.x = 0.58 * s;
+      const guard = mesh(new THREE.BoxGeometry(0.06 * s, 0.34 * s, 0.08 * s), matA);
+      guard.position.x = 0.08 * s;
+      g.add(halo, blade, guard);
+      break;
+    }
+    case 'long-pole': {
+      const shaft = mesh(new THREE.CylinderGeometry(0.035 * s, 0.04 * s, 1.95 * s, 10), matS);
+      shaft.rotation.z = Math.PI / 2;
+      shaft.position.x = 0.68 * s;
+      const tip = mesh(new THREE.ConeGeometry(0.12 * s, 0.36 * s, 8), matA);
+      tip.rotation.z = -Math.PI / 2;
+      tip.position.x = 1.72 * s;
+      g.add(shaft, tip);
+      break;
+    }
+    case 'storm-haft': {
+      const haft = mesh(new THREE.CylinderGeometry(0.05 * s, 0.05 * s, 1.08 * s, 10), matS);
+      haft.position.y = 0.18 * s;
+      const head = mesh(new THREE.BoxGeometry(0.38 * s, 0.38 * s, 0.38 * s), lam('#7ddcff', 0x11385a));
+      head.position.y = -0.42 * s;
+      const coil = mesh(
+        new THREE.TorusGeometry(0.2 * s, 0.025 * s, 6, 18),
+        new THREE.MeshBasicMaterial({ color: '#c8f6ff', transparent: true, opacity: 0.82 })
+      );
+      coil.position.y = -0.42 * s;
+      g.add(haft, head, coil);
+      break;
+    }
   }
   return g;
+}
+
+export function applyItemAppearances(rig: UnitRig, apps: ItemAppearanceSpec[]): void {
+  rig.itemLayer.clear();
+  replaceWeapon(rig, apps.find((a) => a.weapon)?.weapon);
+
+  for (const app of apps) {
+    if (app.tint) addTintShell(rig, app.tint);
+    for (const part of app.parts ?? []) addPart(rig, part);
+    if (app.aura) addAura(rig, app.aura.color, app.aura.color2);
+  }
+}
+
+function replaceWeapon(rig: UnitRig, weapon: ItemAppearanceSpec['weapon'] | undefined): void {
+  if (!weapon) return;
+  if (rig.weapon?.parent) rig.weapon.parent.remove(rig.weapon);
+  const matS = lam(weapon.color ?? '#d8dce8', weapon.emissive ? 0x111111 : 0);
+  const matA = lam(weapon.emissive ?? '#ffe27d', weapon.emissive ? 0x181818 : 0);
+  const next = buildWeapon(weapon.kind, rig.scale, matS, matA);
+  if (!next) return;
+  const host = rig.rightHand ?? rig.itemLayer;
+  next.position.set(
+    rig.rightHand ? 0.15 * rig.scale : 0.42 * rig.scale,
+    rig.rightHand ? -0.72 * rig.scale : rig.height * 0.52,
+    rig.rightHand ? 0 : -0.56 * rig.scale
+  );
+  if (!rig.rightHand) next.rotation.z = -0.45;
+  host.add(next);
+  rig.weapon = next;
+}
+
+function addPart(rig: UnitRig, part: NonNullable<ItemAppearanceSpec['parts']>[number]): void {
+  const s = rig.scale;
+  switch (part) {
+    case 'pauldrons': {
+      const mat = lam('#d4d9e6');
+      for (const side of [1, -1] as const) {
+        const pad = mesh(new THREE.SphereGeometry(0.27 * s, 10, 8), mat);
+        pad.scale.set(1.2, 0.6, 0.9);
+        pad.position.set(0, 1.5 * s, side * 0.58 * s);
+        rig.itemLayer.add(pad);
+      }
+      break;
+    }
+    case 'heart-core': {
+      const core = mesh(new THREE.OctahedronGeometry(0.23 * s), lam('#d64a3f', 0x250606));
+      core.position.set(0.33 * s, 1.12 * s, 0);
+      rig.itemLayer.add(core);
+      break;
+    }
+    case 'frost-shards': {
+      const mat = lam('#a8e8ff');
+      for (let i = 0; i < 5; i++) {
+        const shard = mesh(new THREE.ConeGeometry(0.06 * s, 0.38 * s, 6), mat);
+        const a = (i / 5) * Math.PI * 2;
+        shard.position.set(Math.cos(a) * 0.42 * s, 1.48 * s + (i % 2) * 0.18 * s, Math.sin(a) * 0.42 * s);
+        shard.rotation.z = 0.45;
+        rig.itemLayer.add(shard);
+      }
+      break;
+    }
+    case 'boot-trail': {
+      const mat = new THREE.MeshBasicMaterial({ color: '#f1d58a', transparent: true, opacity: 0.35, depthWrite: false });
+      for (const side of [1, -1] as const) {
+        const trail = mesh(new THREE.CircleGeometry(0.18 * s, 12), mat);
+        trail.rotation.x = -Math.PI / 2;
+        trail.position.set(-0.16 * s, 0.04, side * 0.18 * s);
+        rig.itemLayer.add(trail);
+      }
+      break;
+    }
+    case 'wing-blades': {
+      const mat = lam('#c8ffd8');
+      for (const side of [1, -1] as const) {
+        const wing = mesh(new THREE.BoxGeometry(0.06 * s, 0.72 * s, 0.22 * s), mat);
+        wing.position.set(-0.34 * s, 1.28 * s, side * 0.46 * s);
+        wing.rotation.z = side * 0.32;
+        rig.itemLayer.add(wing);
+      }
+      break;
+    }
+  }
+}
+
+function addTintShell(rig: UnitRig, color: string): void {
+  const shell = mesh(
+    new THREE.SphereGeometry(0.82 * rig.scale, 12, 8),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.08, depthWrite: false })
+  );
+  shell.scale.y = 1.35;
+  shell.position.y = rig.height * 0.48;
+  rig.itemLayer.add(shell);
+}
+
+function addAura(rig: UnitRig, color: string, color2?: string): void {
+  const ring = mesh(
+    new THREE.TorusGeometry(0.72 * rig.scale, 0.035 * rig.scale, 6, 28),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.52, depthWrite: false })
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.16;
+  rig.itemLayer.add(ring);
+  if (color2) {
+    const ring2 = ring.clone();
+    (ring2 as THREE.Mesh).material = new THREE.MeshBasicMaterial({ color: color2, transparent: true, opacity: 0.24, depthWrite: false });
+    ring2.scale.setScalar(1.25);
+    rig.itemLayer.add(ring2);
+  }
 }
 
 /** Team/selection ring shown under units. */

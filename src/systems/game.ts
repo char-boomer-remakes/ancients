@@ -5,6 +5,7 @@ import { Unit } from '../core/unit';
 import { autoPicksForLevel, buildHero } from '../core/hero-setup';
 import { freshEchoProgress, normalizeEchoProgress, recordOwnedHeroEchoKill } from '../core/echo';
 import { computeKillReward, overflowXpToGold } from '../core/progression';
+import { dayNightMods, defaultPhase3SaveFields, migratePhase3Save, scaledBounty } from '../core/phase3';
 import { mergeCreeps, newCreepInstanceId, validateEntourage } from '../core/capture';
 import { computeBuyPlan, executeBuy, itemSaveOf, itemStateFromSave, sellValue, sortInventory } from '../core/items';
 import { levelFromXp, xpForLevel } from '../core/stats';
@@ -18,7 +19,7 @@ import { runGymMatch } from './macro-session';
 // camps, capture/entourage, shop, shrine, day clock, save/load.
 // ------------------------------------------------------------------
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 const SLOT_KEYS = ['ancients.save.1', 'ancients.save.2', 'ancients.save.3'];
 const AUTO_KEY = 'ancients.save.auto';
 
@@ -33,11 +34,13 @@ export interface RosterEntry {
   hpPct: number;
   manaPct: number;
   items: (ItemSave | null)[];
+  neutralSlot: ItemSave | null;
   abilityCooldowns: number[]; // remaining sec at serialize time
   benchedAt: number;          // game time at swap-out
   respawnAt: number;          // 0 = alive
   lastCombatAt: number;
   fleshStacks?: Record<string, number>;
+  dayNightMods: Record<string, number>;
   unit: Unit | null;
 }
 
@@ -63,6 +66,7 @@ function defaultQuestProgress(): QuestProgress {
 
 export function newGameSave(starterHeroId: string): GameSave {
   const region = REG.region('tranquil-vale');
+  const phase3 = defaultPhase3SaveFields();
   return {
     version: SAVE_VERSION,
     name: REG.hero(starterHeroId).name,
@@ -82,6 +86,7 @@ export function newGameSave(starterHeroId: string): GameSave {
         level: 1,
         xp: 0,
         items: [null, null, null, null, null, null],
+        neutralSlot: null,
         talentPicks: [null, null, null, null],
         gambits: [],
         echo: freshEchoProgress(),
@@ -100,6 +105,7 @@ export function newGameSave(starterHeroId: string): GameSave {
     defeatedGyms: [],
     echoRespawn: {},
     campRespawn: {},
+    ...phase3,
     settings: { quickcast: true }
   };
 }
@@ -131,6 +137,14 @@ export class Game {
   badges = new Set<string>();
   questProgress: Record<string, QuestProgress> = {};
   defeatedGyms = new Set<string>();
+  difficulty: GameSave['difficulty'] = {};
+  inventoryStash: ItemSave[] = [];
+  raidProgress: GameSave['raidProgress'] = {};
+  eliteFive: GameSave['eliteFive'] = { defeated: 0, championDown: false };
+  factionChoices: Record<string, string> = {};
+  heldUniques: string[] = [];
+  neutralStash: GameSave['neutralStash'] = [];
+  goldSinks: GameSave['goldSinks'] = { buybacks: 0, tomesUsed: 0, respecs: 0 };
 
   private camps = new Map<string, CampState>();
   private echoes = new Map<string, EchoState>();
@@ -165,6 +179,14 @@ export class Game {
       Object.entries(save.questProgress).map(([id, q]) => [id, { ...defaultQuestProgress(), ...q }])
     );
     this.defeatedGyms = new Set(save.defeatedGyms);
+    this.difficulty = structuredClone(save.difficulty);
+    this.inventoryStash = save.inventoryStash.map((i) => ({ ...i }));
+    this.raidProgress = structuredClone(save.raidProgress);
+    this.eliteFive = { ...save.eliteFive };
+    this.factionChoices = { ...save.factionChoices };
+    this.heldUniques = [...save.heldUniques];
+    this.neutralStash = save.neutralStash.map((n) => ({ ...n }));
+    this.goldSinks = { ...save.goldSinks };
 
     this.party = save.party.map((heroId) => {
       const hs = save.roster.find((r) => r.heroId === heroId)!;
@@ -179,11 +201,13 @@ export class Game {
         hpPct: hs.hpPct,
         manaPct: hs.manaPct,
         items: hs.items.map((i) => (i ? { ...i } : null)),
+        neutralSlot: hs.neutralSlot ? { ...hs.neutralSlot } : null,
         abilityCooldowns: [...hs.abilityCooldowns],
         benchedAt: 0,
         respawnAt: 0,
         lastCombatAt: -999,
         fleshStacks: hs.fleshStacks ? { ...hs.fleshStacks } : undefined,
+        dayNightMods: {},
         unit: null
       };
     });
@@ -200,6 +224,7 @@ export class Game {
     rec.unit = u;
     this.sim.playerActiveUid = u.uid;
     this.scene.selectedUid = u.uid;
+    this.refreshDayNightMods(true);
 
     // entourage
     for (const instUid of save.fielded) {
@@ -224,6 +249,26 @@ export class Game {
 
   isNight(): boolean {
     return this.dayTime >= 0.5;
+  }
+
+  private dayNightState: boolean | null = null;
+
+  private refreshDayNightMods(force = false): void {
+    const isNight = this.isNight();
+    if (!force && this.dayNightState === isNight) return;
+    this.dayNightState = isNight;
+    for (const rec of this.party) {
+      const u = rec.unit;
+      if (!u) continue;
+      for (const [k, v] of Object.entries(rec.dayNightMods)) {
+        u.externalMods[k] = (u.externalMods[k] ?? 0) - v;
+      }
+      rec.dayNightMods = dayNightMods(rec.heroId, isNight) as Record<string, number>;
+      for (const [k, v] of Object.entries(rec.dayNightMods)) {
+        u.externalMods[k] = (u.externalMods[k] ?? 0) + v;
+      }
+      u.refresh(this.sim.time);
+    }
   }
 
   inTown(): boolean {
@@ -410,6 +455,10 @@ export class Game {
     });
     for (const k in build.externalMods) {
       u.externalMods[k] = (u.externalMods[k] ?? 0) + build.externalMods[k];
+    }
+    rec.dayNightMods = dayNightMods(rec.heroId, this.isNight()) as Record<string, number>;
+    for (const [k, v] of Object.entries(rec.dayNightMods)) {
+      u.externalMods[k] = (u.externalMods[k] ?? 0) + v;
     }
     u.xp = Math.max(rec.xp, xpForLevel(rec.level));
     rec.items.forEach((s, i) => {
@@ -639,10 +688,12 @@ export class Game {
       hpPct: 1,
       manaPct: 1,
       items: [null, null, null, null, null, null],
+      neutralSlot: null,
       abilityCooldowns: [0, 0, 0, 0],
       benchedAt: 0,
       respawnAt: 0,
       lastCombatAt: -999,
+      dayNightMods: {},
       unit: null
     });
     this.msg(`${def.name} joins the party! (key ${this.party.length})`, 'good');
@@ -907,6 +958,7 @@ export class Game {
         level: r.level,
         xp: r.xp,
         items: r.items.map((i) => (i ? { ...i } : null)),
+        neutralSlot: r.neutralSlot ? { ...r.neutralSlot } : null,
         gambits: structuredClone(r.gambits),
         talentPicks: [...r.talentPicks],
         echo: {
@@ -921,6 +973,7 @@ export class Game {
         fleshStacks: r.fleshStacks ? { ...r.fleshStacks } : undefined
       })),
       stash: [],
+      inventoryStash: this.inventoryStash.map((i) => ({ ...i })),
       caught: this.caught.map((c) => ({ ...c })),
       fielded: [...this.fielded],
       recruited: [...this.recruited],
@@ -929,6 +982,13 @@ export class Game {
       defeatedGyms: [...this.defeatedGyms],
       echoRespawn: this.echoRespawnMap(),
       campRespawn: this.campRespawnMap(),
+      difficulty: structuredClone(this.difficulty),
+      raidProgress: structuredClone(this.raidProgress),
+      eliteFive: { ...this.eliteFive },
+      factionChoices: { ...this.factionChoices },
+      heldUniques: [...this.heldUniques],
+      neutralStash: this.neutralStash.map((n) => ({ ...n })),
+      goldSinks: { ...this.goldSinks },
       settings: { ...this.settings }
     };
   }
@@ -990,11 +1050,20 @@ export class Game {
     if (!raw) return null;
     try {
       const s = JSON.parse(raw) as unknown;
-      if (!Game.validateSave(s)) return null;
-      return s;
+      return Game.migrateSave(s);
     } catch {
       return null;
     }
+  }
+
+  static migrateSave(s: unknown): GameSave | null {
+    if (!s || typeof s !== 'object') return null;
+    const v = s as Partial<GameSave>;
+    if (v.version === 2 || v.version === SAVE_VERSION) {
+      const migrated = migratePhase3Save(v as GameSave);
+      return Game.validateSave(migrated) ? migrated : null;
+    }
+    return null;
   }
 
   static validateSave(s: unknown): s is GameSave {
@@ -1017,6 +1086,23 @@ export class Game {
     }
     if (!Array.isArray(v.defeatedGyms) || !v.defeatedGyms.every((g) => typeof g === 'string' && REG.gyms.has(g))) return false;
     if (!v.echoRespawn || typeof v.echoRespawn !== 'object') return false;
+    if (!v.campRespawn || typeof v.campRespawn !== 'object') return false;
+    if (!v.difficulty || typeof v.difficulty !== 'object') return false;
+    for (const [bossId, d] of Object.entries(v.difficulty)) {
+      if (!REG.bosses.has(bossId)) return false;
+      if (!['normal', 'nightmare', 'hell'].includes(d.tier) || typeof d.dryClears !== 'number') return false;
+    }
+    if (!Array.isArray(v.inventoryStash)) return false;
+    if (!v.raidProgress || typeof v.raidProgress !== 'object') return false;
+    for (const [raidId, r] of Object.entries(v.raidProgress)) {
+      if (!REG.raids.has(raidId)) return false;
+      if (typeof r.clears !== 'number' || typeof r.dryStreak !== 'number') return false;
+    }
+    if (!v.eliteFive || typeof v.eliteFive.defeated !== 'number' || typeof v.eliteFive.championDown !== 'boolean') return false;
+    if (!v.factionChoices || typeof v.factionChoices !== 'object') return false;
+    if (!Array.isArray(v.heldUniques) || !v.heldUniques.every((id) => typeof id === 'string' && REG.items.has(id))) return false;
+    if (!Array.isArray(v.neutralStash) || !v.neutralStash.every((n) => REG.neutralItems.has(n.id) && typeof n.count === 'number' && n.count >= 0)) return false;
+    if (!v.goldSinks || typeof v.goldSinks.buybacks !== 'number' || typeof v.goldSinks.tomesUsed !== 'number' || typeof v.goldSinks.respecs !== 'number') return false;
     if (typeof v.activeIdx !== 'number' || v.activeIdx < 0 || v.activeIdx >= v.party.length) return false;
     if (!v.settings || typeof v.settings.quickcast !== 'boolean') return false;
     for (const heroId of v.party) {
@@ -1026,6 +1112,7 @@ export class Game {
     for (const r of v.roster) {
       if (!r || typeof r.heroId !== 'string' || !REG.heroes.has(r.heroId)) return false;
       if (!Array.isArray(r.items) || r.items.length !== TUNING.itemSlots) return false;
+      if (r.neutralSlot !== null && r.neutralSlot !== undefined && !REG.neutralItems.has(r.neutralSlot.id)) return false;
       if (r.gambits !== undefined && (!Array.isArray(r.gambits) || r.gambits.length > 8)) return false;
       if (!Array.isArray(r.talentPicks) || r.talentPicks.length !== 4) return false;
       if (r.echo !== undefined) {
@@ -1111,6 +1198,8 @@ export class Game {
   private handleKillCredit(ev: Extract<SimEvent, { t: 'kill-credit' }>): void {
     const killer = this.sim.unit(ev.killerUid);
     if (!killer || killer.team !== 0) return; // only player-team kills pay
+    const victim = this.sim.unit(ev.victimUid);
+    const bounty = scaledBounty(ev.bounty, this.region.id, 'normal', victim?.tier, victim?.star ?? 1);
     const states = this.party.map((rec, i) => ({
       heroId: rec.heroId,
       isActive: i === this.activeIdx,
@@ -1118,7 +1207,7 @@ export class Game {
         i === this.activeIdx ||
         this.sim.time - rec.lastCombatAt <= TUNING.participantWindowSec
     }));
-    const reward = computeKillReward(ev.bounty, states, ev.lastHitByPlayer);
+    const reward = computeKillReward(bounty, states, ev.lastHitByPlayer);
     this.gold += reward.gold;
     for (const r of reward.perHeroXp) {
       const rec = this.party.find((p) => p.heroId === r.heroId)!;
@@ -1241,6 +1330,7 @@ export class Game {
     const dt = Math.min(realDt, 0.1);
     this.playtime += dt;
     this.dayTime = (this.dayTime + dt / TUNING.dayLengthSec) % 1;
+    this.refreshDayNightMods();
 
     // fixed-step sim
     this.accumulator += dt;

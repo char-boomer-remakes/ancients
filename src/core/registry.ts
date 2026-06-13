@@ -1,4 +1,4 @@
-import type { CreepDef, GymDef, HeroDef, ItemDef, RecruitmentQuestDef, RegionDef, TrialDef } from './types';
+import type { BossDef, CreepDef, DraftDef, GymDef, HeroDef, ItemDef, NeutralItemDef, RaidDef, RecruitmentQuestDef, RegionDef, TrialDef } from './types';
 
 // ---------------------------------------------------------------
 // Content registry. Data files register themselves; systems are
@@ -16,6 +16,10 @@ class Registry {
   gyms = new Map<string, GymDef>();
   trials = new Map<string, TrialDef>();
   quests = new Map<string, RecruitmentQuestDef>();
+  bosses = new Map<string, BossDef>();
+  raids = new Map<string, RaidDef>();
+  drafts = new Map<string, DraftDef>();
+  neutralItems = new Map<string, NeutralItemDef>();
   exotics = new Map<string, ExoticImpl>();
 
   registerHero(def: HeroDef): void {
@@ -38,6 +42,18 @@ class Registry {
   }
   registerQuest(def: RecruitmentQuestDef): void {
     this.quests.set(def.id, def);
+  }
+  registerBoss(def: BossDef): void {
+    this.bosses.set(def.id, def);
+  }
+  registerRaid(def: RaidDef): void {
+    this.raids.set(def.id, def);
+  }
+  registerDraft(def: DraftDef): void {
+    this.drafts.set(def.id, def);
+  }
+  registerNeutralItem(def: NeutralItemDef): void {
+    this.neutralItems.set(def.id, def);
   }
   registerExotic(id: string, impl: ExoticImpl): void {
     this.exotics.set(id, impl);
@@ -78,6 +94,26 @@ class Registry {
     if (!d) throw new Error(`unknown quest: ${id}`);
     return d;
   }
+  boss(id: string): BossDef {
+    const d = this.bosses.get(id);
+    if (!d) throw new Error(`unknown boss: ${id}`);
+    return d;
+  }
+  raid(id: string): RaidDef {
+    const d = this.raids.get(id);
+    if (!d) throw new Error(`unknown raid: ${id}`);
+    return d;
+  }
+  draft(id: string): DraftDef {
+    const d = this.drafts.get(id);
+    if (!d) throw new Error(`unknown draft: ${id}`);
+    return d;
+  }
+  neutralItem(id: string): NeutralItemDef {
+    const d = this.neutralItems.get(id);
+    if (!d) throw new Error(`unknown neutral item: ${id}`);
+    return d;
+  }
   clear(): void {
     this.heroes.clear();
     this.items.clear();
@@ -86,6 +122,10 @@ class Registry {
     this.gyms.clear();
     this.trials.clear();
     this.quests.clear();
+    this.bosses.clear();
+    this.raids.clear();
+    this.drafts.clear();
+    this.neutralItems.clear();
     this.exotics.clear();
   }
 }

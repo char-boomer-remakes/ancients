@@ -13,12 +13,13 @@ export interface AnimState {
   attackFlash: number;   // 1 at windup-impact, decays
   castFlash: number;
   hitFlash: number;
+  lungeFlash: number;
   deathT: number;        // 0..1 after death
   spinSpeed: number;     // blade fury style spin
 }
 
 export function newAnimState(): AnimState {
-  return { runPhase: 0, lastPos: { x: 0, y: 0 }, speedSmooth: 0, attackFlash: 0, castFlash: 0, hitFlash: 0, deathT: 0, spinSpeed: 0 };
+  return { runPhase: 0, lastPos: { x: 0, y: 0 }, speedSmooth: 0, attackFlash: 0, castFlash: 0, hitFlash: 0, lungeFlash: 0, deathT: 0, spinSpeed: 0 };
 }
 
 export function animateRig(rig: UnitRig, unit: Unit, st: AnimState, dt: number, time: number, simTime: number): void {
@@ -56,6 +57,7 @@ export function animateRig(rig: UnitRig, unit: Unit, st: AnimState, dt: number, 
   const bob = moving ? Math.abs(Math.sin(st.runPhase)) * 0.08 : Math.sin(time * 1.8 + unit.uid) * 0.03;
 
   body.position.y = bob;
+  body.position.x = 0;
   if (rig.legL) rig.legL.rotation.z = swing;
   if (rig.legR) rig.legR.rotation.z = -swing;
 
@@ -72,6 +74,10 @@ export function animateRig(rig: UnitRig, unit: Unit, st: AnimState, dt: number, 
   } else if (st.attackFlash > 0) {
     armSwingR = 0.8 * st.attackFlash;
     st.attackFlash = Math.max(0, st.attackFlash - dt * 5);
+  }
+  if (st.lungeFlash > 0) {
+    body.position.x += st.lungeFlash * 0.28;
+    st.lungeFlash = Math.max(0, st.lungeFlash - dt * 7);
   }
 
   // casting: both arms up

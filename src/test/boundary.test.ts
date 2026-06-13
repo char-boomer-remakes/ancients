@@ -42,6 +42,14 @@ describe('core boundary', () => {
     });
   }
 
+  it('core runtime does not read Phase 4 item visual metadata', () => {
+    for (const file of files.filter((f) => !f.endsWith('/types.ts'))) {
+      const src = readFileSync(file, 'utf8');
+      expect(src, `${file} reads item appearance`).not.toMatch(/\.appearance\b/);
+      expect(src, `${file} reads attackVisual`).not.toMatch(/\.attackVisual\b/);
+    }
+  });
+
   it('data files do not import three either', () => {
     const dataDir = join(HERE, '..', 'data');
     for (const file of walk(dataDir)) {

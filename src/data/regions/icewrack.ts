@@ -39,7 +39,8 @@ export const ICEWRACK: RegionDef = {
     { id: 'iw-echo-aa', heroId: 'ancient-apparition', pos: { x: 10100, y: 3400 }, level: 16, respawnSec: 240 }
   ],
   gates: [
-    { id: 'iw-to-nw', name: 'Thawing Road to Nightsilver', pos: { x: 900, y: 9800 }, radius: 520, toRegionId: 'nightsilver-woods', toPos: { x: 10150, y: 1800 } }
+    { id: 'iw-to-nw', name: 'Thawing Road to Nightsilver', pos: { x: 900, y: 9800 }, radius: 520, toRegionId: 'nightsilver-woods', toPos: { x: 10150, y: 1800 } },
+    { id: 'iw-to-desert', name: 'Cold Caravan Road to Devarshi', pos: { x: 11100, y: 2600 }, radius: 520, toRegionId: 'devarshi-desert', toPos: { x: 1100, y: 1800 }, requiredBadge: 'frost-badge' }
   ],
   gyms: [{ gymId: 'frost-gym', pos: { x: 6500, y: 3200 }, radius: 650 }],
   props: { treeDensity: 0.25, rockDensity: 0.75 },

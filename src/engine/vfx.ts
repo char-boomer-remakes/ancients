@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { SimEvent, VfxSpec } from '../core/types';
+import type { AttackVisualSpec, SimEvent, Vec2, VfxSpec } from '../core/types';
 import { WORLD_SCALE } from './scale';
 
 // ------------------------------------------------------------------
@@ -24,6 +24,26 @@ export class VfxManager {
 
   private w(x: number, y: number, lift = 0): THREE.Vector3 {
     return new THREE.Vector3(x / WORLD_SCALE, this.heightAt(x, y) + lift, y / WORLD_SCALE);
+  }
+
+  attackVisual(visual: AttackVisualSpec, from: Vec2, to: Vec2): void {
+    switch (visual.kind) {
+      case 'cleave-sweep':
+        this.cleaveSweep(from, to, visual);
+        break;
+      case 'ranged-conversion':
+        this.attackBeam(from, to, visual, 0.16);
+        break;
+      case 'lightning-bounce':
+        this.lightning(from, to, visual);
+        break;
+      case 'tinted-impact':
+        this.burst(to.x, to.y, visual.color, 0.7 * (visual.scale ?? 1), 0.28, visual.color2);
+        break;
+      case 'crit-lunge':
+        this.critSlash(from, to, visual);
+        break;
+    }
   }
 
   handleEvent(ev: SimEvent, unitPos: (uid: number) => { x: number; y: number; h: number } | null): void {
@@ -252,6 +272,86 @@ export class VfxManager {
       flash.scale.setScalar(1 + lifeT * 1.6);
       mat.opacity = 0.7 * (1 - lifeT);
     });
+  }
+
+  private attackAngle(from: Vec2, to: Vec2): number {
+    return Math.atan2(to.y - from.y, to.x - from.x);
+  }
+
+  private cleaveSweep(from: Vec2, to: Vec2, visual: AttackVisualSpec): void {
+    const scale = visual.scale ?? 1;
+    const arc = new THREE.Mesh(
+      new THREE.RingGeometry(0.55 * scale, 1.35 * scale, 28, 1, -0.55 * Math.PI, 1.1 * Math.PI),
+      new THREE.MeshBasicMaterial({ color: visual.color, transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false })
+    );
+    arc.rotation.x = -Math.PI / 2;
+    arc.rotation.z = -this.attackAngle(from, to);
+    arc.position.copy(this.w(from.x, from.y, 0.8));
+    const mat = arc.material as THREE.MeshBasicMaterial;
+    this.push(arc, 0.22, (_t, lifeT) => {
+      arc.scale.setScalar(0.75 + lifeT * 0.65);
+      mat.opacity = 0.62 * (1 - lifeT);
+    });
+  }
+
+  private attackBeam(from: Vec2, to: Vec2, visual: AttackVisualSpec, width: number): void {
+    const a = this.w(from.x, from.y, 1.2);
+    const b = this.w(to.x, to.y, 1.0);
+    const len = a.distanceTo(b);
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(width * (visual.scale ?? 1), width * 0.5 * (visual.scale ?? 1), len, 6, 1, true),
+      new THREE.MeshBasicMaterial({ color: visual.color, transparent: true, opacity: 0.72, depthWrite: false })
+    );
+    beam.position.copy(a.clone().add(b).multiplyScalar(0.5));
+    beam.lookAt(b);
+    beam.rotateX(Math.PI / 2);
+    const mat = beam.material as THREE.MeshBasicMaterial;
+    this.push(beam, 0.18, (_t, lifeT) => {
+      mat.opacity = 0.72 * (1 - lifeT);
+      beam.scale.x = 1 + lifeT * 0.8;
+      beam.scale.z = 1 + lifeT * 0.8;
+    });
+  }
+
+  private lightning(from: Vec2, to: Vec2, visual: AttackVisualSpec): void {
+    const a = this.w(from.x, from.y, 1.25);
+    const b = this.w(to.x, to.y, 1.05);
+    const points: THREE.Vector3[] = [];
+    const side = new THREE.Vector3(-(b.z - a.z), 0, b.x - a.x).normalize();
+    for (let i = 0; i <= 6; i++) {
+      const t = i / 6;
+      const p = a.clone().lerp(b, t);
+      const jag = (i === 0 || i === 6) ? 0 : (((i * 17) % 7) - 3) * 0.08 * (visual.scale ?? 1);
+      p.addScaledVector(side, jag);
+      p.y += Math.sin(t * Math.PI) * 0.25;
+      points.push(p);
+    }
+    const geom = new THREE.BufferGeometry().setFromPoints(points);
+    const line = new THREE.Line(
+      geom,
+      new THREE.LineBasicMaterial({ color: visual.color, transparent: true, opacity: 0.9 })
+    );
+    const mat = line.material as THREE.LineBasicMaterial;
+    this.push(line, 0.24, (_t, lifeT) => {
+      mat.opacity = 0.9 * (1 - lifeT);
+    });
+    this.burst(to.x, to.y, visual.color2 ?? visual.color, 0.55 * (visual.scale ?? 1), 0.22, visual.color);
+  }
+
+  private critSlash(from: Vec2, to: Vec2, visual: AttackVisualSpec): void {
+    const slash = new THREE.Mesh(
+      new THREE.ConeGeometry(0.2 * (visual.scale ?? 1), 1.1 * (visual.scale ?? 1), 3),
+      new THREE.MeshBasicMaterial({ color: visual.color, transparent: true, opacity: 0.7, depthWrite: false })
+    );
+    slash.position.copy(this.w(to.x, to.y, 1.0));
+    slash.rotation.z = -this.attackAngle(from, to);
+    slash.rotation.y = Math.PI / 2;
+    const mat = slash.material as THREE.MeshBasicMaterial;
+    this.push(slash, 0.2, (_t, lifeT) => {
+      slash.scale.setScalar(1 + lifeT * 0.8);
+      mat.opacity = 0.7 * (1 - lifeT);
+    });
+    this.burst(to.x, to.y, visual.color2 ?? visual.color, 0.5 * (visual.scale ?? 1), 0.18, visual.color);
   }
 
   private bindingBeam(a: { x: number; y: number; h: number }, b: { x: number; y: number; h: number }, dur: number): void {

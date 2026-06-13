@@ -75,6 +75,26 @@ button:disabled { opacity: 0.45; cursor: default; }
 #top-bar .clock.night { color: #9db8e8; }
 #top-bar .gold { color: var(--gold); font-weight: 700; }
 #top-bar .keys-hint { margin-left: auto; color: var(--dim); font-size: 11px; }
+.top-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 12px;
+  background: rgba(27, 35, 52, 0.72);
+}
+
+/* ---------- minimap ---------- */
+
+#minimap {
+  position: absolute;
+  right: 14px;
+  bottom: 118px;
+  width: 160px;
+  height: 160px;
+  background: rgba(8, 10, 15, 0.82);
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
 
 /* ---------- party column ---------- */
 
@@ -392,6 +412,50 @@ button:disabled { opacity: 0.45; cursor: default; }
 .talent-opt { flex: 1; max-width: 300px; padding: 18px 14px; font-size: 15px; }
 .talent-opt:hover { border-color: var(--gold); }
 .talent-or { color: var(--dim); }
+
+/* journal / codex */
+.journal-summary {
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: rgba(255, 216, 106, 0.08);
+  border: 1px solid rgba(255, 216, 106, 0.18);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.journal-row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.jr-stage {
+  color: var(--gold);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.jr-main { font-size: 13px; }
+.jr-main em, .codex-card em { color: var(--dim); font-style: normal; font-size: 11px; margin-left: 6px; }
+.jr-main p, .codex-card p, .codex-note p { color: var(--dim); margin-top: 3px; font-size: 12px; line-height: 1.35; }
+.jr-main span { color: #9db8e8; font-size: 11px; }
+.codex-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 18px;
+}
+.codex-card {
+  display: flex;
+  gap: 9px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.codex-card img { width: 48px; height: 48px; border-radius: 6px; }
+.codex-note {
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+}
 
 /* menu */
 .menu-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; }

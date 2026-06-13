@@ -2,7 +2,7 @@
 
 Read this first each session, then `DECISIONS.md`, then run `npm test`.
 
-## Current phase: 2 — Systems (PASSING)
+## Current phase: 4 — Polish (IN PROGRESS)
 
 ### Phase 1 checklist (SPEC §9)
 
@@ -51,6 +51,54 @@ Read this first each session, then `DECISIONS.md`, then run `npm test`.
 5. After the Lunar Badge, use the Frost Road gate to Icewrack, then challenge the Frost Gym.
 6. Save/load via `Esc`; badges, region, quests, gambits, echo progress, party, and inventory persist.
 
+### Phase 3 checklist (SPEC §9 / phase3 spec)
+
+| # | Item | Status |
+|---|------|--------|
+| 1 | Data lint proves ≥60 heroes, ≥50 items, ≥30 creeps, 10 regions, 8 gyms, recruitment chains | PASS |
+| 2 | Aghs implemented for ≥15 heroes | PASS |
+| 3 | Kit smoke executes every hero ability and every item active at levels 1 / 15 / 30 | PASS |
+| 4 | Boss / mini-boss difficulty tiers, loot tables, pity, and Nightmare/Hell gates | PASS |
+| 5 | Four raids registered with phase mechanics, add waves, zones, enrage, loot, and headless runs | PASS |
+| 6 | Elite Five draft and Champion data registered; deterministic draft test passes | PASS |
+| 7 | Day/night effects for Night Stalker, Luna, and night vision | PASS |
+| 8 | Neutral items, Tinker Bench reroll/enchant, buyback/Tome/respec gold sinks | PASS |
+| 9 | Save v3 migration and round-trip for Phase 3 fields | PASS |
+| 10 | Tests/build/browser smoke | PASS |
+
+### Phase 3 demo script
+
+1. Run `npm run dev`, start a new game, and confirm the title screen, starter selection, and in-game HUD load.
+2. Inspect the ten-region map/data path through badge-gated routes from Tranquil Vale to Mad Moon Crater.
+3. Re-run a registered boss on Nightmare/Hell in headless tests to see scaled rewards, guaranteed components, assembled drop chance, and pity.
+4. Run the raid definitions from tests: Roshan's Pit, Lord of Terror, Frost-Crowned King, and Queen of Blades all produce mechanics timelines and decisive headless results.
+5. Run the Elite Five draft helper against the recruited roster to produce legal 5v5 teams and the Champion gate.
+6. Use neutral item tests to verify tiered drops, in-tier rerolls, three-duplicate enchant, and no direct gold purchase of gated power.
+7. Toggle day/night helpers to see Night Stalker and Luna bonuses and the tightened night vision radius.
+
+### Phase 4 checklist (SPEC §9)
+
+| # | Item | Status |
+|---|------|--------|
+| 1 | Item appearance schema, data lint, and renderer-only consumption | PASS |
+| 2 | Weapon-class item swaps on equipped hero model | PASS |
+| 3 | Armor/aura/part overlays on equipped hero model | PASS |
+| 4 | ≥6 item attack-animation overrides and composable on-attack VFX | PASS |
+| 5 | Boundary check: `/src/core/` does not read visual metadata | PASS |
+| 6 | Minimap canvas dots for region POIs and active hero | PASS |
+| 7 | Quest journal and codex panels | PASS |
+| 8 | Balance pass from Dota baselines via `tuning.ts` | TODO |
+| 9 | Tiny procedural WebAudio SFX | TODO |
+| 10 | Performance pass against budget | TODO |
+
+### Phase 4 demo script
+
+1. Run `npm run dev`, start or load a game, and buy/equip visible items from Dawnshade such as Boots, Platemail, Dragon Lance, Battlefury, Crystalys, or Maelstrom.
+2. Confirm equipment updates the hero model: Boots leave a ground trail, Platemail adds pauldrons, Dragon Lance swaps in a long pole, Battlefury swaps in a broad cleaver, and Maelstrom adds a storm haft/aura.
+3. Attack a nearby camp with two override items equipped, for example Battlefury + Maelstrom, and confirm the cleave sweep and lightning attack VFX compose on the same attack event.
+4. Use the minimap to orient around town, camps, gates, hero spawns, echoes, and the active hero marker.
+5. Open **Journal** or press `J` to view current regional recruitment leads; open **Codex** or press `K` to read known heroes, regions, and visible-power item lore.
+
 ## Session log
 
 - 2026-06-12: Project bootstrapped (Vite + TS + vitest + three). Core sim, data, tests, engine, UI under construction.
@@ -58,3 +106,5 @@ Read this first each session, then `DECISIONS.md`, then run `npm test`.
 - 2026-06-12: Content/visual pass: roster 6 -> 9 with Luna, Sven, Axe; item catalog +10 entries/components with Yasha, Sange, Kaya, Dragon Lance, Morbid Mask, Mask of Madness, Hyperstone, Platemail, Ultimate Orb; smoother procedural unit geometry. `npm test` green (8 files, 196 tests) and `npm run build` green.
 - 2026-06-12: Phase 2 kickoff: added persisted owned-echo progress, first-echo facet unlock state, and echo talent tier unlocks that apply the opposite branch through `buildHero`. `npm test` green (9 files, 201 tests).
 - 2026-06-12: Phase 2 systems pass: roster 20, creeps 12, regions 3, echo spawns, Find→Trial→Bind recruitment, badge-gated travel, Lunar/Frost gyms, gambit presets, Captain Calls in macro gym rounds, and Phase 2 data lint/tests. `npm test` green (10 files, 289 tests).
+- 2026-06-12: Phase 3 content pass: roster 64, items 60+, creeps 36, regions 10, gyms 8, bosses/raids/draft/neutral-item registries, difficulty loot, reward scaling, gold sinks, day/night modifiers, and save v3. `npm test` green (12 files, 631 tests), `npm run build` green, Playwright smoke verified title → starter → HUD.
+- 2026-06-12: Phase 4 polish slice: item appearance/attackVisual metadata, renderer-only equipment overlays, composable attack VFX, minimap, quest journal, codex, and lint coverage for Phase 4 visuals. `npm test` green (12 files, 633 tests), `npm run build` green, and Playwright smoke verified title → starter → HUD/minimap → Journal/Codex buttons and J/K shortcuts.

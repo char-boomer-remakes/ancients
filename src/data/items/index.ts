@@ -90,6 +90,68 @@ export const CONSUMABLES: ItemDef[] = [
       ],
       vfx: { archetype: 'ground-aoe', color: '#c8a0ff', scale: 1 }
     }
+  },
+  {
+    id: 'observer-ward',
+    name: 'Observer Ward',
+    tier: 'consumable',
+    cost: 50,
+    charges: 1,
+    lore: 'A little eye on a stick. It buys certainty, not damage.',
+    glyph: 'eye',
+    active: {
+      id: 'observer-ward-active',
+      name: 'Place Observer Ward',
+      targeting: 'point-target',
+      castRange: 500,
+      castPoint: 0,
+      cooldown: [1],
+      effects: [{ kind: 'summon', at: 'point', summon: { id: 'observer-ward-summon', name: 'Observer Ward', lifetime: 360, cannotAttack: true, stats: { maxHp: 2, damage: 0, armor: 0, moveSpeed: 0, attackRange: 0, baseAttackTime: 1 }, silhouette: { build: 'ward', scale: 0.45, weapon: 'none' }, palette: ['#6bd8ff', '#1e3558', '#ffffff'] } }],
+      vfx: { archetype: 'summon-pop', color: '#6bd8ff', scale: 0.4 },
+      anim: 'item-use',
+      sound: 'item'
+    }
+  },
+  {
+    id: 'sentry-ward',
+    name: 'Sentry Ward',
+    tier: 'consumable',
+    cost: 50,
+    charges: 1,
+    lore: 'Powdered moon-glass that tattles on hidden things.',
+    glyph: 'eye',
+    active: {
+      id: 'sentry-ward-active',
+      name: 'Place Sentry Ward',
+      targeting: 'point-target',
+      castRange: 500,
+      castPoint: 0,
+      cooldown: [1],
+      effects: [{ kind: 'summon', at: 'point', summon: { id: 'sentry-ward-summon', name: 'Sentry Ward', lifetime: 360, cannotAttack: true, stats: { maxHp: 2, damage: 0, armor: 0, moveSpeed: 0, attackRange: 0, baseAttackTime: 1 }, silhouette: { build: 'ward', scale: 0.45, weapon: 'none' }, palette: ['#c8a0ff', '#2a1740', '#ffffff'] } }],
+      vfx: { archetype: 'summon-pop', color: '#c8a0ff', scale: 0.4 },
+      anim: 'item-use',
+      sound: 'item'
+    }
+  },
+  {
+    id: 'smoke-of-deceit',
+    name: 'Smoke of Deceit',
+    tier: 'consumable',
+    cost: 80,
+    charges: 1,
+    lore: 'A team secret held together by gray vapor.',
+    glyph: 'cloud',
+    active: {
+      id: 'smoke-active',
+      name: 'Smoke',
+      targeting: 'no-target',
+      castPoint: 0,
+      cooldown: [1],
+      effects: [{ kind: 'status', status: 'invis', duration: 12, target: 'allies-in-radius', radius: 1200, params: { fadeTime: 0.2, tag: 'smoke' } }],
+      vfx: { archetype: 'ground-aoe', color: '#9a9a9a', scale: 0.8 },
+      anim: 'item-use',
+      sound: 'item'
+    }
   }
 ];
 
@@ -111,7 +173,13 @@ export const COMPONENTS: ItemDef[] = [
   { id: 'ogre-axe', name: 'Ogre Axe', tier: 'component', cost: 1000, passiveMods: { str: 10 }, lore: 'An ogre\u2019s idea of subtlety.', glyph: 'axe' },
   { id: 'staff-of-wizardry', name: 'Staff of Wizardry', tier: 'component', cost: 1000, passiveMods: { int: 10 }, lore: 'Hums at the frequency of unfinished spells.', glyph: 'staff' },
   { id: 'blade-of-alacrity', name: 'Blade of Alacrity', tier: 'component', cost: 1000, passiveMods: { agi: 10 }, lore: 'Light as a rumor.', glyph: 'blade' },
-  { id: 'boots-of-speed', name: 'Boots of Speed', tier: 'basic', cost: 500, passiveMods: { moveSpeed: 45 }, lore: 'The vale\u2019s most popular purchase.', glyph: 'boot' },
+  {
+    id: 'boots-of-speed', name: 'Boots of Speed', tier: 'basic', cost: 500,
+    passiveMods: { moveSpeed: 45 },
+    lore: 'The vale\u2019s most popular purchase.',
+    glyph: 'boot',
+    appearance: { parts: ['boot-trail'], aura: { archetype: 'storm', color: '#f1d58a', color2: '#ffffff' } }
+  },
   { id: 'gloves-of-haste', name: 'Gloves of Haste', tier: 'component', cost: 450, passiveMods: { attackSpeed: 20 }, lore: 'They twitch when you hesitate.', glyph: 'fist' },
   { id: 'sages-mask', name: 'Sage\u2019s Mask', tier: 'component', cost: 175, passiveMods: { manaRegen: 1 }, lore: 'Breathe in. The mana follows.', glyph: 'mask' },
   { id: 'ring-of-regen', name: 'Ring of Regeneration', tier: 'component', cost: 175, passiveMods: { hpRegen: 1.75 }, lore: 'A modest loop of troll-bone.', glyph: 'ring' },
@@ -123,8 +191,20 @@ export const COMPONENTS: ItemDef[] = [
   { id: 'shadow-amulet', name: 'Shadow Amulet', tier: 'component', cost: 1000, passiveMods: {}, lore: 'It dims the light\u2019s opinion of you.', glyph: 'gem' },
   { id: 'morbid-mask', name: 'Morbid Mask', tier: 'component', cost: 900, passiveMods: { lifestealPct: 18 }, lore: 'A hungry little face, worn in the hand.', glyph: 'mask' },
   { id: 'hyperstone', name: 'Hyperstone', tier: 'component', cost: 2000, passiveMods: { attackSpeed: 60 }, lore: 'It vibrates faster than fear.', glyph: 'gem' },
-  { id: 'platemail', name: 'Platemail', tier: 'component', cost: 1400, passiveMods: { armor: 10 }, lore: 'A fortress hammered thin enough to wear.', glyph: 'armor' },
+  {
+    id: 'platemail', name: 'Platemail', tier: 'component', cost: 1400,
+    passiveMods: { armor: 10 },
+    lore: 'A fortress hammered thin enough to wear.',
+    glyph: 'armor',
+    appearance: { parts: ['pauldrons'], tint: '#9aa4b8' }
+  },
   { id: 'ultimate-orb', name: 'Ultimate Orb', tier: 'component', cost: 2800, passiveMods: { str: 15, agi: 15, int: 15 }, lore: 'A perfect sphere of indecision: every virtue at once.', glyph: 'orb' },
+  { id: 'demon-edge', name: 'Demon Edge', tier: 'component', cost: 2200, passiveMods: { damage: 40 }, lore: 'Too sharp to sheath politely.', glyph: 'blade' },
+  { id: 'sacred-relic', name: 'Sacred Relic', tier: 'component', cost: 3400, passiveMods: { damage: 55 }, lore: 'A holy answer to an unholy question.', glyph: 'relic' },
+  { id: 'reaver', name: 'Reaver', tier: 'component', cost: 2800, passiveMods: { str: 25 }, lore: 'A red stone that insists the body can be larger.', glyph: 'gem' },
+  { id: 'eaglesong', name: 'Eaglesong', tier: 'component', cost: 2800, passiveMods: { agi: 25 }, lore: 'Feather-light, impossibly quick.', glyph: 'wing' },
+  { id: 'mystic-staff', name: 'Mystic Staff', tier: 'component', cost: 2800, passiveMods: { int: 25 }, lore: 'A staff that remembers every spell cast near it.', glyph: 'staff' },
+  { id: 'point-booster', name: 'Point Booster', tier: 'component', cost: 1200, passiveMods: { maxHp: 175, maxMana: 175 }, lore: 'A practical little reservoir.', glyph: 'gem' },
   { id: 'magic-stick', name: 'Magic Stick', tier: 'basic', cost: 200, charges: 0, maxCharges: 10,
     triggers: [{ on: 'on-nearby-enemy-cast', radius: 1200, chargeGain: 1 }],
     consumesAllCharges: true,
@@ -227,7 +307,9 @@ export const ASSEMBLED: ItemDef[] = [
     components: ['blade-of-alacrity', 'belt-of-strength'], recipeCost: 450,
     passiveMods: { agi: 10, str: 6, attackRange: 140 },
     lore: 'A long answer to a short-ranged problem.',
-    glyph: 'spear'
+    glyph: 'spear',
+    appearance: { weapon: { kind: 'long-pole', color: '#c87842' } },
+    attackVisual: [{ kind: 'ranged-conversion', color: '#ffb35c', scale: 1.05 }]
   },
   {
     id: 'mask-of-madness', name: 'Mask of Madness', tier: 'core', cost: 1900,
@@ -374,7 +456,9 @@ export const ASSEMBLED: ItemDef[] = [
     passiveMods: { damage: 50, hpRegen: 7.5, manaRegen: 3 },
     attackMod: { cleave: { pct: 60, radius: 600 } },
     lore: 'An axe with opinions about crowds.',
-    glyph: 'axe'
+    glyph: 'axe',
+    appearance: { weapon: { kind: 'broad-cleaver', color: '#c8cdd8' } },
+    attackVisual: [{ kind: 'cleave-sweep', color: '#d8dde8', scale: 1.25 }]
   },
   {
     id: 'crystalys', name: 'Crystalys', tier: 'core', cost: 1900,
@@ -382,7 +466,8 @@ export const ASSEMBLED: ItemDef[] = [
     passiveMods: { damage: 32 },
     attackMod: { critChance: 20, critMult: 160 },
     lore: 'A blade of living crystal that sings on the lucky swings.',
-    glyph: 'blade'
+    glyph: 'blade',
+    attackVisual: [{ kind: 'crit-lunge', color: '#ff5f5f', color2: '#ffffff', scale: 0.85 }]
   },
   {
     id: 'diffusal-blade', name: 'Diffusal Blade', tier: 'core', cost: 2500,
@@ -412,7 +497,9 @@ export const ASSEMBLED: ItemDef[] = [
     passiveMods: { damage: 24, attackSpeed: 20 },
     attackMod: { procChance: 30, procDamage: 140 },
     lore: 'A hammer with a storm trapped in the head. It leaks.',
-    glyph: 'hammer'
+    glyph: 'hammer',
+    appearance: { weapon: { kind: 'storm-haft', color: '#7ddcff', emissive: '#244b7a' }, aura: { archetype: 'storm', color: '#7ddcff', color2: '#ffffff' } },
+    attackVisual: [{ kind: 'lightning-bounce', color: '#7ddcff', color2: '#ffffff', scale: 1.1 }]
   },
   {
     id: 'drum-of-endurance', name: 'Drum of Endurance', tier: 'basic', cost: 1650,
@@ -441,6 +528,126 @@ export const ASSEMBLED: ItemDef[] = [
     aura: { radius: 1200, affects: 'allies', mods: { lifestealPct: 15, damagePct: 12, armor: 3 } },
     lore: 'A fanged chalice that tithes every wound.',
     glyph: 'fang'
+  },
+  {
+    id: 'assault-cuirass', name: 'Assault Cuirass', tier: 'core', cost: 5500,
+    components: ['hyperstone', 'platemail', 'chainmail'], recipeCost: 1550,
+    passiveMods: { armor: 10, attackSpeed: 30 },
+    aura: { radius: 1200, affects: 'allies', mods: { armor: 5, attackSpeed: 25 } },
+    lore: 'A marching fortress with a heartbeat.',
+    glyph: 'armor',
+    appearance: { parts: ['pauldrons'], tint: '#d4d9e6', aura: { archetype: 'shield', color: '#d4d9e6', color2: '#ffd86a' } }
+  },
+  {
+    id: 'divine-rapier', name: 'Divine Rapier', tier: 'core', cost: 6200,
+    components: ['sacred-relic', 'demon-edge'], recipeCost: 600,
+    passiveMods: { damage: 350 },
+    lore: 'A victory condition with a handle. It drops when pride dies.',
+    glyph: 'blade',
+    appearance: { weapon: { kind: 'glowing-blade', color: '#ffe27d', emissive: '#806a18' }, aura: { archetype: 'global-mark', color: '#ffe27d', color2: '#ffffff' } },
+    attackVisual: [{ kind: 'tinted-impact', color: '#ffe27d', color2: '#ffffff', scale: 1.35 }]
+  },
+  {
+    id: 'butterfly', name: 'Butterfly', tier: 'core', cost: 5375,
+    components: ['eaglesong', 'quarterstaff', 'quarterstaff'], recipeCost: 825,
+    passiveMods: { agi: 35, damage: 25, attackSpeed: 35, evasionPct: 35 },
+    lore: 'The blade misses because you have already left.',
+    glyph: 'wing',
+    appearance: { parts: ['wing-blades'], tint: '#c8ffd8' },
+    attackVisual: [{ kind: 'crit-lunge', color: '#95ffbc', color2: '#ffffff', scale: 1.15 }]
+  },
+  {
+    id: 'scythe-of-vyse', name: 'Scythe of Vyse', tier: 'core', cost: 7075,
+    components: ['mystic-staff', 'ultimate-orb', 'void-stone'], recipeCost: 675,
+    passiveMods: { int: 30, str: 15, agi: 15, manaRegen: 5 },
+    lore: 'Scholarship, sharpened into livestock.',
+    glyph: 'scythe',
+    active: {
+      id: 'hex-active',
+      name: 'Hex',
+      targeting: 'unit-target',
+      affects: 'enemy',
+      castRange: 800,
+      castPoint: 0,
+      cooldown: [22],
+      manaCost: [250],
+      effects: [{ kind: 'status', status: 'hex', duration: 3.5, target: 'target' }],
+      vfx: { archetype: 'beam', color: '#c8a0ff', scale: 0.8 },
+      anim: 'item-use',
+      sound: 'item'
+    }
+  },
+  {
+    id: 'heart-of-tarrasque', name: 'Heart of Tarrasque', tier: 'core', cost: 5175,
+    components: ['reaver', 'vitality-booster', 'ring-of-regen'], recipeCost: 1200,
+    passiveMods: { str: 40, maxHp: 250, hpRegenPctMax: 1.6 },
+    lore: 'The old beast is dead. Its stubbornness is not.',
+    glyph: 'heart',
+    appearance: { parts: ['heart-core'], aura: { archetype: 'shield', color: '#c83a3a', color2: '#ffb08a' } }
+  },
+  {
+    id: 'eye-of-skadi', name: 'Eye of Skadi', tier: 'core', cost: 7475,
+    components: ['ultimate-orb', 'ultimate-orb', 'point-booster'], recipeCost: 675,
+    passiveMods: { str: 22, agi: 22, int: 22, maxHp: 220, maxMana: 220 },
+    attackMod: { procChance: 100, procStatus: { status: 'slow', duration: 2.5, params: { moveSlowPct: 35, attackSlowPct: 35, tag: 'skadi-cold' } } },
+    lore: 'A cold eye that teaches every strike to linger.',
+    glyph: 'orb',
+    appearance: { parts: ['frost-shards'], tint: '#a8e8ff', aura: { archetype: 'storm', color: '#a8e8ff', color2: '#ffffff' } },
+    attackVisual: [{ kind: 'tinted-impact', color: '#a8e8ff', color2: '#ffffff', scale: 1.05 }]
+  },
+  {
+    id: 'refresher-orb', name: 'Refresher Orb', tier: 'core', cost: 6275,
+    components: ['mystic-staff', 'void-stone', 'void-stone'], recipeCost: 1875,
+    passiveMods: { int: 25, manaRegen: 6 },
+    lore: 'A second chance for every cooldown.',
+    glyph: 'orb',
+    active: {
+      id: 'refresher-active',
+      name: 'Refresh',
+      targeting: 'no-target',
+      castPoint: 0,
+      cooldown: [180],
+      manaCost: [300],
+      effects: [{ kind: 'exotic', id: 'refresh-cooldowns' }],
+      vfx: { archetype: 'global-mark', color: '#8ee8ff', scale: 1 },
+      anim: 'item-use',
+      sound: 'item'
+    }
+  },
+  {
+    id: 'aghanims-scepter', name: "Aghanim's Scepter", tier: 'core', cost: 5800,
+    components: ['point-booster', 'ogre-axe', 'staff-of-wizardry', 'blade-of-alacrity'], recipeCost: 1600,
+    passiveMods: { str: 10, agi: 10, int: 10, maxHp: 175, maxMana: 175 },
+    lore: 'A blue invitation for a hero to become more themselves.',
+    glyph: 'staff'
+  },
+  {
+    id: 'aegis-of-the-immortal', name: 'Aegis of the Immortal', tier: 'core', cost: 0,
+    lore: 'A held promise: die once, stand once.',
+    glyph: 'shield'
+  },
+  {
+    id: 'refresher-shard', name: 'Refresher Shard', tier: 'consumable', cost: 0,
+    charges: 1,
+    lore: 'A smaller second chance, won from the pit.',
+    glyph: 'shard'
+  },
+  {
+    id: 'cheese', name: 'Cheese', tier: 'consumable', cost: 0,
+    charges: 1,
+    lore: 'Improbably dense, extremely reassuring.',
+    glyph: 'cheese',
+    active: {
+      id: 'cheese-active',
+      name: 'Eat Cheese',
+      targeting: 'no-target',
+      castPoint: 0,
+      cooldown: [1],
+      effects: [{ kind: 'heal', amount: 2500, target: 'self' }, { kind: 'mana', op: 'restore', amount: 1500, target: 'self' }],
+      vfx: { archetype: 'shield', color: '#fff29a', scale: 0.8 },
+      anim: 'item-use',
+      sound: 'item'
+    }
   }
 ];
 

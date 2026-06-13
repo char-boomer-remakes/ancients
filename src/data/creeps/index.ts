@@ -281,6 +281,122 @@ export const ICE_SHAMAN: CreepDef = {
   aggroRadius: 620
 };
 
+function creep(
+  id: string,
+  name: string,
+  tier: CreepDef['tier'],
+  abilityName: string,
+  palette: [string, string, string],
+  opts: { ranged?: boolean; summon?: boolean; aura?: boolean; stun?: boolean } = {}
+): CreepDef {
+  const tierStats = {
+    small: { maxHp: 260, damage: 16, armor: 0, xp: 34, gold: 20, scale: 0.62 },
+    medium: { maxHp: 520, damage: 30, armor: 1, xp: 72, gold: 46, scale: 0.85 },
+    large: { maxHp: 980, damage: 48, armor: 3, xp: 125, gold: 82, scale: 1.15 },
+    ancient: { maxHp: 1900, damage: 78, armor: 6, xp: 260, gold: 165, scale: 1.45 }
+  }[tier];
+  const abilities = opts.summon
+    ? [{
+        id: `${id}-summon`,
+        name: abilityName,
+        targeting: 'point-target' as const,
+        castRange: 450,
+        manaCost: [80, 90, 100],
+        cooldown: [18, 16, 14],
+        values: { lifetime: [14, 18, 22] },
+        effects: [{
+          kind: 'summon' as const,
+          at: 'point' as const,
+          summon: {
+            id: `${id}-minion`,
+            name: `${name} Minion`,
+            lifetime: 'lifetime',
+            stats: { maxHp: 260, damage: 18, armor: 0, moveSpeed: 300, attackRange: 120, baseAttackTime: 1.6 },
+            silhouette: { build: 'biped' as const, scale: 0.55, weapon: 'sword' as const },
+            palette
+          }
+        }],
+        vfx: { archetype: 'summon-pop' as const, color: palette[0], scale: 0.5 },
+        anim: 'summon-gesture' as const,
+        sound: 'summon' as const
+      }]
+    : opts.aura
+      ? [{
+          id: `${id}-aura`,
+          name: abilityName,
+          targeting: 'aura' as const,
+          aura: { radius: 900, affects: 'allies' as const, mods: (tier === 'ancient' ? { armor: 4, damagePct: 10 } : { damagePct: 8 }) as Record<string, number> },
+          vfx: { archetype: 'global-mark' as const, color: palette[0], scale: 0.45 },
+          anim: 'staff-cast' as const,
+          sound: 'roar' as const
+        }]
+      : [{
+          id: `${id}-ability`,
+          name: abilityName,
+          targeting: opts.ranged ? 'unit-target' as const : 'no-target' as const,
+          affects: opts.ranged ? 'enemy' as const : undefined,
+          castRange: opts.ranged ? 600 : undefined,
+          manaCost: [55, 65, 75],
+          cooldown: [12, 11, 10],
+          values: { damage: [55, 90, 125], radius: [260, 280, 300], stun: [0.6, 0.8, 1.0] },
+          effects: opts.ranged
+            ? [{ kind: 'damage' as const, dtype: 'magical' as const, amount: 'damage', target: 'target' as const }, ...(opts.stun ? [{ kind: 'status' as const, status: 'stun' as const, duration: 'stun', target: 'target' as const }] : [])]
+            : [{ kind: 'damage' as const, dtype: 'physical' as const, amount: 'damage', target: 'enemies-in-radius' as const, radius: 'radius' }, { kind: 'status' as const, status: opts.stun ? 'stun' as const : 'slow' as const, duration: 'stun', target: 'enemies-in-radius' as const, radius: 'radius', params: opts.stun ? undefined : { moveSlowPct: 22 } }],
+          vfx: { archetype: opts.ranged ? 'projectile' as const : 'ground-aoe' as const, color: palette[0], scale: 0.6 },
+          anim: opts.ranged ? 'ranged-shot' as const : 'ground-slam' as const,
+          sound: opts.ranged ? 'storm' as const : 'impact' as const
+        }];
+
+  return {
+    id,
+    name,
+    tier,
+    stats: {
+      maxHp: tierStats.maxHp,
+      damage: tierStats.damage,
+      armor: tierStats.armor,
+      magicResistPct: tier === 'ancient' ? 35 : tier === 'large' ? 15 : 0,
+      moveSpeed: opts.ranged ? 300 : 285,
+      attackRange: opts.ranged ? 520 : 120,
+      baseAttackTime: 1.65,
+      attackProjectileSpeed: opts.ranged ? 900 : undefined
+    },
+    abilities,
+    bounty: { xp: tierStats.xp, gold: tierStats.gold },
+    silhouette: { build: tier === 'ancient' ? 'golem' : opts.ranged ? 'biped' : 'brute', scale: tierStats.scale, bodyShape: tier === 'small' ? 'slim' : 'bulky', head: opts.aura ? 'horned' : 'bare', weapon: opts.ranged ? 'staff' : 'none' },
+    palette,
+    aggroRadius: tier === 'ancient' ? 720 : 600,
+    animProfile: { rig: tier === 'ancient' ? 'ancient' : 'neutral', castStyle: opts.ranged ? 'caster' : 'beast', voiceTimbre: tier }
+  };
+}
+
+export const PHASE3_CREEPS: CreepDef[] = [
+  creep('fell-spirit', 'Fell Spirit', 'small', 'Mana Burn', ['#9f7aff', '#2b1c48', '#e8dcff'], { ranged: true }),
+  creep('gnoll-assassin', 'Gnoll Assassin', 'small', 'Envenomed Weapon', ['#8f6a3a', '#2f2112', '#d8c08a']),
+  creep('harpy-scout', 'Harpy Scout', 'small', 'Take Off', ['#d8d06a', '#5a5f8a', '#ffffff'], { ranged: true }),
+  creep('centaur-courser', 'Centaur Courser', 'medium', 'War Stomp', ['#9a6840', '#3b2414', '#d8b080'], { stun: true }),
+  creep('satyr-mindstealer', 'Satyr Mindstealer', 'medium', 'Mana Burn', ['#8a5c9f', '#2d1840', '#d8a8ff'], { ranged: true }),
+  creep('giant-wolf', 'Giant Wolf', 'medium', 'Pack Howl', ['#7c6a54', '#3e352a', '#d8d0aa'], { aura: true }),
+  creep('ogre-bruiser', 'Ogre Bruiser', 'medium', 'Ogre Smash', ['#4f8fc0', '#23384a', '#c8e8ff'], { stun: true }),
+  creep('ogre-frostmage', 'Ogre Frostmage', 'medium', 'Ice Armor', ['#9fdcff', '#35536a', '#ffffff'], { ranged: true, aura: true }),
+  creep('mud-golem', 'Mud Golem', 'medium', 'Hurl Boulder', ['#8a6a4a', '#3e3022', '#c8ad86'], { ranged: true, stun: true }),
+  creep('dark-troll', 'Dark Troll', 'medium', 'Ensnare', ['#5b657a', '#1d2430', '#b8c0d0'], { ranged: true }),
+  creep('wildwing', 'Wildwing', 'medium', 'Tornado', ['#b8a878', '#4a4230', '#f0e0b0'], { ranged: true }),
+  creep('wildwing-ripper', 'Wildwing Ripper', 'large', 'Toughness Aura', ['#c0a060', '#4f3b20', '#f3e0a8'], { aura: true }),
+  creep('ogre-magi-large', 'Ogre Magi', 'large', 'Frost Armor', ['#3f7fb8', '#213d58', '#bfe8ff'], { ranged: true }),
+  creep('thunderhide', 'Thunderhide', 'large', 'Slam', ['#6f7a52', '#2d3520', '#d4e08a'], { stun: true }),
+  creep('dark-troll-summoner', 'Dark Troll Summoner', 'large', 'Raise Dead', ['#404a60', '#181c28', '#a8b0c8'], { ranged: true, summon: true }),
+  creep('centaur-conqueror', 'Centaur Conqueror', 'large', 'War Stomp', ['#a46a3d', '#3d2414', '#e0b080'], { stun: true }),
+  creep('enraged-wildkin', 'Enraged Wildkin', 'large', 'Hurricane', ['#b0a05f', '#3f3920', '#f0e6a0'], { ranged: true }),
+  creep('rock-golem', 'Rock Golem', 'ancient', 'Shard Split', ['#8a8580', '#46403c', '#d4d0c8'], { stun: true }),
+  creep('black-dragon', 'Black Dragon', 'ancient', 'Fireball', ['#262020', '#b84828', '#ffb070'], { ranged: true }),
+  creep('prowler-shaman', 'Prowler Shaman', 'ancient', 'Prowler Hex', ['#704a8f', '#25162f', '#d8b0ff'], { ranged: true, summon: true }),
+  creep('prowler-acolyte', 'Prowler Acolyte', 'ancient', 'Ancient Lifesteal Aura', ['#604078', '#20132c', '#caa8f0'], { aura: true }),
+  creep('frostbitten-golem', 'Frostbitten Golem', 'ancient', 'Ice Shatter', ['#bfeaff', '#587080', '#ffffff'], { stun: true }),
+  creep('elder-jungle-stalker', 'Elder Jungle Stalker', 'ancient', 'Ancient Frenzy', ['#3f7a3c', '#182a16', '#b8e8a8'], { aura: true }),
+  creep('ancient-thunderhide', 'Ancient Thunderhide', 'ancient', 'Frenzy Slam', ['#6f8a4a', '#263418', '#d8f09a'], { stun: true })
+];
+
 export const ALL_CREEPS: CreepDef[] = [
   KOBOLD,
   KOBOLD_FOREMAN,
@@ -293,5 +409,6 @@ export const ALL_CREEPS: CreepDef[] = [
   SATYR_BANISHER,
   HARPY_STORMCRAFTER,
   POLAR_FURBOLG,
-  ICE_SHAMAN
+  ICE_SHAMAN,
+  ...PHASE3_CREEPS
 ];

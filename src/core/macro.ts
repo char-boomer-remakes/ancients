@@ -4,7 +4,7 @@ import { Sim } from './sim';
 import { buildDefaultGambit } from './controllers';
 import { autoPicksForLevel, buildHero } from './hero-setup';
 import { makeItemState } from './items';
-import type { MacroHeroSetup } from './types';
+import type { MacroHeroSetup, RaidBossSetup } from './types';
 import type { Unit } from './unit';
 
 // ------------------------------------------------------------------
@@ -17,11 +17,6 @@ export interface MacroSetup {
   teamA: MacroHeroSetup[];
   teamB: MacroHeroSetup[];
   maxSec?: number;
-}
-
-export interface RaidBossSetup extends MacroHeroSetup {
-  hpScale?: number;
-  damageScale?: number;
 }
 
 export interface RaidSetup {

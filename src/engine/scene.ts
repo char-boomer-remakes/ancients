@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import type { RegionDef } from '../core/types';
+import type { AttackVisualSpec, ItemAppearanceSpec, RegionDef } from '../core/types';
 import type { Sim } from '../core/sim';
 import type { Unit } from '../core/unit';
 import { REG } from '../core/registry';
 import { buildTerrain, type TerrainInfo } from './terrain';
-import { buildUnitRig, buildSelectionRing, type UnitRig } from './models';
+import { applyItemAppearances, buildUnitRig, buildSelectionRing, type UnitRig } from './models';
 import { animateRig, newAnimState, type AnimState } from './animator';
 import { VfxManager } from './vfx';
 import { WORLD_SCALE } from './scale';
@@ -28,6 +28,7 @@ interface UnitView {
   lastTeamColor: string;
   stars: THREE.Group;
   immuneShell: THREE.Mesh;
+  lastItemVisualKey: string;
   removeAt: number; // time to despawn after death
 }
 
@@ -181,6 +182,7 @@ export class GameScene {
 
   /** Game layer forwards sim events here (it also consumes them for UI). */
   pushEvent(ev: Parameters<VfxManager['handleEvent']>[0], sim: Sim): void {
+    if (ev.t === 'attack-impact') this.playAttackVisuals(ev.uid, ev.target, sim);
     this.vfx.handleEvent(ev, (uid) => {
       const u = sim.unit(uid);
       return u ? { x: u.pos.x, y: u.pos.y, h: 0 } : null;
@@ -229,6 +231,7 @@ export class GameScene {
     if (!palette) palette = ['#888899', '#666677', '#aaaabb'];
 
     const rig = buildUnitRig(sil, palette);
+    applyItemAppearances(rig, this.itemAppearancesFor(u));
     this.scene.add(rig.root);
 
     const ringColor = u.team === this.playerTeam ? 0x5ad95a : 0xe05a5a;
@@ -272,12 +275,17 @@ export class GameScene {
     return {
       rig, anim: newAnimState(), ring, hpBar, hpCanvas, hpTex,
       lastHpPct: -1, lastManaPct: -1, lastTeamColor: '',
-      stars, immuneShell, removeAt: 0
+      stars, immuneShell, lastItemVisualKey: this.itemVisualKey(u), removeAt: 0
     };
   }
 
   private updateView(u: Unit, view: UnitView, dt: number, simTime: number): void {
     const { rig } = view;
+    const visualKey = this.itemVisualKey(u);
+    if (visualKey !== view.lastItemVisualKey) {
+      applyItemAppearances(rig, this.itemAppearancesFor(u));
+      view.lastItemVisualKey = visualKey;
+    }
     const wx = u.pos.x / WORLD_SCALE;
     const wz = u.pos.y / WORLD_SCALE;
     const wy = this.terrain.heightAt(u.pos.x, u.pos.y);
@@ -340,6 +348,32 @@ export class GameScene {
     if (view.immuneShell.visible) {
       (view.immuneShell.material as THREE.MeshBasicMaterial).opacity = 0.13 + Math.sin(this.time * 6) * 0.05;
     }
+    rig.itemLayer.rotation.y = Math.sin(this.time * 1.6 + u.uid) * 0.035;
+  }
+
+  private itemVisualKey(u: Unit): string {
+    return u.items.map((it) => it?.defId ?? '-').join('|');
+  }
+
+  private itemAppearancesFor(u: Unit): ItemAppearanceSpec[] {
+    return u.items
+      .map((it) => (it ? REG.items.get(it.defId)?.appearance : undefined))
+      .filter((app): app is ItemAppearanceSpec => !!app);
+  }
+
+  private attackVisualsFor(u: Unit): AttackVisualSpec[] {
+    return u.items.flatMap((it) => (it ? (REG.items.get(it.defId)?.attackVisual ?? []) : []));
+  }
+
+  private playAttackVisuals(attackerUid: number, targetUid: number, sim: Sim): void {
+    const attacker = sim.unit(attackerUid);
+    const target = sim.unit(targetUid);
+    if (!attacker || !target) return;
+    const visuals = this.attackVisualsFor(attacker);
+    if (visuals.length === 0) return;
+    const view = this.views.get(attacker.uid);
+    if (view && visuals.some((v) => v.kind === 'crit-lunge')) view.anim.lungeFlash = 1;
+    for (const visual of visuals) this.vfx.attackVisual(visual, attacker.pos, target.pos);
   }
 
   private redrawHpBar(u: Unit, view: UnitView): void {
