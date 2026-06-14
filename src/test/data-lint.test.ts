@@ -55,6 +55,43 @@ const CODED_DROP_HOMES: Record<string, DropSource[]> = {
   'refresher-shard': ['raid'],
   cheese: ['raid']
 };
+
+function reachableCutsceneIds(): Set<string> {
+  const ids = new Set([
+    'prologue-moon-breaks',
+    'bind-first',
+    'bind-stinger',
+    'raid-clear-stinger',
+    'boss-clear-stinger',
+    'boss-phase-stinger',
+    'void-prelate-phase-break',
+    'last-eldwurm-phase-break',
+    'echo-milestone-stinger',
+    'resonance-first-reaction',
+    'trial-dialogue-stinger',
+    'elite-gauntlet-open',
+    'champion-intro',
+    'champion-clear',
+    'item-aegis-of-the-immortal-first-hold',
+    'item-divine-rapier-first-hold',
+    'item-chase-first-hold',
+    'outworld-first-contact',
+    'outworld-all-clear'
+  ]);
+  for (const region of ALL_REGIONS) {
+    if (region.arrivalBeat) ids.add(region.arrivalBeat);
+  }
+  for (const gym of ALL_GYMS) ids.add(`badge-${gym.badgeId}`);
+  for (const raid of ALL_RAIDS) {
+    ids.add(`raid-intro-${raid.id}`);
+    ids.add(`raid-clear-${raid.id}`);
+    if (raid.id !== 'void-prelate' && raid.id !== 'last-eldwurm') ids.add(`raid-phase-${raid.id}`);
+  }
+  ALL_DRAFTS[0]?.members.forEach((_, index) => ids.add(`elite-persona-${index}`));
+  for (const event of ALL_SEASONAL_EVENTS) ids.add(event.cutsceneId);
+  for (const legend of ALL_LEGENDS) ids.add(legend.cutsceneId);
+  return ids;
+}
 const ITEM_WEAPON_VISUALS: ItemWeaponVisualKind[] = ['none', 'sword', 'staff', 'hook', 'totem', 'rifle', 'cleaver', 'broad-cleaver', 'glowing-blade', 'long-pole', 'storm-haft'];
 const ITEM_APPEARANCE_PARTS: ItemAppearancePart[] = ['pauldrons', 'heart-core', 'frost-shards', 'boot-trail', 'wing-blades', 'crystal-edge', 'mana-orb', 'hex-sigil', 'cloak', 'halo'];
 const ATTACK_VISUALS: AttackVisualKind[] = ['cleave-sweep', 'ranged-conversion', 'lightning-bounce', 'tinted-impact', 'crit-lunge', 'armor-shred-flash'];
@@ -692,8 +729,10 @@ describe('data lint: Phase 3 registries', () => {
       }
     }
     expect(ALL_CUTSCENES.length).toBeGreaterThanOrEqual(20);
+    const reachableScenes = reachableCutsceneIds();
     for (const scene of ALL_CUTSCENES) {
       expect(REG.cutscenes.has(scene.id), `${scene.id}: registered`).toBe(true);
+      expect(reachableScenes.has(scene.id), `${scene.id}: reachable from runtime call-sites`).toBe(true);
       expect(['setpiece', 'stinger', 'bark'], `${scene.id}: tier`).toContain(scene.tier);
       expect(scene.skippable, `${scene.id}: skippable`).toBe(true);
       expect(scene.beats.length, `${scene.id}: beats`).toBeGreaterThan(0);
@@ -736,6 +775,7 @@ describe('data lint: Phase 3 registries', () => {
         if (beat.line?.portraitHeroId && !beat.line.portraitHeroId.includes('{')) expect(REG.heroes.has(beat.line.portraitHeroId), `${scene.id}: portrait`).toBe(true);
       }
     }
+    for (const sceneId of reachableScenes) expect(REG.cutscenes.has(sceneId), `${sceneId}: runtime cutscene id`).toBe(true);
     expect(OUTWORLD_CLAIMANT_RAID_IDS.length).toBeGreaterThanOrEqual(6);
     for (const raidId of OUTWORLD_CLAIMANT_RAID_IDS) expect(REG.raids.has(raidId), `claimant ${raidId}`).toBe(true);
     expect(ALL_SEASONAL_EVENTS.length).toBeGreaterThanOrEqual(3);

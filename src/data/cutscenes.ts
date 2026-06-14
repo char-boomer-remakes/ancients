@@ -19,23 +19,27 @@ export const OUTWORLD_CLAIMANT_RAID_IDS = [
   'lord-of-hatred',
   'forsaken-queen'
 ];
+const BESPOKE_PHASE_RAID_IDS = new Set(['void-prelate', 'last-eldwurm']);
 
-const ACT_BREAKS: Record<string, { title: string; line: string; palette: string; mood: string }> = {
+const ACT_BREAKS: Record<string, { title: string; line: string; history: string; palette: string; mood: string }> = {
   'lunar-badge': {
     title: 'Act I - Echoes In The Shards',
     line: 'An Echo is not a ghost. It is a remembered champion, resolved long enough to ride with you.',
+    history: 'Flashback: a defeated Echo stills instead of dying, proof that binding resolves a memory from an older turn of the Loop.',
     palette: 'moonlit blue',
     mood: 'revelation'
   },
   'arcane-badge': {
     title: 'Act VI - The Scholars Name It',
     line: 'Quoidge gives the war its real name: Ancient falls, time resets, and Avaryn already chose to rule the cycle.',
+    history: 'Flashback: chalk circles, crater maps, and repeated Ancient-fall marks line up into the scholars\' first complete diagram of the Loop.',
     palette: 'arcane violet',
     mood: 'truth named'
   },
   'titan-badge': {
     title: 'Act VIII - The First Division',
     line: 'The Titan Badge is permission to approach the crater, and a warning: not every broken thing wants to be made whole.',
+    history: 'Flashback: bronze cliffs hold the first division of forces, warning that some fractures are prisons and some are protections.',
     palette: 'titan bronze',
     mood: 'permission'
   }
@@ -152,96 +156,72 @@ const RAID_CLEAR_DIRECTING: Record<string, { speaker: string; line: string; pale
   'last-eldwurm': { speaker: 'The Last Eldwurm', line: 'The ember folds low. The home-world answer has been heard.', palette: 'dragonfire dusk', vfx: '#ff7a2c' }
 };
 
-const PROLOGUE: CutsceneDef = {
+const PROLOGUE: CutsceneDef = compileCutsceneDsl(`
+  BEAT {
+    SHOT: bird-eye/hold/cold moonlight/held breath
+    STAGE: {DescribeEnvironment(location="The Mad Moon hangs whole over the Radiant shelf.", target="tower")}
+    HOLD: 2.2
+  }
+  BEAT {
+    SHOT: close/snap/white fracture/sundering
+    STAGE: {RevealMystery(mystery="A single crack becomes a sky of falling shards.", target="tower", vfx="dome", color="#d8f4ff")}
+    LINE: Narration : "They sealed the war inside the Moon. The war broke the Moon."
+    HOLD: 3.2
+  }
+  BEAT {
+    SHOT: high/pull-back/shard rain blue/world wounded
+    STAGE: {EstablishHistory(text="Shard-rain crosses every road the player will walk.", vfx="storm", color="#9db8ff")}
+    LINE: Narration : "The falling stones ring like bells, each one carrying a war that has already happened."
+    HOLD: 3.4
+  }
+  BEAT {
+    SHOT: low/push-in/dawn gold/awakening
+    STAGE: {AdvancePlot(text="At your feet, one shard remembers.", target="player", vfx="channel", color="#ffd86a")}
+    LINE: Narration : "Every shard still remembers it."
+    HOLD: 2.8
+    SOUND: capture
+  }
+`, {
   id: 'prologue-moon-breaks',
   title: 'The Moon Breaks',
   tier: 'setpiece',
   trigger: { kind: 'new-game' },
-  skippable: true,
-  letterbox: true,
-  music: 'silence',
   category: 'Prologue',
   replayable: true,
-  beats: [
-    {
-      shot: { angle: 'bird-eye', move: 'hold', palette: 'cold moonlight', mood: 'held breath' },
-      stage: [
-        { kind: 'describe-environment', text: 'The Mad Moon hangs whole over the Radiant shelf.' },
-        { kind: 'focus', target: 'tower' }
-      ],
-      hold: 2.2
-    },
-    {
-      shot: { angle: 'close', move: 'snap', palette: 'white fracture', mood: 'sundering' },
-      stage: [
-        { kind: 'reveal-mystery', text: 'A single crack becomes a sky of falling shards.', target: 'tower' },
-        { kind: 'vfx', archetype: 'dome', color: '#d8f4ff' }
-      ],
-      line: { speaker: 'Narration', text: 'They sealed the war inside the Moon. The war broke the Moon.' },
-      hold: 3.2
-    },
-    {
-      shot: { angle: 'high', move: 'pull-back', palette: 'shard rain blue', mood: 'world wounded' },
-      stage: [
-        { kind: 'establish-history', text: 'Shard-rain crosses every road the player will walk.' },
-        { kind: 'vfx', archetype: 'storm', color: '#9db8ff' }
-      ],
-      line: { speaker: 'Narration', text: 'The falling stones ring like bells, each one carrying a war that has already happened.' },
-      hold: 3.4
-    },
-    {
-      shot: { angle: 'low', move: 'push-in', palette: 'dawn gold', mood: 'awakening' },
-      stage: [
-        { kind: 'advance-plot', text: 'At your feet, one shard remembers.', target: 'player' },
-        { kind: 'vfx', archetype: 'channel', color: '#ffd86a' }
-      ],
-      line: { speaker: 'Narration', text: 'Every shard still remembers it.' },
-      sound: 'capture',
-      hold: 2.8
-    }
-  ]
-};
+  music: 'silence',
+  galleryCaption: 'Director note: opens on the intact Mad Moon, withholds the break until the crack, then turns the shard-rain into the sound motif that follows the player across the map.'
+});
 
-const BIND_FIRST: CutsceneDef = {
+const BIND_FIRST: CutsceneDef = compileCutsceneDsl(`
+  BEAT {
+    SHOT: over-the-shoulder/rack-focus/shard white/uncertain
+    STAGE: {DevelopCharacter(text="The defeated Echo does not fall. It flickers between hero and shard-light.", target="ally", gesture="channel-loop")}
+    LINE: {hero} : "{bark}"
+    HOLD: 3
+  }
+  BEAT {
+    SHOT: close/push-in/shard white/the bind
+    STAGE: {AdvancePlot(text="The shard-light reaches into the binder instead of consuming them.", target="player", vfx="channel", color="#d8f4ff")}
+    LINE: Narration : "It does not die. It remembers you now. The first war you will carry."
+    HOLD: 3.6
+    SOUND: capture
+  }
+  BEAT {
+    SHOT: wide/pull-back/two-shot gold/ally gained
+    STAGE: {DevelopCharacter(text="The Echo settles behind the player as a companion, not a captive.", target="ally", gesture="toggle-stance", vfx="global-mark", color="#ffd86a")}
+    LINE: Narration : "You do not recruit heroes. You recover the Moon, one remembered champion at a time."
+    HOLD: 3.4
+  }
+`, {
   id: 'bind-first',
   title: 'What You Are',
   tier: 'setpiece',
   trigger: { kind: 'bind', first: true },
-  skippable: true,
-  letterbox: true,
   category: 'Binds',
   replayable: true,
-  beats: [
-    {
-      shot: { angle: 'over-shoulder', move: 'rack-focus', palette: 'shard white', mood: 'uncertain' },
-      stage: [
-        { kind: 'develop-character', target: 'ally', text: 'The defeated Echo does not fall. It flickers between hero and shard-light.', gesture: 'channel-loop' },
-        { kind: 'focus', target: 'ally' }
-      ],
-      line: { speaker: '{hero}', text: '{bark}', portraitHeroId: '{heroId}' },
-      hold: 3
-    },
-    {
-      shot: { angle: 'close', move: 'push-in', palette: 'shard white', mood: 'the bind' },
-      stage: [
-        { kind: 'advance-plot', text: 'The shard-light reaches into the binder instead of consuming them.', target: 'player' },
-        { kind: 'vfx', archetype: 'channel', color: '#d8f4ff' }
-      ],
-      line: { speaker: 'Narration', text: 'It does not die. It remembers you now. The first war you will carry.' },
-      sound: 'capture',
-      hold: 3.6
-    },
-    {
-      shot: { angle: 'wide', move: 'pull-back', palette: 'two-shot gold', mood: 'ally gained' },
-      stage: [
-        { kind: 'develop-character', target: 'ally', text: 'The Echo settles behind the player as a companion, not a captive.', gesture: 'toggle-stance' },
-        { kind: 'vfx', archetype: 'global-mark', color: '#ffd86a' }
-      ],
-      line: { speaker: 'Narration', text: 'You do not recruit heroes. You recover the Moon, one remembered champion at a time.' },
-      hold: 3.4
-    }
-  ]
-};
+  galleryCaption: 'Director note: treats the first recruit as a reveal of the binder role, not a victory pose; the Echo stills, reaches, and joins as carried memory.'
+});
+BIND_FIRST.beats[0].line = { ...BIND_FIRST.beats[0].line!, portraitHeroId: '{heroId}' };
 
 const BIND_STINGER: CutsceneDef = {
   id: 'bind-stinger',
@@ -309,15 +289,22 @@ function badge(gym: (typeof ALL_GYMS)[number]): CutsceneDef {
   const act = ACT_BREAKS[gym.badgeId];
   const actBeats: CutsceneBeat[] = act ? [
     {
-      shot: { angle: 'high', move: 'pull-back', palette: act.palette, mood: act.mood },
-      stage: [{ kind: 'title', text: act.title }],
+      shot: { angle: 'high', move: 'pull-back', palette: `desaturated ${act.palette}`, mood: `${act.mood} flashback` },
+      stage: [
+        { kind: 'title', text: act.title },
+        { kind: 'establish-history', text: act.history },
+        { kind: 'vfx', archetype: 'dome', color: '#d8f4ff' }
+      ],
       line: { speaker: 'The Loop', text: act.line },
       sound: 'levelup',
       hold: 4.2
     },
     {
       shot: { angle: 'wide', move: 'push-in', palette: 'road opening', mood: 'deeper path' },
-      stage: [{ kind: 'focus', target: 'region' }],
+      stage: [
+        { kind: 'focus', target: 'region' },
+        { kind: 'explore-theme', text: 'The gate opens only after the flashback names what the badge changed.' }
+      ],
       line: { speaker: 'Journal', text: 'The road opens, and the war underneath it sounds closer.' },
       hold: 2.8
     }
@@ -331,6 +318,9 @@ function badge(gym: (typeof ALL_GYMS)[number]): CutsceneDef {
     letterbox: setpiece,
     category: 'Regions',
     replayable: true,
+    galleryCaption: act
+      ? `Director note: badge fanfare breaks into a desaturated Loop flashback before returning to the opened road: ${act.history}`
+      : undefined,
     beats: [
       {
         shot: { angle: 'title-card', move: 'hold', palette: 'badge gold', mood: 'earned' },
@@ -646,6 +636,8 @@ const ELITE_OPEN: CutsceneDef = {
   letterbox: true,
   category: 'Endgame',
   replayable: true,
+  requiredStaging: true,
+  galleryCaption: 'Director note: the climax never becomes a silent toast. Even under cut-scene-off settings, it keeps a shortened staged concession and Tower reveal before handing the Loop question back to the player.',
   beats: [
     {
       shot: { angle: 'wide', move: 'crane', palette: 'tower shadow', mood: 'final gate' },
@@ -726,6 +718,8 @@ const CHAMPION_CLEAR: CutsceneDef = {
   letterbox: true,
   category: 'Endgame',
   replayable: true,
+  requiredStaging: true,
+  galleryCaption: 'Director note: the climax never becomes a silent toast. Even under cut-scene-off settings, it keeps a shortened staged concession and Tower reveal before handing the Loop question back to the player.',
   beats: [
     {
       shot: { angle: 'low', move: 'pull-back', palette: 'radiant and dire', mood: 'concession' },
@@ -1149,7 +1143,7 @@ export const ALL_CUTSCENES: CutsceneDef[] = [
   ...REGIONS.map(arrival),
   ...ALL_GYMS.map(badge),
   ...ALL_RAIDS.map(raidIntro),
-  ...ALL_RAIDS.map(raidPhase),
+  ...ALL_RAIDS.filter((raid) => !BESPOKE_PHASE_RAID_IDS.has(raid.id)).map(raidPhase),
   ...ALL_RAIDS.map(raidClear),
   RAID_CLEAR,
   BOSS_CLEAR,

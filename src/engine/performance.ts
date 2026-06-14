@@ -8,14 +8,17 @@ export const PERFORMANCE_BUDGET = {
 } as const;
 
 export type QualityTier = 'low' | 'medium' | 'high' | 'ultra';
+export const QUALITY_TIERS: readonly QualityTier[] = ['low', 'medium', 'high', 'ultra'] as const;
 
 export interface QualityPreset {
   tier: QualityTier;
   maxPixelRatio: number;
   shadowMapSize: number;
   shadows: boolean;
+  staticPropShadows: boolean;
   shadowType: 'basic' | 'pcf';
   transientVfxCap: number;
+  fullRigAnimationBudget: number;
   // ---- Dota-look render features (GRAPHICS_SPEC §3, §9.6) ----
   /** PBR environment map for unit/terrain materials. */
   envMap: boolean;
@@ -27,7 +30,7 @@ export interface QualityPreset {
   bloomRadius: number;
   /** Color-grade + vignette pass. */
   grade: boolean;
-  /** Ambient occlusion pass (most expensive). */
+  /** Reserved for a future AO pass; keep false until the composer actually wires one. */
   ao: boolean;
   /** Post-AA pass (SMAA) inside the composer. */
   smaa: boolean;
@@ -41,8 +44,10 @@ export const QUALITY_PRESETS: Record<QualityTier, QualityPreset> = {
     maxPixelRatio: 1,
     shadowMapSize: 512,
     shadows: false,
+    staticPropShadows: false,
     shadowType: 'basic',
     transientVfxCap: 100,
+    fullRigAnimationBudget: 12,
     envMap: false,
     postFx: false,
     bloom: false,
@@ -58,8 +63,10 @@ export const QUALITY_PRESETS: Record<QualityTier, QualityPreset> = {
     maxPixelRatio: 1.5,
     shadowMapSize: 1024,
     shadows: true,
+    staticPropShadows: false,
     shadowType: 'basic',
     transientVfxCap: 160,
+    fullRigAnimationBudget: 20,
     envMap: true,
     postFx: true,
     bloom: true,
@@ -75,8 +82,10 @@ export const QUALITY_PRESETS: Record<QualityTier, QualityPreset> = {
     maxPixelRatio: PERFORMANCE_BUDGET.maxPixelRatio,
     shadowMapSize: PERFORMANCE_BUDGET.shadowMapSize,
     shadows: true,
+    staticPropShadows: false,
     shadowType: 'pcf',
     transientVfxCap: PERFORMANCE_BUDGET.transientVfxCap,
+    fullRigAnimationBudget: 32,
     envMap: true,
     postFx: true,
     bloom: true,
@@ -92,15 +101,17 @@ export const QUALITY_PRESETS: Record<QualityTier, QualityPreset> = {
     maxPixelRatio: PERFORMANCE_BUDGET.maxPixelRatio,
     shadowMapSize: 4096,
     shadows: true,
+    staticPropShadows: true,
     shadowType: 'pcf',
     transientVfxCap: 260,
+    fullRigAnimationBudget: 48,
     envMap: true,
     postFx: true,
     bloom: true,
     bloomStrength: 0.55,
     bloomRadius: 0.55,
     grade: true,
-    ao: true,
+    ao: false,
     smaa: true,
     weatherDensity: 1
   }
@@ -113,4 +124,15 @@ export function qualityPreset(tier: QualityTier = 'high'): QualityPreset {
 export function clampedPixelRatio(devicePixelRatio: number, tier: QualityTier = 'high'): number {
   const preset = qualityPreset(tier);
   return Math.min(preset.maxPixelRatio, Math.max(1, devicePixelRatio || 1));
+}
+
+export function lowerQualityTier(tier: QualityTier): QualityTier | null {
+  const idx = QUALITY_TIERS.indexOf(tier);
+  return idx > 0 ? QUALITY_TIERS[idx - 1] : null;
+}
+
+export function higherQualityTier(tier: QualityTier, ceiling: QualityTier): QualityTier | null {
+  const idx = QUALITY_TIERS.indexOf(tier);
+  const ceilingIdx = QUALITY_TIERS.indexOf(ceiling);
+  return idx >= 0 && idx < ceilingIdx ? QUALITY_TIERS[idx + 1] : null;
 }

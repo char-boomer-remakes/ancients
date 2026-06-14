@@ -8,6 +8,7 @@ import { ITEM_GRADES, levelReq, percentileForGrade, rollGrade, statMultiplier, t
 import { QUALITY_GRADES, nextQuality, rarityColor } from '../data/quality';
 import { applyLootFilter, DEFAULT_LOOT_FILTER, type LootFilterRule } from './loot-filter';
 import { REG } from '../core/registry';
+import { buildAbilityCard } from '../core/describe';
 import { Sim } from '../core/sim';
 import { Unit } from '../core/unit';
 import { applyElementAura, healUnit } from '../core/combat';
@@ -384,9 +385,10 @@ export interface SceneLike {
   update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView?: CinematicView | null): void;
   resetUnitViews?(): void;
   setDungeonRoom?(template: RoomTemplate | null, room?: DungeonRoom | null): void;
+  showOrderFeedback?(point: Vec2, kind: 'move' | 'attack-move' | 'attack-unit', queued?: boolean): void;
   /** Optional (real GameScene only): live graphics-settings hooks (§6). */
   setQuality?(tier: QualityTier): void;
-  setGraphics?(g: { exposure?: number; grade?: number; reducedMotion?: boolean }): void;
+  setGraphics?(g: { exposure?: number; grade?: number; reducedMotion?: boolean; autoAdjustQuality?: boolean; frameTarget?: 30 | 60 }): void;
   /** Optional (real GameScene only): pre-compile shaders behind a loading screen. */
   prewarm?(): void;
   dispose?(): void;
@@ -1346,6 +1348,32 @@ export class Game {
     return true;
   }
 
+  private cutsceneGalleryCaption(def: CutsceneDef): string {
+    if (def.galleryCaption) return def.galleryCaption;
+    const stage = def.beats
+      .flatMap((beat) => beat.stage ?? [])
+      .map((action) => {
+        if (action.kind === 'title') return action.text;
+        if ('text' in action) return action.text;
+        if (action.kind === 'focus') return `Focus: ${action.target}`;
+        if (action.kind === 'vfx') return `${action.archetype} VFX`;
+        if (action.kind === 'gesture') return `${action.target} ${action.gesture}`;
+        return '';
+      })
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(' / ');
+    const shots = def.beats
+      .map((beat) => `${beat.shot.angle}/${beat.shot.move}`)
+      .slice(0, 3)
+      .join(' -> ');
+    const line = def.beats.find((beat) => beat.line)?.line?.text.replace(/\{[^}]+\}/g, '...');
+    const parts = [`Director note: ${stage || 'stages the milestone as a directed beat'}`];
+    if (shots) parts.push(`Shots: ${shots}.`);
+    if (line) parts.push(`Key line: "${line}"`);
+    return parts.join(' ');
+  }
+
   /** Spoiler-safe gallery view-model: seen replayable scenes are replayable; the rest show locked. */
   cinematicGallery(): { category: string; entries: { id: string; title: string; tier: string; seen: boolean; caption: string }[] }[] {
     const groups = new Map<string, { id: string; title: string; tier: string; seen: boolean; caption: string }[]>();
@@ -1353,9 +1381,8 @@ export class Game {
       if (!def.replayable) continue;
       const category = def.category ?? 'Other';
       const seen = this.journalSeen.has(`cinematic:${def.id}`);
-      const beat = def.beats[0];
       const caption = seen
-        ? `${beat.shot.palette} · ${beat.shot.mood}${beat.line ? ` — “${beat.line.text.replace(/\{[^}]+\}/g, '…')}”` : ''}`
+        ? this.cutsceneGalleryCaption(def)
         : 'Locked — reach this moment to record it.';
       const title = seen ? def.title.replace(/\{[^}]+\}/g, '…') : `??? (${category})`;
       const list = groups.get(category) ?? [];
@@ -1432,7 +1459,13 @@ export class Game {
    *  the scene. Cheap — safe to call on every slider change. No-op headless. */
   applyGraphics(): void {
     const g = this.settings.graphics ?? defaultGraphicsSettings();
-    this.scene.setGraphics?.({ exposure: g.exposure, grade: g.grade, reducedMotion: g.reducedMotion });
+    this.scene.setGraphics?.({
+      exposure: g.exposure,
+      grade: g.grade,
+      reducedMotion: g.reducedMotion,
+      autoAdjustQuality: g.autoAdjustQuality,
+      frameTarget: g.frameTarget
+    });
   }
 
   /** Change the render quality tier at runtime (heavy: rebuilds the post stack,
@@ -2753,7 +2786,7 @@ export class Game {
       lore: string;
       owned: boolean;
       level: number | null;
-      abilities: { name: string; ult: boolean; lore: string; cooldown: string; manaCost: string }[];
+      abilities: { name: string; ult: boolean; kind: string; lore: string; effect: string[]; cooldown: string; manaCost: string }[];
       talents: { level: number; options: [string, string]; picked: 0 | 1 | null }[];
       facets: { name: string; description: string }[];
       aghs: { name: string; description: string; implemented: boolean } | null;
@@ -2774,13 +2807,18 @@ export class Game {
           lore: h.lore,
           owned: !!save,
           level: save?.level ?? null,
-          abilities: h.abilities.map((a) => ({
-            name: a.name,
-            ult: !!a.ult,
-            lore: a.lore ?? '',
-            cooldown: a.cooldown && a.cooldown.length > 0 ? a.cooldown.join('/') + 's' : '—',
-            manaCost: a.manaCost && a.manaCost.length > 0 ? a.manaCost.join('/') : '—'
-          })),
+          abilities: h.abilities.map((a) => {
+            const card = buildAbilityCard(a);
+            return {
+              name: a.name,
+              ult: !!a.ult,
+              kind: card.kind,
+              lore: a.lore ?? '',
+              effect: card.effect,
+              cooldown: a.cooldown && a.cooldown.length > 0 ? a.cooldown.join('/') + 's' : '—',
+              manaCost: a.manaCost && a.manaCost.length > 0 ? a.manaCost.join('/') : '—'
+            };
+          }),
           talents: h.talents.map((t, i) => ({
             level: t.level,
             options: [t.options[0].name, t.options[1].name] as [string, string],
@@ -4629,18 +4667,60 @@ export class Game {
 
   // ---------- orders from input ----------
 
-  private issueOrder(order: Order, queued = false): void {
+  private issueOrder(order: Order, queued = false, feedback = true): void {
     const sim = this.inputSim();
     let u = this.controlledUnit();
     if (this.liveRaid) u = this.liveRaid.claimDriver();
     if (!u || !u.alive) return;
+    const safeOrder = this.sanitizeOrderPoint(sim, u, order);
+    if (feedback) this.showOrderFeedback(sim, safeOrder, queued);
     if (queued) {
-      this.queuedOrders.push(order);
-      this.msg(`Queued ${order.kind.replace('-', ' ')}`, 'info');
+      this.queuedOrders.push(safeOrder);
+      this.msg(`Queued ${safeOrder.kind.replace('-', ' ')}`, 'info');
       return;
     }
     this.queuedOrders = [];
-    sim.order(u.uid, order);
+    sim.order(u.uid, safeOrder);
+  }
+
+  private showOrderFeedback(sim: Sim, order: Order, queued: boolean): void {
+    if (order.kind === 'move' || order.kind === 'attack-move') {
+      this.scene.showOrderFeedback?.(order.point, order.kind, queued);
+      return;
+    }
+    if (order.kind === 'attack-unit') {
+      const target = sim.unit(order.uid);
+      if (target) this.scene.showOrderFeedback?.(target.pos, 'attack-unit', queued);
+    }
+  }
+
+  private sanitizeOrderPoint(sim: Sim, u: Unit, order: Order): Order {
+    if (order.kind !== 'move' && order.kind !== 'attack-move') return order;
+    return { ...order, point: this.nearestWalkablePoint(sim, u, order.point) };
+  }
+
+  private nearestWalkablePoint(sim: Sim, u: Unit, point: Vec2): Vec2 {
+    const out = { ...point };
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = false;
+      for (const obstacle of sim.obstacles) {
+        const minD = obstacle.radius + u.radius + 10;
+        const dx = out.x - obstacle.pos.x;
+        const dy = out.y - obstacle.pos.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= minD * minD) continue;
+        const d = Math.sqrt(d2);
+        const dir = d > 1e-6 ? { x: dx / d, y: dy / d } : norm(sub(u.pos, obstacle.pos));
+        const safeDir = dir.x === 0 && dir.y === 0 ? fromAngle(u.facing) : dir;
+        out.x = obstacle.pos.x + safeDir.x * minD;
+        out.y = obstacle.pos.y + safeDir.y * minD;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+    out.x = Math.max(u.radius, Math.min(sim.bounds.w - u.radius, out.x));
+    out.y = Math.max(u.radius, Math.min(sim.bounds.h - u.radius, out.y));
+    return out;
   }
 
   private advanceQueuedOrder(): void {
@@ -4651,8 +4731,8 @@ export class Game {
     sim.order(u.uid, this.queuedOrders.shift()!);
   }
 
-  orderMove(point: Vec2, queued = false): void {
-    this.issueOrder({ kind: 'move', point }, queued);
+  orderMove(point: Vec2, queued = false, feedback = true): void {
+    this.issueOrder({ kind: 'move', point }, queued, feedback);
   }
 
   orderAttack(uid: number, queued = false): void {

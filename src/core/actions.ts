@@ -1,5 +1,5 @@
 import { TUNING } from '../data/tuning';
-import { dist, dist2, v2 } from './math2d';
+import { dist, dist2, pointSegDist, v2 } from './math2d';
 import { attackImpact } from './combat';
 import { execEffects, type EffectCtx } from './effects';
 import { REG } from './registry';
@@ -134,7 +134,7 @@ export function updateUnitActions(sim: Sim, u: Unit, dt: number): void {
       break;
     }
     case 'attack-move': {
-      const enemy = nearestEnemy(sim, u, TUNING.attackMoveAcquireRadius);
+      const enemy = nearestEnemyOnAttackMovePath(sim, u, u.order.point);
       if (enemy) {
         pursueAndAttack(sim, u, enemy, dt);
       } else {
@@ -194,6 +194,21 @@ export function nearestEnemy(sim: Sim, u: Unit, radius: number): Unit | null {
     u.pos,
     radius,
     (o) => o.alive && o.team !== u.team && o.kind !== 'npc' && !o.summary.untargetable && o.isVisibleTo(u.team, sim.time)
+  );
+}
+
+function nearestEnemyOnAttackMovePath(sim: Sim, u: Unit, point: { x: number; y: number }): Unit | null {
+  const pathWidth = Math.max(TUNING.attackMovePathWidth, u.radius + TUNING.meleeRangeBuffer);
+  return sim.nearestUnit(
+    u.pos,
+    TUNING.attackMoveAcquireRadius,
+    (o) =>
+      o.alive &&
+      o.team !== u.team &&
+      o.kind !== 'npc' &&
+      !o.summary.untargetable &&
+      o.isVisibleTo(u.team, sim.time) &&
+      pointSegDist(o.pos, u.pos, point) <= pathWidth + o.radius
   );
 }
 

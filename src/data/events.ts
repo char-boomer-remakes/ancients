@@ -125,10 +125,10 @@ export const ALL_LEGENDS: LegendDef[] = [
     id: 'hooked-home',
     name: 'Hooked Home',
     realMoment: 'TI3: Fountain Hook',
-    triggerSummary: 'Pudge and a recall effect turn a hook into a homecoming trap.',
+    triggerSummary: 'Pudge turns a hook into a base-zone homecoming trap.',
     cutsceneId: 'legend-hooked-home',
     codexTitle: 'Hooked Home',
-    codexBody: 'A hook is usually a straight line. One famous turn of the Loop made it a door. The binder who repeats the trick earns the wink.'
+    codexBody: 'A hook is usually a straight line. One famous turn of the Loop made it a door. In this telling, the wink lands when a hooked enemy dies in the binder\'s own fountain ground.'
   },
   {
     id: 'call-paid-out',
@@ -143,10 +143,10 @@ export const ALL_LEGENDS: LegendDef[] = [
     id: 'coil-closed-game',
     name: 'The Coil That Closed the Game',
     realMoment: 'TI3: the Million-Dollar Dream Coil',
-    triggerSummary: 'Puck catches multiple enemies in a decisive Dream Coil.',
+    triggerSummary: 'Puck catches multiple enemies while at least one is trying to move, cast, or escape.',
     cutsceneId: 'legend-coil-closed-game',
     codexTitle: 'The Coil That Closed the Game',
-    codexBody: 'A circle can be a door closing. Puck\'s old trick is not that it hurts; it is that it tells escape to wait one heartbeat too long.'
+    codexBody: 'A circle can be a door closing. The sim has no teleport-channel event, so this homage keys off the closest playable truth: Dream Coil catches enemies mid-action and tells escape to wait one heartbeat too long.'
   },
   {
     id: 'rampage',

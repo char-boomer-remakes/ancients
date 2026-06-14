@@ -117,6 +117,7 @@ export const JUGGERNAUT: HeroDef = {
       id: 'jug-omnislash',
       name: 'Omnislash',
       lore: 'For three breaths, Yurnero is everywhere a sword can be.',
+      description: 'Become untargetable and invulnerable, then blink-strike random nearby enemies 4/7/10 times. Each slash deals 30/45/60 plus 100% of attack damage as physical damage.',
       targeting: 'unit-target',
       affects: 'enemy',
       ult: true,

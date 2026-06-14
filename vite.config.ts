@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   base: './',
   server: {
+    open: true,
     // the embedded preview browser caches modules too aggressively
     headers: { 'Cache-Control': 'no-store' }
   },

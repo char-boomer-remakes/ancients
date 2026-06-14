@@ -320,6 +320,8 @@ export type GraphicsQuality = 'auto' | 'low' | 'medium' | 'high' | 'ultra';
 
 export interface GraphicsSettings {
   quality: GraphicsQuality;
+  autoAdjustQuality: boolean; // lets the renderer lower DPR/tier under sustained frame-budget misses
+  frameTarget: 30 | 60;       // adaptive setpoint; macro simulation remains fixed-step
   exposure: number;      // tonemapping exposure, 0.5..1.5 (default 0.92)
   grade: number;         // color-grade strength, 0..1.5 (default 1)
   reducedMotion: boolean; // freezes ambient particle/water motion
@@ -341,6 +343,8 @@ export interface AbilityDef {
   id: string;
   name: string;
   lore?: string;
+  /** Authored "what it does" summary. Overrides the auto-generated description (src/core/describe.ts). */
+  description?: string;
   targeting: BaseTargeting;
   affects?: 'enemy' | 'ally' | 'any';   // unit-target filter
   ult?: boolean;
@@ -636,6 +640,8 @@ export interface ItemDef {
   triggers?: TriggerSpec[];
   damageLockoutSec?: number;   // Blink Dagger: unusable after taking enemy damage
   lore: string;
+  /** Authored "what it does" summary. Overrides the auto-generated description (src/core/describe.ts). */
+  description?: string;
   glyph?: string;              // icon generator hint
   appearance?: ItemAppearanceSpec;
   attackVisual?: AttackVisualSpec[];
@@ -770,6 +776,10 @@ export interface CutsceneDef {
   beats: CutsceneBeat[];
   replayable?: boolean;
   category?: 'Prologue' | 'Binds' | 'Regions' | 'Bosses' | 'Raids' | 'Items' | 'Endgame' | 'Claimants' | 'Festivals' | 'Legends';
+  /** Gallery-facing director commentary. Falls back to shot/line metadata when absent. */
+  galleryCaption?: string;
+  /** True for climax beats that settings may shorten, but never collapse into a silent toast. */
+  requiredStaging?: boolean;
 }
 
 // ---------- Event tie-ins ----------
@@ -956,6 +966,8 @@ export interface NeutralItemDef {
   enchantsInto?: string;
   dropFromTier: CreepTier;
   lore: string;
+  /** Authored "what it does" summary. Overrides the auto-generated description (src/core/describe.ts). */
+  description?: string;
   glyph?: string;
 }
 

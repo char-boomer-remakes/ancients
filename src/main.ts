@@ -7,6 +7,7 @@ import { debugEnabled, mountDebugPanel } from './systems/debug';
 import {
   installTestApi,
   testEnabled,
+  testHudEnabled,
   testRenderHeadless,
   testSeed,
   testStarterHero
@@ -79,19 +80,29 @@ function teardown(): void {
   unmountDebug = null;
 }
 
+function updateUiOnce(): void {
+  const pickableScene = game?.scene as unknown as { pick?: unknown } | undefined;
+  if (typeof pickableScene?.pick === 'function') input?.update();
+  hud?.update();
+}
+
 // Headless-render boot for the QA harness (?test&render=headless): build the
-// real Game orchestrator over the no-op scene/audio so tests exercise all
-// gameplay logic without WebGL, without the loading screen, and without a rAF
-// loop (the harness steps time deterministically via __test.fastForward).
-function startGameHeadless(save: GameSave): void {
+// real Game orchestrator over the no-op scene/audio so tests exercise gameplay
+// logic without WebGL. DOM-focused tests can opt into the real HUD with ?hud=1.
+function startGameHeadless(save: GameSave, opts: { hud?: boolean } = {}): void {
   teardown();
   game = new Game(canvas, save, { scene: new HeadlessScene(), audio: new HeadlessAudio() });
   (window as unknown as { __game: Game }).__game = game;
+  if (opts.hud) {
+    input = new InputController(game, canvas);
+    hud = new Hud(game, input, () => undefined);
+    updateUiOnce();
+  }
 }
 
-function startGame(save: GameSave, opts: { headless?: boolean } = {}): void {
+function startGame(save: GameSave, opts: { headless?: boolean; hud?: boolean } = {}): void {
   if (opts.headless) {
-    startGameHeadless(save);
+    startGameHeadless(save, { hud: opts.hud });
     return;
   }
   teardown();
@@ -169,10 +180,11 @@ function boot(): void {
 }
 
 const HEADLESS_RENDER = testEnabled() && testRenderHeadless();
+const TEST_HUD = testEnabled() && testHudEnabled();
 
 window.addEventListener('ancients:load', (e) => {
   const save = (e as CustomEvent<GameSave>).detail;
-  startGame(save, { headless: HEADLESS_RENDER });
+  startGame(save, { headless: HEADLESS_RENDER, hud: TEST_HUD });
 });
 
 if (testEnabled()) {
@@ -180,7 +192,9 @@ if (testEnabled()) {
     getGame: () => game,
     start: (save, opts) => startGame(save, opts),
     load: (save) => window.dispatchEvent(new CustomEvent('ancients:load', { detail: save })),
-    headless: HEADLESS_RENDER
+    headless: HEADLESS_RENDER,
+    hud: TEST_HUD,
+    updateUi: updateUiOnce
   });
   const region = new URLSearchParams(location.search).get('region') ?? undefined;
   (window as unknown as { __test: { startNewGame: (o: object) => void } }).__test.startNewGame({

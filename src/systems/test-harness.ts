@@ -35,6 +35,11 @@ export function testRenderHeadless(): boolean {
   return params().get('render') === 'headless';
 }
 
+/** Mount the real HUD/input over the headless scene for DOM-focused browser tests. */
+export function testHudEnabled(): boolean {
+  return params().get('hud') === '1';
+}
+
 /** Starter hero for the auto-boot game (?hero=...), defaults to juggernaut. */
 export function testStarterHero(): string {
   const h = params().get('hero');
@@ -146,9 +151,11 @@ export interface TestApi {
 
 export interface HarnessDeps {
   getGame: () => Game | null;
-  start: (save: GameSave, opts?: { headless?: boolean }) => void;
+  start: (save: GameSave, opts?: { headless?: boolean; hud?: boolean }) => void;
   load: (save: GameSave) => void;
   headless: boolean;
+  hud?: boolean;
+  updateUi?: () => void;
 }
 
 function buildNewGameSave(opts: NewGameOpts): GameSave {
@@ -173,19 +180,23 @@ export function makeTestApi(deps: HarnessDeps): TestApi {
     game: () => deps.getGame(),
     newGameSave: (heroId = 'juggernaut') => newGameSave(REG.heroes.has(heroId) ? heroId : 'juggernaut'),
     startNewGame: (opts = {}) => {
-      deps.start(buildNewGameSave(opts), { headless: opts.headless ?? deps.headless });
+      deps.start(buildNewGameSave(opts), { headless: opts.headless ?? deps.headless, hud: deps.hud });
     },
-    start: (save, opts) => deps.start(save, { headless: opts?.headless ?? deps.headless }),
+    start: (save, opts) => deps.start(save, { headless: opts?.headless ?? deps.headless, hud: deps.hud }),
     load: (save) => deps.load(save),
     fastForward: (seconds, stepMs = 1000 / 30) => {
       const game = deps.getGame();
       if (!game) return;
       const stepSec = stepMs / 1000;
       const steps = Math.max(1, Math.ceil(seconds / stepSec));
-      for (let i = 0; i < steps; i++) game.update(stepSec);
+      for (let i = 0; i < steps; i++) {
+        game.update(stepSec);
+        deps.updateUi?.();
+      }
     },
     step: (stepMs = 1000 / 30) => {
       deps.getGame()?.update(stepMs / 1000);
+      deps.updateUi?.();
     },
     addGold: (n) => {
       const game = deps.getGame();

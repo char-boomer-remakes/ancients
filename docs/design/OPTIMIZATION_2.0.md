@@ -111,7 +111,7 @@ Run the `?debug` HUD on the fixed browser smoke route (`PERFORMANCE_PLAN.md`
 likely culprit because it is full-screen fill. Capture a Spector.js trace once to
 confirm. No render change in §A lands without this classification first.
 
-### A.2 Cut draw calls where units repeat
+### A.2 Cut draw calls where units repeat — [free]
 
 The renderer mounts one rig per unit. Camps, summon armies, illusions, brewlings,
 clones, and raid add waves put many copies of the same silhouette on screen at
@@ -126,7 +126,7 @@ units:
   awkward (`OPTIMIZATION_SPEC.md` §F still holds), so the realistic win is shared
   skeletons + instanced static far-LOD, not one instanced draw call per body.
 
-### A.3 Tame the post stack by tier
+### A.3 Tame the post stack by tier — [dial]
 
 Bloom and AO are fill-rate heavy and scale with resolution, not scene
 complexity. The presets already gate AO to ultra and post-FX off at low
@@ -139,14 +139,14 @@ complexity. The presets already gate AO to ultra and post-FX off at low
 - Measure SMAA against off at medium; if the cost outweighs the read on the target
   machine, drop it a tier.
 
-### A.4 Shadow budget
+### A.4 Shadow budget — [dial] (frustum-cull casters is [free])
 
 Shadows are a second scene draw. `shadowMapSize` already steps by tier (512 → 4096).
 Add: let static props receive shadows without casting them, cull shadow casters to
 the camera frustum, and consider baking terrain-prop shadows since they do not
 move. The goal is a flat shadow cost as the unit count grows.
 
-### A.5 Adaptive quality 2.0 (close the loop)
+### A.5 Adaptive quality 2.0 (close the loop) — [dial] (the auto-controller for every other dial)
 
 `scene.ts` already runs `updateAdaptiveDpr` off a 180-sample frame-time window.
 Promote that from a DPR-only knob to a closed feedback controller that steps whole
@@ -155,7 +155,7 @@ resolution, then SMAA, with hysteresis and a cooldown so it settles instead of
 oscillating. A hitch should degrade gracefully and recover, the way the spike
 clamp degrades the sim to slow-mo instead of a death spiral.
 
-### A.6 Cull and skip off-screen work
+### A.6 Cull and skip off-screen work — [free]
 
 LOD freezes far animation (`lod.ts`), which is good. Add frustum/distance culling
 so off-screen unit rigs and VFX skip their per-frame transform and material work
@@ -169,7 +169,7 @@ plus an entourage; most of it is off-camera at any moment.
 Authored creeps and heroes run skeletal animation now. At 30+ animated units this
 is real CPU, even when loading and GPU are solved.
 
-### B.1 Gate the mixer, not just the pose
+### B.1 Gate the mixer, not just the pose — [free]
 
 `updateView` already skips `animateRig` for reduced/culled LOD tiers
 (`scene.ts:1139`). Extend the same gate to the glTF `AnimationMixer.update` and to
@@ -177,14 +177,14 @@ cosmetic wobble, so a far authored creep pays nothing for animation. Reduced uni
 animate every other frame; culled units freeze. Audit bone counts per asset in the
 build report (`PERFORMANCE_PLAN.md` §2.6).
 
-### B.2 Crowd views for armies and illusions
+### B.2 Crowd views for armies and illusions — [dial]
 
 Summoner playstyles and illusion-heavy kits are a 2.0 reality the original budget
 did not model. Give large same-type groups a cheaper view: shared skeleton, far
 copies as impostors or static-pose instances, full rigs only for the near few.
 Tie the count to a `TUNING` ceiling so a Necromancer army has a defined cost.
 
-### B.3 Stop mutating shared materials (correctness + perf)
+### B.3 Stop mutating shared materials (correctness + perf) — [free]
 
 `updateView` sets `m.transparent`/`m.opacity` on `rig.materials` for invis and
 fade (`scene.ts:1150`). With the 1.0 material-sharing cache, those materials may be
@@ -193,7 +193,7 @@ extra shader state. Audit the share boundary: clone a material only when a unit
 needs unique opacity/tint/effect state, and restore the shared instance when the
 effect ends. This is both a latent visual bug and a draw-call multiplier.
 
-### B.4 Finish the visual-epoch counter (carried from 1.0 B.4)
+### B.4 Finish the visual-epoch counter (carried from 1.0 B.4) — [free]
 
 `itemVisualKey` still builds a `map().join('|')` string per unit per frame to
 detect equipment changes (`scene.ts:1112`). Bump a `visualEpoch` integer on the
@@ -210,21 +210,21 @@ zones → repeaters → auras → regen, with resonance, status reactions, and i
 auras layered in. None of this is hot today; the work here is staying ahead of the
 roster and fight sizes 2.0 enables.
 
-### C.1 Reuse the spatial rebuild
+### C.1 Reuse the spatial rebuild — [free]
 
 Two full rebuilds per tick is the safe default (positions change after movement).
 Measure whether the post-movement rebuild can be a dirty update of moved units
 only, or whether the pre-think rebuild can be skipped when nothing moved last tick.
 Keep stable query ordering so the determinism hash never shifts.
 
-### C.2 Budget the new per-tick systems
+### C.2 Budget the new per-tick systems — [free]
 
 Resonance reactions, status ticks, and set-bonus auras each scan units. Route
 their radius work through the existing grid (the AI clustering already does), give
 them think-cadence staggering like the AI, and confirm they are off the per-frame
 path entirely when their feature is disabled (resonance can be toggled off).
 
-### C.3 Move the sim to a Web Worker (the big structural win)
+### C.3 Move the sim to a Web Worker (the big structural win) — [free]
 
 The headless core is already walled off from `three` and the DOM. That boundary
 makes it the ideal candidate to run on its own thread. Run the 30 Hz sim in a
@@ -235,7 +235,7 @@ host does. This is the single largest main-thread win available and it directly
 serves the GPU-bound reality from §0. Risks live in §H: snapshot transfer cost,
 input-to-tick latency, and keeping the worker boundary deterministic.
 
-### C.4 Raise and document the unit ceiling
+### C.4 Raise and document the unit ceiling — [dial]
 
 With §A–§C headroom, set and document a supported unit ceiling for the overworld
 and for raids, and add `TUNING` caps for summons and illusions so the worst case
@@ -249,7 +249,7 @@ is bounded rather than discovered in a frame drop.
 cache. 2.0 adds the pieces that surface once many regions, dungeons, raids, and
 cut-scenes ship in one session.
 
-### D.1 A GPU memory ceiling with eviction
+### D.1 A GPU memory ceiling with eviction — [free]
 
 Implement the cache lifecycle from `PERFORMANCE_PLAN.md` §2.4: strong cache for
 the current scene, small warm cache for likely-next assets, eviction on region
@@ -257,13 +257,13 @@ change past a threshold, and real GPU disposal (textures, geometries, materials,
 PMREM) with reference counting for cloned source assets. Surface the counters in
 the `?debug` HUD (it already shows cache sizes and hits).
 
-### D.2 KTX2 / Basis for textures
+### D.2 KTX2 / Basis for textures — [free]
 
 Once image decode or GPU upload shows up in a profile, adopt KTX2/Basis for
 terrain and model textures to cut decode time and VRAM, with the transcoder kept
 local. Until a profile proves it, this stays a note (`PERFORMANCE_PLAN.md` §2.2).
 
-### D.3 Scene-lifecycle leak guard
+### D.3 Scene-lifecycle leak guard — [free]
 
 The game now builds and tears down many scene types: overworld regions, gym
 fights, raids, multi-room dungeons, and cut-scene stages. `scene.ts` disposes the
@@ -273,14 +273,14 @@ Guard every async asset `.then` with a scene token so a late load cannot mount
 into a disposed scene. Add the region-cycle stress test (`PERFORMANCE_PLAN.md`
 §2.7): A → B → A repeatedly, watch object counts and GPU memory stay flat.
 
-### D.4 Code-split the heavy, rarely-first modules
+### D.4 Code-split the heavy, rarely-first modules — [free]
 
 Cut the time-to-first-frame and the main bundle by lazy-loading modules that are
 not needed at boot: cinematics/cut-scene DSL, dungeon and raid sessions, seasonal
 modes, and heavy `three` addons. The loading screen already covers scene warm-up,
 so a lazy import behind it is invisible to the player.
 
-### D.5 Extend prewarm to authored materials and the post stack
+### D.5 Extend prewarm to authored materials and the post stack — [free]
 
 `GameScene.prewarm()` compiles the scene before the loading screen fades. Extend
 it to authored GLB materials and every post-processing program for the loaded
@@ -293,7 +293,7 @@ region so the first interactive frame after region entry has no shader hitch.
 Performance work is the means; a better-feeling game is the point. Each item below
 spends the budget §A–§D frees.
 
-### E.1 Bigger, readable fights
+### E.1 Bigger, readable fights — [dial]
 
 Once units are cheaper to render and the sim runs off-thread, raise the live unit
 counts that make the fantasy land: full summoner armies, denser raid add waves,
@@ -301,35 +301,35 @@ larger dungeon packs, deeper endless-mode escalation. Pair every raise with the
 readability work (clear silhouettes, telegraph decals already exist) so a big
 fight stays legible, not just possible.
 
-### E.2 A smarter AI with the freed cycles
+### E.2 A smarter AI with the freed cycles — [dial]
 
 The AI 2.0 pass already generalized item usage, mana budgeting, and combo windows,
 and routes clustering through the grid. With sim headroom it can think more often
 and consider more threats per decision without missing budget, which sharpens gym,
 Elite, and raid fights. Spend §C savings on AI quality, not idle margin.
 
-### E.3 A more continuous world
+### E.3 A more continuous world — [dial]
 
 Use the asset cache and prewarm (§D, `PERFORMANCE_PLAN.md` §2.3) to stream the
 overworld so region borders feel like travel rather than a loading wall, and so
 the camera can see further without a draw-call cliff (gated by §A.2 instancing and
 §A.6 culling).
 
-### E.4 Input latency and spike behavior
+### E.4 Input latency and spike behavior — [free]
 
 The fixed-step clamp keeps a hitch from spiraling. With the worker sim (§C.3),
 re-verify input-to-action latency: an order issued mid-frame should apply on the
 very next tick, and the snapshot interpolation must not make the active hero feel
 laggy on sharp turns. Cheap to check, high perceived value.
 
-### E.5 More VFX within budget
+### E.5 More VFX within budget — [dial]
 
 The projectile pool and additive glow language make particles cheap to add.
 Within the 200-particle budget there is room for richer signature spells and
 reaction effects (resonance Vaporize/Freeze reads), now that adding them does not
 thrash GC.
 
-### E.6 Performance as fairness
+### E.6 Performance as fairness — [free]
 
 Gym and Elite fights resolve on the fixed-step core, so their outcome is
 framerate-independent by construction. Keep it that way: assert in a test that a
@@ -338,33 +338,122 @@ timing, so "my framerate dropped and I lost" can never be true.
 
 ---
 
-## F. TESTING & MEASUREMENT 2.0
+## F. PLAYER-FACING OPTIONS — LET THE PLAYER BALANCE IT
+
+The **[dial]** items above are trade-offs, and the player's hardware and taste are
+the missing input. Rather than guess one global point, expose the dials in the
+options menu and let the player choose. A laptop on battery picks frames; a
+desktop with a good GPU picks fidelity; someone who wants a 100-unit army accepts
+a lower tier to get it. The default tier picks a sane middle and the adaptive
+controller (§A.5) catches the worst case, so a player who never opens the menu is
+still fine.
+
+### F.0 What already exists (build on it, don't rebuild)
+
+The settings spine is in place and is the hook for everything here:
+
+- `GraphicsSettings` and `CutsceneSettings` in `src/core/types.ts`, stored in
+  `GameSave.settings`, with defaults + migration backfill in `src/core/phase4.ts`
+  so old saves load clean.
+- The menu modal in `src/ui/hud.ts` already renders **Options** (quick-cast,
+  resonance, mute, master/sfx/voice/stinger volume), **Graphics** (quality
+  `auto/low/medium/high/ultra`, exposure, color grade, reduced motion), and
+  **Cut-scenes** (length, speed, always-skip, limit flashes, tie-ins).
+- Live-apply paths exist: `Game.setQualityTier` (leak-free runtime tier rebuild),
+  `Game.applyGraphics` (exposure / grade / reduced-motion), and
+  `Game.applyCutsceneSettings`. `scene.ts` `setQuality`/`setGraphics` do the work.
+- The boundary is already respected: `GraphicsQuality` is mirrored in core as a
+  plain string union so `src/core/` never imports the renderer.
+
+So adding an option is: add a field to the settings interface, a default +
+migration line, a control in the menu, and a live-apply call. The plumbing is
+solved.
+
+### F.1 New graphics / performance options (the §A–§B dials)
+
+| Option | Controls | From | Default | Live-apply |
+|--------|----------|------|---------|------------|
+| Quality tier (exists) | the master preset: post depth, shadows, VFX cap, DPR | A.3–A.5 | auto | `setQualityTier` |
+| Auto-adjust quality | turns the adaptive controller on/off; when on, tier is a ceiling | A.5 | on | scene flag |
+| Bloom | off / low / high (overrides tier) | A.3 | tier | `setGraphics` |
+| Ambient occlusion | off / on | A.3 | tier (ultra) | `setQuality` rebuild |
+| Anti-aliasing (SMAA) | off / on | A.3 | tier | `setQuality` rebuild |
+| Shadows | off / low / high | A.4 | tier | `setQuality` rebuild |
+| Draw distance | how far units/props render before cull | A.6, E.3 | medium | scene cull radius |
+| Army / crowd detail | full rigs / near-full + far impostors / reduced | B.2 | auto | view builder |
+| VFX density | particle + transient cap scale (0.5×–1.5×) | E.5 | tier | `vfx` cap |
+| Frame target | 30 / 60 / uncapped (drives the adaptive setpoint) | A.5 | 60 | controller setpoint |
+
+These extend `GraphicsSettings`. Most map onto preset flags that already exist in
+`performance.ts` (`bloom`, `ao`, `smaa`, `shadows`, `transientVfxCap`); the
+addition is letting a player override a single flag on top of the chosen tier
+instead of only picking the whole tier. A "Custom" tier is just "high with these
+three overrides."
+
+### F.2 New gameplay-scale options (the §C–§E dials), with one rule
+
+Some dials change the fight, not the look. Expose them, but keep the fairness rule
+from §E.6: **anything that affects a macro (gym / Elite) outcome stays fixed and
+off-limits to these toggles.** Player-tunable scale applies to the overworld and
+optional content only.
+
+- **Overworld battle scale** (E.1, C.4): caps on simultaneous wild spawns, summon
+  army size, and illusion count. A `TUNING`-backed ceiling the player can lower for
+  perf or raise for spectacle. Gym/Elite/raid rosters are fixed by design and
+  ignore it.
+- **Companion / entourage cap**: how many fielded creeps follow in the overworld.
+- **Reduced ambient life**: fewer non-combat props, weather, and idle critters for
+  a cleaner, cheaper world (overlaps reduced-motion but is about count, not motion).
+
+Difficulty (AI depth, §E.2) is a separate axis and belongs in a difficulty
+setting, not a performance one. Keep them apart so "make it run faster" never
+silently "makes it easier."
+
+### F.3 Accessibility, already partly there
+
+Reduced motion and limit-flashes exist. Round them out as first-class options:
+global screen-shake intensity (the `shakeTrauma` envelope in `scene.ts`), flash
+caps outside cut-scenes, and a colorblind-safe rarity/telegraph palette. These are
+fidelity-down dials too, so they live beside the graphics options.
+
+### F.4 Persisting and validating it
+
+New settings ride the existing `GameSave.settings` path: a default in
+`phase4.ts`, a migration line so old saves backfill, and a save round-trip test
+(the `save-migration` suite already covers `graphics`/`cutscene`). Validate ranges
+on load so a hand-edited save can't push a cap past the documented ceiling. The
+profile-vs-felt split from §0.1 is the authoring rule: a setting exists because a
+reasonable player would reasonably want to move it, not for every internal knob.
+
+---
+
+## G. TESTING & MEASUREMENT 2.0
 
 1.0 gave a headless harness, a budget assertion, and at-scale determinism. 2.0
 extends coverage to the GPU-bound and memory-bound reality.
 
-### F.1 Automate the browser perf route
+### G.1 Automate the browser perf route
 
 Script the fixed smoke route (`PERFORMANCE_PLAN.md` §2.8) in Playwright: new game
 → busy region → 30-unit fight → hold 60 s → read the `?debug` HUD and record p95
 frame time, draw calls, and cache stats to `PROGRESS.md`. This is the GPU-side
 companion to the headless budget test.
 
-### F.2 Scale the headless harness
+### G.2 Scale the headless harness
 
 Extend `perf-harness.ts` to 60- and 100-unit scenes and assert sub-quadratic
 growth (the spatial-index regression guard, raised to 2.0 fight sizes). If §C.3
 lands, add a worker round-trip determinism test: the same seed through the worker
 host produces the same `Sim.hash()` as the in-process sim.
 
-### F.3 Memory and lifecycle regressions
+### G.3 Memory and lifecycle regressions
 
 Add the region-cycle leak test (§D.3) asserting renderer object counts and
 approximate GPU texture bytes stay flat across A → B → A. Add an asset-size budget
 gate (`PERFORMANCE_PLAN.md` §2.1) that fails when `public/assets/` grows past the
 agreed cap without an explicit update.
 
-### F.4 A frame-budget CI signal
+### G.4 A frame-budget CI signal
 
 Keep the headless budget assertion in the normal suite (fast, deterministic). Run
 the browser route and the at-scale harness on a nightly or manual job, not every
@@ -372,12 +461,12 @@ PR, to avoid flakiness, and record numbers rather than gating on them.
 
 ---
 
-## G. PHASING & ACCEPTANCE
+## H. PHASING & ACCEPTANCE
 
 Ordered so each step is independently shippable and measured. The first step is
 non-negotiable: 2.0 optimizes the GPU, and we have to see the GPU first.
 
-1. **Profile (A.1, F.1).** Run the browser route with the HUD and a Spector.js
+1. **Profile (A.1, G.1).** Run the browser route with the HUD and a Spector.js
    trace. Classify the real bottleneck (draw calls / fill / shaders / memory) and
    record baselines for 30 and 60 units. Nothing in §A–§B proceeds without this.
 2. **Render/GPU pass (A).** Draw-call cuts, post-stack tiering, shadow budget,
@@ -391,7 +480,11 @@ non-negotiable: 2.0 optimizes the GPU, and we have to see the GPU first.
    leak guard, code-splitting, extended prewarm.
 6. **Spend the headroom (E).** Bigger fights, smarter AI cadence, draw distance,
    latency re-verification, richer VFX, the fairness assertion.
-7. **Testing backfill (F).** Browser route automation, scaled harness, memory and
+7. **Expose the dials (F).** Add the new graphics, scale, and accessibility
+   options to the menu as each underlying dial lands, with defaults, migration,
+   and the macro-fairness rule. This trails §A–§E by design: a dial becomes a
+   setting once it works, not before.
+8. **Testing backfill (G).** Browser route automation, scaled harness, memory and
    leak regressions, the CI signal.
 
 **Done when:**
@@ -406,16 +499,19 @@ non-negotiable: 2.0 optimizes the GPU, and we have to see the GPU first.
 - Region cycling holds renderer object counts and GPU memory flat.
 - Bigger summon/raid/dungeon fights run at the documented ceiling and stay
   readable.
+- The options menu lets a player trade fidelity for frames (or the reverse) and
+  set overworld battle scale, all persisted across a save round-trip, with macro
+  fights provably unaffected by any of it.
 - `npm test`, `npm run build`, and the browser smoke stay green; the headless-core
   boundary check is untouched.
 
 ---
 
-## H. RISKS & NOTES
+## I. RISKS & NOTES
 
 - **Determinism across the worker boundary is the new sharp edge.** The core stays
   deterministic, but the host (input timing, snapshot scheduling) must not leak
-  nondeterminism into it. Pair §C.3 with the worker round-trip hash test (§F.2)
+  nondeterminism into it. Pair §C.3 with the worker round-trip hash test (§G.2)
   and keep all RNG inside the core.
 - **Shared-material mutation is a live correctness risk, not only perf** (§B.3).
   The 1.0 material cache and the per-unit opacity writes can collide. Treat the

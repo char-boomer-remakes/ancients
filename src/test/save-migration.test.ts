@@ -29,22 +29,22 @@ describe('save v6 round-trip and migration', () => {
     expect(save.resin).toBeGreaterThan(0);
     expect(save.settings.resonance).toBe(true);
     expect(save.settings.audio).toEqual({ master: 0.8, sfx: 0.8, voice: 0.7, stinger: 0.7, muted: false });
-    expect(save.settings.graphics).toEqual({ quality: 'auto', exposure: 0.92, grade: 1, reducedMotion: false });
+    expect(save.settings.graphics).toEqual({ quality: 'auto', autoAdjustQuality: true, frameTarget: 60, exposure: 0.92, grade: 1, reducedMotion: false });
     expect(save.settings.cutscene).toEqual({ length: 'full', defaultSpeed: 1, alwaysSkip: false, photosensitive: false, tieIns: true });
     expect(Game.validateSave(save)).toBe(true);
   });
 
   it('round-trips custom graphics settings and defaults them for older saves', () => {
     const save = newGameSave('lich');
-    save.settings.graphics = { quality: 'ultra', exposure: 1.1, grade: 0.6, reducedMotion: true };
+    save.settings.graphics = { quality: 'ultra', autoAdjustQuality: false, frameTarget: 30, exposure: 1.1, grade: 0.6, reducedMotion: true };
     const reloaded = Game.migrateSave(JSON.parse(JSON.stringify(save)) as unknown);
-    expect(reloaded!.settings.graphics).toEqual({ quality: 'ultra', exposure: 1.1, grade: 0.6, reducedMotion: true });
+    expect(reloaded!.settings.graphics).toEqual({ quality: 'ultra', autoAdjustQuality: false, frameTarget: 30, exposure: 1.1, grade: 0.6, reducedMotion: true });
 
     // A save with no graphics block gets the defaults backfilled on migration.
     const legacy = JSON.parse(JSON.stringify(save)) as Record<string, unknown>;
     (legacy.settings as Record<string, unknown>).graphics = undefined;
     const migrated = Game.migrateSave(legacy);
-    expect(migrated!.settings.graphics).toEqual({ quality: 'auto', exposure: 0.92, grade: 1, reducedMotion: false });
+    expect(migrated!.settings.graphics).toEqual({ quality: 'auto', autoAdjustQuality: true, frameTarget: 60, exposure: 0.92, grade: 1, reducedMotion: false });
   });
 
   it('round-trips a v6 save carrying karma, codex/journal, exploration, audio, and loadouts identically', () => {

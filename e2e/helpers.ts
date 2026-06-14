@@ -11,6 +11,8 @@ export interface BootOpts {
   debug?: boolean;
   /** Use the real WebGL renderer instead of the headless scene. */
   webgl?: boolean;
+  /** Mount the real HUD over the headless scene for DOM/control tests. */
+  hud?: boolean;
 }
 
 export interface PartyMember {
@@ -57,6 +59,7 @@ export interface GameState {
 export async function boot(page: Page, opts: BootOpts = {}): Promise<void> {
   const q = new URLSearchParams({ test: '1' });
   if (!opts.webgl) q.set('render', 'headless');
+  if (opts.hud) q.set('hud', '1');
   if (opts.debug) q.set('debug', '1');
   if (opts.hero) q.set('hero', opts.hero);
   if (opts.region) q.set('region', opts.region);

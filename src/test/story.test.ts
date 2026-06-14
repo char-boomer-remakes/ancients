@@ -109,19 +109,31 @@ describe('STORY §7.3 legend detector', () => {
     expect(out).toContainEqual({ kind: 'legend', legendId: 'hooked-home' });
   });
 
-  it('does NOT fire Hooked Home when the Pudge is nowhere near home', () => {
+  it('does NOT fire Hooked Home when Pudge or the victim is nowhere near home', () => {
     const pudge: FakeUnit = { uid: 1, team: 0, heroId: 'pudge', pos: { x: 5000, y: 5000 }, alive: true, hp: 500, stats: { maxHp: 500 }, ctrl: { kind: 'player' } };
     const victim: FakeUnit = { uid: 2, team: 1, pos: { x: 5030, y: 5000 }, alive: false, hp: 0, stats: { maxHp: 100 }, ctrl: { kind: 'gambit' } };
     const sim = fakeSim([pudge, victim]);
     const events: SimEvent[] = [{ ...castEvent(1, 'pudge-meat-hook'), target: 2 }, { t: 'death', uid: 2, killer: 1 }];
     expect(new StoryDetector().observe(events, { sim, nowSec: 1, playerTeam: 0, townPos: { x: 0, y: 0 }, townRadius: 900 })).toHaveLength(0);
+
+    const homePudge: FakeUnit = { ...pudge, pos: { x: 0, y: 0 } };
+    const farVictim: FakeUnit = { ...victim, pos: { x: 2200, y: 0 } };
+    expect(new StoryDetector().observe(events, { sim: fakeSim([homePudge, farVictim]), nowSec: 1, playerTeam: 0, townPos: { x: 0, y: 0 }, townRadius: 900 })).toHaveLength(0);
   });
 
-  it('fires The Coil That Closed the Game when Puck coils 2+ enemies', () => {
+  it('fires The Coil That Closed the Game when Puck coils 2+ enemies with an escape-action proxy', () => {
     const puck: FakeUnit = { uid: 1, team: 0, heroId: 'puck', pos: { x: 0, y: 0 }, alive: true, hp: 500, stats: { maxHp: 500 }, ctrl: { kind: 'gambit' } };
-    const sim = fakeSim([puck, ...enemyRing(2, { x: 100, y: 0 }, 50)]);
+    const enemies = enemyRing(2, { x: 100, y: 0 }, 50);
+    (enemies[0] as FakeUnit & { order: { kind: string; point: { x: number; y: number } } }).order = { kind: 'move', point: { x: 500, y: 0 } };
+    const sim = fakeSim([puck, ...enemies]);
     const out = new StoryDetector().observe([castEvent(1, 'puck-dream-coil')], { sim, nowSec: 1, playerTeam: 0 });
     expect(out).toContainEqual({ kind: 'legend', legendId: 'coil-closed-game' });
+  });
+
+  it('does NOT fire The Coil That Closed the Game on two idle enemies', () => {
+    const puck: FakeUnit = { uid: 1, team: 0, heroId: 'puck', pos: { x: 0, y: 0 }, alive: true, hp: 500, stats: { maxHp: 500 }, ctrl: { kind: 'gambit' } };
+    const sim = fakeSim([puck, ...enemyRing(2, { x: 100, y: 0 }, 50)]);
+    expect(new StoryDetector().observe([castEvent(1, 'puck-dream-coil')], { sim, nowSec: 1, playerTeam: 0 })).toHaveLength(0);
   });
 
   it('fires The Call That Paid Out when Axe dies after a decisive call', () => {
@@ -211,6 +223,16 @@ describe('STORY §3.4 cut-scene controls', () => {
     expect(d.routesToToast(setpiece)).toBe(true);
     d.setSettings({ length: 'full' });
     expect(d.routesToToast(setpiece)).toBe(false);
+  });
+
+  it('required-staging climax scenes shorten instead of routing to toast', () => {
+    const d = new CinematicDirector();
+    d.setSettings({ length: 'off', alwaysSkip: true });
+    const climax = { ...setpiece, id: 'champion-clear', requiredStaging: true };
+    expect(d.routesToToast(climax)).toBe(false);
+    d.play(climax, {}, false);
+    expect(d.view()?.beatCount).toBe(2);
+    expect(d.view()?.speed).toBe(4);
   });
 
   it('length:short degrades a setpiece to its stinger (fewer beats)', () => {
@@ -365,6 +387,8 @@ describe('STORY gallery, titles & content', () => {
     // The prologue auto-plays on a fresh game, so it is seen + replayable.
     const prologue = all.find((e) => e.id === 'prologue-moon-breaks');
     expect(prologue?.seen).toBe(true);
+    expect(prologue?.caption).toContain('Director note:');
+    expect(prologue?.caption).toContain('Mad Moon');
     expect(g.replayCutscene('prologue-moon-breaks')).toBe(true);
     while (g.cinematic.active) g.cinematicSkip();
     // An unseen replayable scene is locked and cannot be replayed.
@@ -526,6 +550,9 @@ describe('STORY gallery, titles & content', () => {
   });
 
   it('authors production raid intros through ref-resolved dialogue and registers directed clear/phase beats', () => {
+    expect(REG.cutscene('prologue-moon-breaks').galleryCaption).toContain('Director note');
+    expect(REG.cutscene('bind-first').beats[1].stage?.some((s) => s.kind === 'advance-plot')).toBe(true);
+
     const intro = REG.cutscene('raid-intro-last-eldwurm');
     expect(intro.music).toBe('duck');
     expect(intro.beats[1].line?.text).toBe(REG.raid('last-eldwurm').dialogue[0]);
@@ -535,6 +562,14 @@ describe('STORY gallery, titles & content', () => {
     expect(phase.beats[0].line?.text).toContain('wreck');
     const clear = REG.cutscene('raid-clear-renegade-marshal');
     expect(clear.beats[0].line?.text).toContain('fleet');
+  });
+
+  it('stages major badge act breaks as Loop flashbacks before opening the road', () => {
+    const lunar = REG.cutscene('badge-lunar-badge');
+    expect(lunar.tier).toBe('setpiece');
+    expect(lunar.galleryCaption).toContain('desaturated Loop flashback');
+    expect(lunar.beats.some((beat) => beat.stage?.some((s) => s.kind === 'establish-history'))).toBe(true);
+    expect(lunar.beats.some((beat) => beat.stage?.some((s) => s.kind === 'explore-theme'))).toBe(true);
   });
 
   it('stages owned-Echo story only for the first facet unlock, not surplus/repeat kills', () => {

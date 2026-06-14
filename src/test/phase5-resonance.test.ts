@@ -68,4 +68,17 @@ describe('Phase 5 feel orders', () => {
 
     expect(creep.hp).toBeLessThan(creep.stats.maxHp);
   });
+
+  it('attack-move ignores off-path enemies while advancing', () => {
+    const sim = new Sim({ seed: 92, bounds: { w: 2400, h: 2400 } });
+    const jug = sim.spawnHero(REG.hero('juggernaut'), { team: 0, pos: { x: 300, y: 500 }, level: 8, ctrl: { kind: 'player' } });
+    const sideCreep = sim.spawnCreep(REG.creep('kobold'), { team: 1, pos: { x: 650, y: 950 }, wild: true });
+    sideCreep.ctrl = { kind: 'none' };
+
+    sim.order(jug.uid, { kind: 'attack-move', point: { x: 1200, y: 500 } });
+    sim.run(4);
+
+    expect(sideCreep.hp).toBe(sideCreep.stats.maxHp);
+    expect(jug.pos.x).toBeGreaterThan(1050);
+  });
 });

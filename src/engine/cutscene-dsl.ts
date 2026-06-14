@@ -1,4 +1,4 @@
-import type { AnimGesture, CutsceneBeat, CutsceneDef, CutsceneTier, CutsceneTrigger, ShotAngle, ShotMove } from '../core/types';
+import type { AnimGesture, CutsceneBeat, CutsceneDef, CutsceneTier, CutsceneTrigger, ShotAngle, ShotMove, VfxArchetype } from '../core/types';
 import { REG } from '../core/registry';
 
 const ANGLE_ALIASES: Record<string, ShotAngle> = {
@@ -116,6 +116,9 @@ function applyStage(beat: CutsceneBeat, line: string): void {
   if (gesture && (target === 'player' || target === 'ally' || target === 'boss')) {
     beat.stage.push({ kind: 'gesture', target, gesture: gesture as AnimGesture });
   }
+  const archetype = attr(body, 'vfx') ?? attr(body, 'archetype');
+  const color = attr(body, 'color');
+  if (archetype && color) beat.stage.push({ kind: 'vfx', archetype: archetype as VfxArchetype, color });
   if (/DescribeRealm|DescribeEnvironment/i.test(body) && title) beat.stage.push({ kind: 'describe-environment', text: title });
   if (/DevelopCharacter/i.test(body)) beat.stage.push({ kind: 'develop-character', target: (target === 'player' || target === 'ally' || target === 'boss' ? target : 'boss'), text: title, gesture: gesture as AnimGesture | undefined });
   if (/AdvancePlot/i.test(body) && title) beat.stage.push({ kind: 'advance-plot', text: title, target: target as 'ally' | 'boss' | 'player' | 'item' | 'tower' | undefined });
@@ -146,7 +149,19 @@ function beatBlocks(src: string): string[] {
 /** Compile the STORY §5 cut-scene authoring format into playable data. */
 export function compileCutsceneDsl(
   source: string,
-  meta: { id: string; title: string; tier: CutsceneTier; trigger: CutsceneTrigger; category?: CutsceneDef['category']; replayable?: boolean; resolveRef?: (ref: string) => string }
+  meta: {
+    id: string;
+    title: string;
+    tier: CutsceneTier;
+    trigger: CutsceneTrigger;
+    category?: CutsceneDef['category'];
+    replayable?: boolean;
+    letterbox?: boolean;
+    music?: CutsceneDef['music'];
+    galleryCaption?: string;
+    requiredStaging?: boolean;
+    resolveRef?: (ref: string) => string;
+  }
 ): CutsceneDef {
   const resolveRef = meta.resolveRef ?? defaultResolveRef;
   const beats = beatBlocks(source).map((block): CutsceneBeat => {
@@ -171,9 +186,12 @@ export function compileCutsceneDsl(
     tier: meta.tier,
     trigger: meta.trigger,
     skippable: true,
-    letterbox: meta.tier !== 'bark',
+    letterbox: meta.letterbox ?? meta.tier !== 'bark',
+    music: meta.music,
     category: meta.category,
     replayable: meta.replayable,
+    galleryCaption: meta.galleryCaption,
+    requiredStaging: meta.requiredStaging,
     beats
   };
 }

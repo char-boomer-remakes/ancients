@@ -71,6 +71,21 @@ export class InputController {
 
   dispose(): void {
     for (const d of this.disposers) d();
+    this.canvas.style.cursor = '';
+  }
+
+  attackMoveArmed(): boolean {
+    return this.attackMovePending;
+  }
+
+  private updateCursor(): void {
+    this.canvas.style.cursor = this.uiModalOpen
+      ? ''
+      : this.attackMovePending
+        ? 'crosshair'
+        : this.targeting.kind !== 'none'
+          ? 'cell'
+          : '';
   }
 
   /** re-pick at the current mouse position (also called on mousedown so
@@ -84,12 +99,13 @@ export class InputController {
   /** called each frame: refresh hover pick + held-RMB move orders */
   update(): void {
     this.refreshPick();
+    this.updateCursor();
 
     if (this.rmbHeld && !this.uiModalOpen) {
       const now = performance.now();
       if (now - this.lastMoveOrderAt > 150 && this.hoverGround) {
         this.lastMoveOrderAt = now;
-        this.game.orderMove(this.hoverGround);
+        this.game.orderMove(this.hoverGround, false, false);
       }
     }
   }
@@ -206,6 +222,10 @@ export class InputController {
       return;
     }
     if (key === 'escape') {
+      if (this.attackMovePending) {
+        this.attackMovePending = false;
+        return;
+      }
       if (this.targeting.kind !== 'none') {
         this.targeting = { kind: 'none' };
         return;
@@ -286,6 +306,7 @@ export class InputController {
           return;
         }
         this.attackMovePending = true;
+        this.targeting = { kind: 'none' };
         g.msg('Attack-move: click a point or enemy', 'info');
         return;
       case 'g':

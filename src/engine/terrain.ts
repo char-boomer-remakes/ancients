@@ -14,11 +14,21 @@ export interface TerrainInfo {
   group: THREE.Group;
   heightAt(simX: number, simY: number): number; // world-units height
   obstacles: { pos: { x: number; y: number }; radius: number }[];
+  setStaticPropShadows?(enabled: boolean): void;
   /** Advances animated materials (water ripples). No-op when none. */
   update?(time: number): void;
 }
 
 type SceneLiveCheck = () => boolean;
+interface TerrainBuildOptions {
+  staticPropShadows?: boolean;
+}
+
+function markStaticShadowCaster(obj: THREE.Object3D, enabled: boolean): void {
+  obj.userData.staticPropCaster = true;
+  const mesh = obj as THREE.Mesh;
+  if (mesh.isMesh) mesh.castShadow = enabled;
+}
 
 // Generated grayscale ground-detail texture (GRAPHICS_SPEC §5.1): mostly white
 // so it barely darkens the painted height bands, with sparse speckle + soft
@@ -83,7 +93,10 @@ function sampleNoise(grid: number[][], u: number, v: number): number {
   return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
 }
 
-const BIOME_COLORS: Record<string, { low: number; mid: number; high: number; tree: number; trunk: number; rock: number }> = {
+type BiomePalette = { low: number; mid: number; high: number; tree: number; trunk: number; rock: number };
+type TerrainEdgeHeights = { south: number[]; east: number[]; north: number[]; west: number[] };
+
+const BIOME_COLORS: Record<string, BiomePalette> = {
   grass: { low: 0x4a7c3a, mid: 0x5c9447, high: 0x7daf5e, tree: 0x3e7a34, trunk: 0x6b4a2c, rock: 0x8d8d99 },
   snow: { low: 0xc8d8e8, mid: 0xe8f0f8, high: 0xffffff, tree: 0x4a6b5c, trunk: 0x52404a, rock: 0x9aa6b8 },
   desert: { low: 0xc8a05c, mid: 0xd8b06c, high: 0xe8c87c, tree: 0x7a8a3a, trunk: 0x8a6a3a, rock: 0xa08a6a },
@@ -128,6 +141,71 @@ function applyTerrainPBR(mat: THREE.MeshStandardMaterial, biome: string, repeat:
   });
 }
 
+function buildTerrainEdge(sizeW: number, edgeHeights: TerrainEdgeHeights, colors: BiomePalette): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'terrain-edge';
+
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const bottomY = -2.4;
+  const rimLift = 0.08;
+  const seg = edgeHeights.south.length - 1;
+  const step = sizeW / seg;
+
+  const addQuad = (
+    topA: [number, number, number],
+    bottomA: [number, number, number],
+    topB: [number, number, number],
+    bottomB: [number, number, number]
+  ): void => {
+    const base = positions.length / 3;
+    positions.push(...topA, ...bottomA, ...topB, ...bottomB);
+    indices.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
+  };
+
+  for (let i = 0; i < seg; i++) {
+    const a = i * step;
+    const b = (i + 1) * step;
+    addQuad([a, edgeHeights.south[i], 0], [a, bottomY, 0], [b, edgeHeights.south[i + 1], 0], [b, bottomY, 0]);
+    addQuad([sizeW, edgeHeights.east[i], a], [sizeW, bottomY, a], [sizeW, edgeHeights.east[i + 1], b], [sizeW, bottomY, b]);
+    addQuad([b, edgeHeights.north[i + 1], sizeW], [b, bottomY, sizeW], [a, edgeHeights.north[i], sizeW], [a, bottomY, sizeW]);
+    addQuad([0, edgeHeights.west[i + 1], b], [0, bottomY, b], [0, edgeHeights.west[i], a], [0, bottomY, a]);
+  }
+
+  const wallGeo = new THREE.BufferGeometry();
+  wallGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  wallGeo.setIndex(indices);
+  wallGeo.computeVertexNormals();
+  const wallColor = new THREE.Color(colors.low).lerp(new THREE.Color(0x24313a), 0.45);
+  const wall = new THREE.Mesh(wallGeo, new THREE.MeshStandardMaterial({
+    color: wallColor,
+    roughness: 0.98,
+    metalness: 0.01,
+    flatShading: true,
+    side: THREE.DoubleSide
+  }));
+  wall.receiveShadow = true;
+  group.add(wall);
+
+  const rimPoints: THREE.Vector3[] = [];
+  for (let i = 0; i <= seg; i++) rimPoints.push(new THREE.Vector3(i * step, edgeHeights.south[i] + rimLift, 0));
+  for (let i = 1; i <= seg; i++) rimPoints.push(new THREE.Vector3(sizeW, edgeHeights.east[i] + rimLift, i * step));
+  for (let i = seg - 1; i >= 0; i--) rimPoints.push(new THREE.Vector3(i * step, edgeHeights.north[i] + rimLift, sizeW));
+  for (let i = seg - 1; i > 0; i--) rimPoints.push(new THREE.Vector3(0, edgeHeights.west[i] + rimLift, i * step));
+  rimPoints.push(rimPoints[0].clone());
+  const rimColor = new THREE.Color(colors.high).lerp(new THREE.Color(0xffffff), 0.25);
+  const rim = new THREE.Line(new THREE.BufferGeometry().setFromPoints(rimPoints), new THREE.LineBasicMaterial({
+    color: rimColor,
+    transparent: true,
+    opacity: 0.6,
+    depthWrite: false
+  }));
+  rim.renderOrder = 2;
+  group.add(rim);
+
+  return group;
+}
+
 // Phase 2 (GRAPHICS_SPEC §13): authored Quaternius foliage/props + buildings
 // (CC0). Loaded async; the instanced primitives / box huts stay live until the
 // GLBs arrive, so no-asset and headless runs keep the procedural silhouette.
@@ -168,7 +246,8 @@ function swapToInstancedModels(
   urls: string[],
   matrices: THREE.Matrix4[],
   targetHeight: number,
-  isLive: SceneLiveCheck
+  isLive: SceneLiveCheck,
+  staticPropShadows: boolean
 ): void {
   if (!matrices.length || !urls.length) return;
   void Promise.all(urls.map((u) => loadModel(u))).then((scenes) => {
@@ -180,7 +259,10 @@ function swapToInstancedModels(
     matrices.forEach((m, i) => buckets[i % models.length].push(m));
     models.forEach((model, idx) => {
       if (!buckets[idx].length) return;
-      for (const inst of instancedFromModel(model, buckets[idx])) group.add(inst);
+      for (const inst of instancedFromModel(model, buckets[idx])) {
+        markStaticShadowCaster(inst, staticPropShadows);
+        group.add(inst);
+      }
     });
     for (const f of fallback) f.visible = false;
   });
@@ -191,7 +273,8 @@ function swapTownBuildings(
   g: THREE.Group,
   fallback: THREE.Object3D[],
   placements: { x: number; z: number; baseY: number; rotY: number }[],
-  isLive: SceneLiveCheck
+  isLive: SceneLiveCheck,
+  staticPropShadows: boolean
 ): void {
   if (!placements.length) return;
   void Promise.all(modelUrls(TOWN_BASE, TOWN_BUILDINGS).map((u) => loadModel(u))).then((scenes) => {
@@ -207,7 +290,7 @@ function swapTownBuildings(
       b.traverse((o) => {
         const m = o as THREE.Mesh;
         if (m.isMesh) {
-          m.castShadow = true;
+          markStaticShadowCaster(m, staticPropShadows);
           m.receiveShadow = true;
         }
       });
@@ -217,8 +300,9 @@ function swapTownBuildings(
   });
 }
 
-export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => true): TerrainInfo {
+export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => true, opts: TerrainBuildOptions = {}): TerrainInfo {
   const group = new THREE.Group();
+  const staticPropShadows = opts.staticPropShadows ?? true;
   const sizeW = region.size / WORLD_SCALE;
   const rng = new Rng(region.seed ^ hashString(region.id));
   const noise = valueNoise(rng, 10);
@@ -245,6 +329,12 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
   const cHigh = new THREE.Color(colors.high);
   const WHITE_TINT = new THREE.Color(0xffffff);
   const jitter = new Rng(region.seed + 77);
+  const edgeHeights: TerrainEdgeHeights = {
+    south: new Array<number>(seg + 1).fill(0),
+    east: new Array<number>(seg + 1).fill(0),
+    north: new Array<number>(seg + 1).fill(0),
+    west: new Array<number>(seg + 1).fill(0)
+  };
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i) + sizeW / 2;
     const z = pos.getZ(i) + sizeW / 2;
@@ -254,6 +344,12 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
     // low-poly jitter
     h += (jitter.next() - 0.5) * 0.35;
     pos.setY(i, h);
+    const ix = Math.max(0, Math.min(seg, Math.round(u * seg)));
+    const iz = Math.max(0, Math.min(seg, Math.round(v * seg)));
+    if (iz === 0) edgeHeights.south[ix] = h;
+    if (iz === seg) edgeHeights.north[ix] = h;
+    if (ix === 0) edgeHeights.west[iz] = h;
+    if (ix === seg) edgeHeights.east[iz] = h;
     const t = Math.min(1, h / 4.2);
     const c = t < 0.45 ? cLow.clone().lerp(cMid, t / 0.45) : cMid.clone().lerp(cHigh, (t - 0.45) / 0.55);
     // Ease the painted band toward neutral so the photographic albedo map (when
@@ -281,6 +377,7 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
   ground.position.set(sizeW / 2, 0, sizeW / 2);
   ground.receiveShadow = true;
   group.add(ground);
+  group.add(buildTerrainEdge(sizeW, edgeHeights, colors));
   applyTerrainPBR(mat, region.biome, Math.max(8, Math.round(sizeW / 8)), isLive);
 
   // Animated shader water ring outside the playfield (GRAPHICS_SPEC §5.4):
@@ -360,7 +457,8 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
   const clearings: { x: number; y: number; r: number }[] = [
     { x: region.town.pos.x, y: region.town.pos.y, r: region.town.radius + 250 },
     ...region.camps.map((c) => ({ x: c.pos.x, y: c.pos.y, r: c.radius + 320 })),
-    ...region.heroSpawns.map((h) => ({ x: h.pos.x, y: h.pos.y, r: 420 }))
+    ...region.heroSpawns.map((h) => ({ x: h.pos.x, y: h.pos.y, r: 420 })),
+    ...(region.dungeons ?? []).map((d) => ({ x: d.pos.x, y: d.pos.y, r: d.radius + 260 }))
   ];
   const isClear = (x: number, y: number) => clearings.every((c) => Math.hypot(x - c.x, y - c.y) > c.r);
 
@@ -400,10 +498,10 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
   }
   trees.count = placedTrees;
   trunks.count = placedTrees;
-  trees.castShadow = true;
+  markStaticShadowCaster(trees, staticPropShadows);
   group.add(trees);
   group.add(trunks);
-  swapToInstancedModels(group, [trees, trunks], modelUrls(FOLIAGE_BASE, TREE_MODELS[region.biome] ?? TREE_MODELS.grass), treeMatrices, 4.6, isLive);
+  swapToInstancedModels(group, [trees, trunks], modelUrls(FOLIAGE_BASE, TREE_MODELS[region.biome] ?? TREE_MODELS.grass), treeMatrices, 4.6, isLive, staticPropShadows);
 
   // rocks
   const rockGeo = new THREE.DodecahedronGeometry(0.8, 0);
@@ -424,32 +522,43 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
     placedRocks++;
   }
   rocks.count = placedRocks;
-  rocks.castShadow = true;
+  markStaticShadowCaster(rocks, staticPropShadows);
   group.add(rocks);
-  swapToInstancedModels(group, [rocks], modelUrls(FOLIAGE_BASE, ROCK_MODELS), rockMatrices, 1.5, isLive);
+  swapToInstancedModels(group, [rocks], modelUrls(FOLIAGE_BASE, ROCK_MODELS), rockMatrices, 1.5, isLive, staticPropShadows);
 
   // town: stone circle + simple huts + shrine crystal
-  const town = buildTown(region, heightAt, isLive);
+  const town = buildTown(region, heightAt, isLive, staticPropShadows);
   group.add(town);
+
+  const dungeonPortals = buildDungeonPortals(region, heightAt, staticPropShadows);
+  group.add(dungeonPortals);
 
   return {
     group,
     heightAt,
     obstacles,
+    setStaticPropShadows: (enabled: boolean) => {
+      group.traverse((obj) => {
+        if (!obj.userData.staticPropCaster) return;
+        const mesh = obj as THREE.Mesh;
+        if (mesh.isMesh) mesh.castShadow = enabled;
+      });
+    },
     update: (time: number) => { waterMat.uniforms.uTime.value = time; }
   };
 }
 
-function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number, isLive: SceneLiveCheck): THREE.Group {
+function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number, isLive: SceneLiveCheck, staticPropShadows: boolean): THREE.Group {
   const g = new THREE.Group();
   const t = region.town.pos;
   const baseY = heightAt(t.x, t.y);
   const wx = t.x / WORLD_SCALE;
   const wz = t.y / WORLD_SCALE;
+  const townRadius = region.town.radius / WORLD_SCALE;
 
   // plaza
   const plaza = new THREE.Mesh(
-    new THREE.CylinderGeometry(region.town.radius / WORLD_SCALE * 0.55, region.town.radius / WORLD_SCALE * 0.58, 0.3, 24),
+    new THREE.CylinderGeometry(townRadius * 0.36, townRadius * 0.39, 0.3, 24),
     new THREE.MeshStandardMaterial({ color: 0xb8a888, flatShading: true, roughness: 0.85, metalness: 0.04 })
   );
   plaza.position.set(wx, baseY + 0.12, wz);
@@ -460,38 +569,50 @@ function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number
   const roofMat = new THREE.MeshStandardMaterial({ color: 0xb84a32, flatShading: true, roughness: 0.7, metalness: 0.05 });
   const hutMeshes: THREE.Object3D[] = [];
   const townPlacements: { x: number; z: number; baseY: number; rotY: number }[] = [];
+  const buildingRadius = townRadius * 0.76;
   for (let i = 0; i < 6; i++) {
     const ang = (i / 6) * Math.PI * 2 + 0.4;
-    const r = region.town.radius / WORLD_SCALE * 0.42;
-    const hx = wx + Math.cos(ang) * r;
-    const hz = wz + Math.sin(ang) * r;
+    const hx = wx + Math.cos(ang) * buildingRadius;
+    const hz = wz + Math.sin(ang) * buildingRadius;
     const hut = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.8, 2.4), hutMat);
-    hut.position.set(hx, baseY + 1.0, hz);
+    const hutBaseY = heightAt(t.x + Math.cos(ang) * (buildingRadius * WORLD_SCALE), t.y + Math.sin(ang) * (buildingRadius * WORLD_SCALE));
+    hut.position.set(hx, hutBaseY + 1.0, hz);
     hut.rotation.y = ang;
     const roof = new THREE.Mesh(new THREE.ConeGeometry(2.1, 1.4, 4), roofMat);
-    roof.position.set(hx, baseY + 2.6, hz);
+    roof.position.set(hx, hutBaseY + 2.6, hz);
     roof.rotation.y = ang + Math.PI / 4;
     g.add(hut, roof);
     hutMeshes.push(hut, roof);
     // Buildings face the plaza centre.
-    townPlacements.push({ x: hx, z: hz, baseY: heightAt(t.x + Math.cos(ang) * (r * WORLD_SCALE), t.y + Math.sin(ang) * (r * WORLD_SCALE)), rotY: ang + Math.PI });
+    townPlacements.push({ x: hx, z: hz, baseY: hutBaseY, rotY: ang + Math.PI });
   }
-  swapTownBuildings(g, hutMeshes, townPlacements, isLive);
+  for (const mesh of hutMeshes) {
+    const m = mesh as THREE.Mesh;
+    if (m.isMesh) {
+      markStaticShadowCaster(m, staticPropShadows);
+      m.receiveShadow = true;
+    }
+  }
+  swapTownBuildings(g, hutMeshes, townPlacements, isLive, staticPropShadows);
 
   // shrine: floating crystal on a plinth
   const sx = region.shrine.pos.x / WORLD_SCALE;
   const sz = region.shrine.pos.y / WORLD_SCALE;
+  const shrineBaseY = heightAt(region.shrine.pos.x, region.shrine.pos.y);
   const plinth = new THREE.Mesh(
     new THREE.CylinderGeometry(1.0, 1.3, 0.9, 6),
     new THREE.MeshStandardMaterial({ color: 0x8d8d99, flatShading: true, roughness: 0.6, metalness: 0.15 })
   );
-  plinth.position.set(sx, baseY + 0.6, sz);
+  plinth.position.set(sx, shrineBaseY + 0.6, sz);
   const crystal = new THREE.Mesh(
     new THREE.OctahedronGeometry(0.8),
     new THREE.MeshStandardMaterial({ color: 0x7adfc4, emissive: 0x49f0c0, emissiveIntensity: 1.7, roughness: 0.15, metalness: 0.1 })
   );
-  crystal.position.set(sx, baseY + 2.4, sz);
+  crystal.position.set(sx, shrineBaseY + 2.4, sz);
   crystal.name = 'shrine-crystal';
+  markStaticShadowCaster(plinth, staticPropShadows);
+  plinth.receiveShadow = true;
+  markStaticShadowCaster(crystal, staticPropShadows);
   g.add(plinth, crystal);
 
   // Standing-stone ring around the shrine (VFX_ASSETS WS-G set dressing): one
@@ -502,35 +623,100 @@ function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number
   const stones = new THREE.InstancedMesh(stoneGeo, stoneMat, STONES);
   const stoneRng = new Rng(region.seed + 4242);
   const sm = new THREE.Matrix4();
+  const stoneRingRadius = Math.max(1.25, Math.min(1.65, townRadius * 0.18));
   for (let i = 0; i < STONES; i++) {
     const ang = (i / STONES) * Math.PI * 2;
-    const rr = 4.2;
-    const px = sx + Math.cos(ang) * rr;
-    const pz = sz + Math.sin(ang) * rr;
+    const px = sx + Math.cos(ang) * stoneRingRadius;
+    const pz = sz + Math.sin(ang) * stoneRingRadius;
     const h = 2.0 + stoneRng.next() * 1.4;
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler((stoneRng.next() - 0.5) * 0.18, ang, (stoneRng.next() - 0.5) * 0.18));
-    sm.compose(new THREE.Vector3(px, baseY + h * 0.5, pz), q, new THREE.Vector3(0.7, h, 0.55));
+    sm.compose(new THREE.Vector3(px, shrineBaseY + h * 0.5, pz), q, new THREE.Vector3(0.52, h, 0.42));
     stones.setMatrixAt(i, sm);
   }
-  stones.castShadow = true;
+  markStaticShadowCaster(stones, staticPropShadows);
   stones.receiveShadow = true;
   g.add(stones);
 
   // shop stall: counter + awning
-  const shopX = wx + 3.5;
-  const shopZ = wz + 1.5;
+  const shopAngle = 0.4 + Math.PI / 6;
+  const shopRadius = townRadius * 0.35;
+  const shopX = wx + Math.cos(shopAngle) * shopRadius;
+  const shopZ = wz + Math.sin(shopAngle) * shopRadius;
+  const shopBaseY = heightAt(t.x + Math.cos(shopAngle) * (shopRadius * WORLD_SCALE), t.y + Math.sin(shopAngle) * (shopRadius * WORLD_SCALE));
+  const shopRot = shopAngle + Math.PI;
+  const shopPoint = (lx: number, ly: number, lz: number): THREE.Vector3 => {
+    const c = Math.cos(shopRot);
+    const s = Math.sin(shopRot);
+    return new THREE.Vector3(shopX + lx * c - lz * s, shopBaseY + ly, shopZ + lx * s + lz * c);
+  };
   const counter = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.1, 1.2), new THREE.MeshStandardMaterial({ color: 0x7a5a36, flatShading: true, roughness: 0.9, metalness: 0.03 }));
-  counter.position.set(shopX, baseY + 0.7, shopZ);
+  counter.position.copy(shopPoint(0, 0.7, 0));
+  counter.rotation.y = shopRot;
   const awning = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.2, 2.0), new THREE.MeshStandardMaterial({ color: 0xd8b04a, flatShading: true, roughness: 0.65, metalness: 0.1 }));
-  awning.position.set(shopX, baseY + 2.3, shopZ);
+  awning.position.copy(shopPoint(0, 2.3, 0));
+  awning.rotation.y = counter.rotation.y;
   const pole1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.8, 5), new THREE.MeshStandardMaterial({ color: 0x5a4a32, roughness: 0.8, metalness: 0.05 }));
-  pole1.position.set(shopX - 1.5, baseY + 1.4, shopZ + 0.8);
+  pole1.position.copy(shopPoint(-1.5, 1.4, 0.8));
   const pole2 = pole1.clone();
-  pole2.position.x = shopX + 1.5;
+  pole2.position.copy(shopPoint(1.5, 1.4, 0.8));
   const sign = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.1), new THREE.MeshStandardMaterial({ color: 0xe8c87c, emissive: 0x6a5a2c, emissiveIntensity: 0.7, roughness: 0.5, metalness: 0.1 }));
-  sign.position.set(shopX, baseY + 3.0, shopZ);
+  sign.position.copy(shopPoint(0, 3.0, -0.65));
+  sign.rotation.y = counter.rotation.y;
   sign.name = 'shop-sign';
+  for (const mesh of [counter, awning, pole1, pole2, sign]) {
+    markStaticShadowCaster(mesh, staticPropShadows);
+    mesh.receiveShadow = true;
+  }
   g.add(counter, awning, pole1, pole2, sign);
+
+  return g;
+}
+
+function buildDungeonPortals(region: RegionDef, heightAt: (x: number, y: number) => number, staticPropShadows = true): THREE.Group {
+  const g = new THREE.Group();
+  const portalMat = new THREE.MeshStandardMaterial({
+    color: 0x6f4cff,
+    emissive: 0x6f4cff,
+    emissiveIntensity: 1.1,
+    roughness: 0.35,
+    metalness: 0.15
+  });
+  const coreMat = new THREE.MeshBasicMaterial({
+    color: 0xb28cff,
+    transparent: true,
+    opacity: 0.42,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  const padMat = new THREE.MeshStandardMaterial({ color: 0x2b2442, roughness: 0.7, metalness: 0.08 });
+
+  for (const portal of region.dungeons ?? []) {
+    const x = portal.pos.x / WORLD_SCALE;
+    const z = portal.pos.y / WORLD_SCALE;
+    const baseY = heightAt(portal.pos.x, portal.pos.y);
+    const p = new THREE.Group();
+    p.name = `dungeon-portal-${portal.dungeonId}`;
+    p.position.set(x, baseY, z);
+
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.75, 1.95, 0.2, 24), padMat);
+    pad.position.y = 0.1;
+    pad.receiveShadow = true;
+
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.35, 0.12, 10, 36), portalMat);
+    ring.position.y = 1.55;
+    markStaticShadowCaster(ring, staticPropShadows);
+
+    const core = new THREE.Mesh(new THREE.CircleGeometry(1.08, 32), coreMat);
+    core.position.y = 1.55;
+    core.position.z = 0.02;
+
+    const beacon = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.2, 6), portalMat);
+    beacon.position.y = 2.85;
+    markStaticShadowCaster(beacon, staticPropShadows);
+
+    p.add(pad, ring, core, beacon);
+    g.add(p);
+  }
 
   return g;
 }

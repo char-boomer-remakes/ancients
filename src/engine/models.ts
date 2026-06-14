@@ -897,6 +897,13 @@ export function applyAuthoredSilhouette(
 
 type PaletteRole = 'primary' | 'secondary' | 'accent';
 
+export interface RecolorOptions {
+  /** Drop source texture maps so palette color stays readable at gameplay zoom. */
+  solid?: boolean;
+  /** Force opaque rendering for assets whose source material uses faint alpha. */
+  opaque?: boolean;
+}
+
 /**
  * WS-A0 runtime recolor: tint a cloned base mesh to a hero's three-color palette,
  * the renderer-side twin of the build script's `recolorToPalette`. Each material
@@ -908,7 +915,8 @@ type PaletteRole = 'primary' | 'secondary' | 'accent';
 export function recolorToPalette(
   model: THREE.Object3D,
   palette: readonly [string, string, string] | readonly string[],
-  materialMap?: Record<string, PaletteRole>
+  materialMap?: Record<string, PaletteRole>,
+  opts: RecolorOptions = {}
 ): void {
   const roleColor: Record<PaletteRole, string> = {
     primary: palette[0] ?? '#888888',
@@ -933,6 +941,22 @@ export function recolorToPalette(
         role = l < 0.18 ? 'secondary' : l > 0.62 ? 'accent' : 'primary';
       }
       colored.color.set(roleColor[role]);
+    }
+    if (opts.solid && next instanceof THREE.MeshStandardMaterial) {
+      next.map = null;
+      next.emissiveMap = null;
+      next.metalnessMap = null;
+      next.roughnessMap = null;
+      next.normalMap = null;
+      next.aoMap = null;
+      next.envMapIntensity = Math.max(next.envMapIntensity, 0.75);
+      next.needsUpdate = true;
+    }
+    if (opts.opaque) {
+      next.transparent = false;
+      next.opacity = 1;
+      next.depthWrite = true;
+      next.needsUpdate = true;
     }
     clones.set(mat, next);
     return next;

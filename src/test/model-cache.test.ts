@@ -267,6 +267,23 @@ describe('shared hero bases (WS-A0)', () => {
     expect(colorB).toBe('00aaff');
     expect(colorA).not.toBe(colorB); // materials cloned, not shared
   });
+
+  it('can make recolored creature materials solid and opaque for gameplay readability', () => {
+    const source = new THREE.MeshStandardMaterial({ color: '#101010', transparent: true, opacity: 0.18 });
+    source.map = new THREE.Texture();
+    source.normalMap = new THREE.Texture();
+    const model = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), source);
+
+    recolorToPalette(model, ['#ff0000', '#00ff00', '#0000ff'], undefined, { solid: true, opaque: true });
+
+    const next = model.material as THREE.MeshStandardMaterial;
+    expect(next).not.toBe(source);
+    expect(next.color.getHexString()).toBe('00ff00');
+    expect(next.map).toBeNull();
+    expect(next.normalMap).toBeNull();
+    expect(next.transparent).toBe(false);
+    expect(next.opacity).toBe(1);
+  });
 });
 
 describe('within-cohort silhouette variation (WS-A / marquee)', () => {

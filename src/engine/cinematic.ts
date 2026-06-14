@@ -102,7 +102,7 @@ export class CinematicDirector {
 
   /** STORY §4.3 — a beat fully suppressed by settings routes its line as a toast instead. */
   routesToToast(def: CutsceneDef): boolean {
-    return this.settings.alwaysSkip || this.settings.length === 'off';
+    return (this.settings.alwaysSkip || this.settings.length === 'off') && !def.requiredStaging;
   }
 
   /** STORY §8 — replay a cut-scene from the gallery at full length, ignoring degrade/skip settings. */
@@ -112,7 +112,8 @@ export class CinematicDirector {
 
   play(def: CutsceneDef, ctx: CutsceneContext = {}, seen = false, replay = false): void {
     // §4.3 degrade matrix: "short" plays a setpiece as its stinger (fewer beats, tighter holds).
-    const degradeSetpiece = !replay && this.settings.length === 'short' && def.tier === 'setpiece';
+    const requiredShort = !replay && !!def.requiredStaging && (this.settings.length === 'off' || this.settings.alwaysSkip);
+    const degradeSetpiece = !replay && def.tier === 'setpiece' && (this.settings.length === 'short' || requiredShort);
     const reduced = !replay && this.settings.reducedMotion;
     let beats = def.beats;
     if (degradeSetpiece) beats = beats.slice(0, Math.min(2, beats.length));
@@ -121,7 +122,9 @@ export class CinematicDirector {
 
     const baseSpeed = replay
       ? 1
-      : seen
+      : requiredShort
+        ? 4
+        : seen
         ? (def.tier === 'setpiece' ? Math.max(2, this.settings.defaultSpeed) : 4)
         : this.settings.defaultSpeed;
     const playback: Playback = {

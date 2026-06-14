@@ -7,6 +7,12 @@ export const TUNING = {
   tickRate: 30,
   dt: 1 / 30,
   maxSimTicksPerFrame: 5,
+  scaleCeilings: {
+    overworldUnits: 100,
+    raidUnits: 120,
+    summons: 24,
+    illusions: 16
+  },
 
   // --- global scales (Dota numbers are the baseline) ---
   rangeScale: 1.0,
@@ -36,6 +42,7 @@ export const TUNING = {
   projectileHitRadius: 48,
   attackDamageVariance: 0.08, // +-8%
   attackMoveAcquireRadius: 850,
+  attackMovePathWidth: 260,
   aiAutoAcquireRadius: 650,
   creepThinkTicks: 5,
   gambitThinkTicks: 5,

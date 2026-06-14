@@ -6,14 +6,15 @@ ANCIENTS is a Three.js + TypeScript action RPG built with Vite. Game logic runs 
 
 ## How tests run
 
-Two modes, picked per case:
+Three modes, picked per case:
 
 - **Headless logic** (`?test=1&render=headless`): no WebGL, sim runs at full speed, time is stepped synchronously. Use for anything you can assert as state. This is the default and the bulk of the plan.
+- **Headless HUD** (`?test=1&render=headless&hud=1`): no WebGL, but the real HUD and input handlers are mounted. Use for DOM and control tests that need stable UI coverage without loading 3D assets.
 - **WebGL visual** (`?test=1`, real renderer): boots the Three.js scene. Use only for rendering, screenshots, and "does it draw without crashing" checks.
 
 Three entry points drive the game:
 
-- `?test=1` auto-boots past the title screen straight into a fresh seeded game. Optional params: `hero`, `region`, `seed`, `render=headless`.
+- `?test=1` auto-boots past the title screen straight into a fresh seeded game. Optional params: `hero`, `region`, `seed`, `render=headless`, `hud=1`.
 - `window.__test` — the QA control surface (`src/systems/test-harness.ts`): boot, step time, read state, apply cheats.
 - `window.__game` — the live `Game` instance, the escape hatch for assertions the snapshot does not cover.
 
@@ -77,6 +78,7 @@ A fresh save in Tranquil Vale plays the prologue (`prologue-moon-breaks`).
 - Cinematic controls work: click / Space / Enter advance, Tab fast-forwards, Esc holds to skip. `[data-cinematic="next|ff|skip"]` are present.
 - `skipActiveCinematic` clears it; `__game.cinematic.active` goes false and the HUD becomes playable.
 - Region arrival cutscenes play on first entry to a region.
+- `e2e/story.spec.ts` covers the player-input path for the prologue overlay; `src/test/data-lint.test.ts` covers catalogue reachability so registered cut-scenes cannot drift out of runtime use.
 
 ---
 
@@ -127,30 +129,100 @@ Opening one modal should not leave another open. Esc inside a modal closes it ra
 
 ---
 
-## Suite 3 — Movement and input
+## Suite 3 — Controls
 
-The control layer in `src/systems/input.ts`.
+The control layer in `src/systems/input.ts` (`InputController`). This is the layer that turns real keyboard and mouse events into game orders, and **nothing else in this plan exercises it** — every other suite calls `__game.orderMove()` and friends directly, which bypasses input entirely. Control bugs (wrong mapping, a modal eating keystrokes, quickcast firing when it should arm targeting, shift-queue dropped, a key still working mid-cinematic) only surface when tests drive the actual DOM events.
 
-### 3.1 Movement orders (P1, headless)
+### Testing principle
 
-- `__game.orderMove(x, y)` moves the active unit toward the target; position changes over `fastForward`.
-- `orderStop` halts it.
-- `orderAttackMove` advances and engages hostiles along the way.
-- Facing updates with movement direction.
+Drive controls the way a player does, then assert the resulting game state:
 
-### 3.2 Dash and sprint (P2, headless)
+- **Dispatch real events**, never call the `__game` order method under test. Use `page.keyboard.press('q')`, `page.mouse.click(x, y, { button: 'right' })`, `page.mouse.wheel`, and `dispatchEvent` for `blur`. The canvas listens on `window` for keys and on `#game-canvas` for mouse, so focus the page first.
+- **Assert via `__game` / `__test.state()`** afterward: the order issued, the targeting state, the active index, the camera mode, the toggle that opened.
+- **Spy on orders** where the end-state is ambiguous: before the event, wrap the method (e.g. `__game.orderMove`) to record its arguments, dispatch, then read what was captured. This proves the *binding*, not just that movement eventually happened.
 
-- `tryDash` consumes stamina and moves the unit; it is blocked while on cooldown or out of stamina.
-- Sprint held (`setSprintHeld(true)`) raises move speed.
+### Pointer determinism caveat
 
-### 3.3 Camera and zoom (P3, WebGL)
+Right/left-click behavior depends on `scene.pick()` resolving `hoverUid` / `hoverGround` from screen coordinates. In **headless** mode the pick does not project world coordinates, so pointer-targeted cases need one of:
 
-- Mouse wheel zooms when no modal is open and does nothing while a modal is up.
-- M toggles map-view vs follow camera.
+- **WebGL boot** with a known camera, computing screen coords for a known world point, or
+- **seeding hover** directly (`__game.input.hoverGround = {x,y}` / `hoverUid = n`) right before dispatching the click.
 
-### 3.4 Keybinds resolve (P2, both)
+Keyboard controls that don't depend on hover (swap, stop, dash, menu toggles, sprint, save, camera toggle) are fully testable in **headless**. Split the suite on that line.
 
-Confirm each bound key triggers its action: QWERDF abilities, ZXCV item actives, N neutral, 1–5 swap, A attack-move, S stop, T capture, G interact, B shop, Y services, Tab party, J/K journal/codex, Esc menu, F5 quick-save.
+### 3.1 Keyboard mapping — hover-independent (P1, headless)
+
+Press each key and assert the bound action fired. Spy on the target method or read state.
+
+| Key | Expected |
+|---|---|
+| 1–5 | `trySwap(n-1)`; `state().activeIdx` changes |
+| S | `orderStop` issued |
+| Space (overworld) | `tryDash` issued |
+| M | `scene.toggleCameraMode()`; camera mode flips |
+| Tab | party modal toggles |
+| B (in town) | shop toggles |
+| Y (in town) | services toggles |
+| J / K | journal / codex toggle |
+| N | `useNeutralActive` issued |
+| F5 | `saveToSlot(0)`; `ancients.save.1` written |
+| Esc (no targeting) | menu toggles |
+
+### 3.2 Keyboard mapping — pointer-dependent (P1, WebGL or seeded hover)
+
+| Key | Setup | Expected |
+|---|---|---|
+| Q/W/E/R/D/F, no-target/toggle | controlled unit | casts immediately |
+| Q…F, point/skillshot, quickcast on | hover ground set | fires at cursor (`fireAbilityQuick`) |
+| Q…F, targeted, quickcast off | — | arms `targeting={ability,slot}`; no cast yet |
+| Z/X/C/V (within `activeItemSlots`) | quickcast on | `useItem(slot)` at cursor |
+| Z/X/C/V, quickcast off | — | arms `targeting={item,slot}` |
+| A | controlled unit | `attackMovePending=true`; hint toast shown |
+| T | hovered/selected capturable | `tryCapture(uid)` |
+| G | near interactable | `tryInteract` |
+
+### 3.3 Mouse mapping (P1, WebGL or seeded hover)
+
+| Action | Setup | Expected |
+|---|---|---|
+| RMB on ground | hover ground | `orderMove(point)` |
+| RMB on hostile | hover hostile uid, has driver | `orderAttack(uid)` |
+| RMB on NPC hero | hover npc | `tryRecruit(uid)` |
+| RMB on team-0 unit in live gym | `liveGym` active | `selectLiveGymUnit(uid)` |
+| RMB held (>150ms) | hover ground | move order repeats each ~150ms via `update()` |
+| LMB, targeting armed | pending cast | `fire()` resolves the cast; targeting clears |
+| LMB, attack-move pending on enemy | hover hostile | `orderAttack` |
+| LMB, attack-move pending on ground | hover ground | `orderAttackMove(point)` |
+| LMB on unit, idle | hover uid | selects unit (`scene.selectedUid`), control stays on hero |
+| Wheel up/down | no modal | `scene.zoomBy`, clamped to min/max |
+| Right-click | canvas | browser context menu suppressed |
+
+### 3.4 Modifiers (P2, both)
+
+- **Shift + order** queues it: shift-RMB / shift-ability sets `queued=true` on the issued order.
+- **Alt** held → `setSprintHeld(true)` on keydown, `false` on keyup; move speed rises while held.
+- Sprint released on window **blur** (Suite 3.7).
+
+### 3.5 Input capture and gating (P1, both)
+
+- **Modal open** (`uiModalOpen`): gameplay keys are swallowed — only Tab and B pass through to toggle their modals. Confirm e.g. Q, S, Space do nothing while a modal is up.
+- **Cinematic active**: LMB and Space/Enter call `cinematicAdvance`; Tab holds fast-forward (release stops it); Esc holds to request skip (release cancels). Gameplay bindings do not fire mid-cinematic.
+- **Esc precedence**: with targeting armed, Esc cancels targeting and does *not* open the menu; a second Esc opens the menu.
+- **Live-mode guards**: in `liveGym` / `liveRaid`, T, G, B, Y, N are no-ops; A without a controlled unit shows the "spend a Captain Call" message; Space issues a Captain Call instead of dashing.
+
+### 3.6 Movement and camera behavior (P1, headless)
+
+With orders issued through the input layer where possible:
+
+- Move order advances the unit over `fastForward`; facing updates with direction.
+- `orderStop` halts it; velocity ~0 next step.
+- Attack-move advances and engages hostiles en route.
+- Dash consumes stamina and is blocked on cooldown / no stamina.
+- M cycles map-view ↔ follow.
+
+### 3.7 Focus loss (P2, both)
+
+- Dispatching `blur` on the window clears `rmbHeld` and calls `setSprintHeld(false)`: no runaway movement and no stuck sprint after the tab loses focus mid-drag.
 
 ---
 
@@ -546,10 +618,11 @@ watchPageErrors(page) / expectNoPageErrors(errors)
 
 The current specs cover boot, heroes, items, mechanics, dungeons, story, and visual smoke. The highest-value additions, roughly in order:
 
-1. Save/load round-trip across a page reload (Suite 11).
-2. Per-region no-error sweep with the real renderer (Suite 17.1).
-3. Shop buy/sell economy beyond the existing boots case (Suite 6).
-4. Settings toggles actually changing behavior (Suite 12).
-5. Gym prefight and live/auto fight (Suite 9.1).
-6. Modal open/close keyboard coverage for all modals (Suite 2.5).
-7. Recruitment and capture full chains (Suites 7, 10.2).
+1. Controls through real DOM events, not direct `__game` calls (Suite 3) — currently zero coverage of the input layer, where mapping/gating bugs ship silently.
+2. Save/load round-trip across a page reload (Suite 11).
+3. Per-region no-error sweep with the real renderer (Suite 17.1).
+4. Shop buy/sell economy beyond the existing boots case (Suite 6).
+5. Settings toggles actually changing behavior (Suite 12).
+6. Gym prefight and live/auto fight (Suite 9.1).
+7. Modal open/close keyboard coverage for all modals (Suite 2.5).
+8. Recruitment and capture full chains (Suites 7, 10.2).

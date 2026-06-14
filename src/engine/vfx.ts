@@ -337,6 +337,14 @@ export class VfxManager {
     }
   }
 
+  orderPing(point: Vec2, kind: 'move' | 'attack-move' | 'attack-unit', queued = false): void {
+    const color = kind === 'attack-move' || kind === 'attack-unit' ? '#ff7a3a' : '#7adfff';
+    const radius = kind === 'attack-move' ? 0.95 : kind === 'attack-unit' ? 0.7 : 0.78;
+    this.impactDecal(point.x, point.y, color, queued ? radius * 0.78 : radius, queued ? 0.42 : 0.34);
+    if (kind === 'attack-move') this.pillar(point.x, point.y, color, 0.34);
+    else this.blinkMark(point.x, point.y, color);
+  }
+
   handleEvent(ev: SimEvent, unitPos: (uid: number) => { x: number; y: number; h: number } | null): void {
     switch (ev.t) {
       case 'projectile-spawn': {
@@ -791,10 +799,10 @@ export class VfxManager {
     });
   }
 
-  private blinkMark(x: number, y: number): void {
+  private blinkMark(x: number, y: number, color = '#7adfff'): void {
     const pillar = new THREE.Mesh(
       sharedGeometry(new THREE.CylinderGeometry(0.12, 0.3, 3.2, 6, 1, true)),
-      new THREE.MeshBasicMaterial({ color: '#7adfff', transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
     );
     pillar.position.copy(this.w(x, y, 1.6));
     const mat = pillar.material as THREE.MeshBasicMaterial;

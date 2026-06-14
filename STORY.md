@@ -22,6 +22,8 @@ An honest read of the narrative layer, with file references so future work start
 
 **The remaining caveats are deliberate scope, not missing foundations.** Production cut-scenes are authored as TypeScript data, with a lightweight `compileCutsceneDsl()` available and data-lint validating shipped text, tokens, shots, sounds, VFX, gestures, and cross-refs. The proposed core `cinematic-cue` event was dropped in favor of Game-side HP/event inference, documented in `DECISIONS.md`, so `/src/core/` stays presentation-agnostic. Seasonal modes are bespoke plans over the shipped session systems rather than separate one-off minigame engines.
 
+**Story is now a content discipline, guarded by tests.** The catalogue has a reachability lint: every registered cut-scene must be reachable from a `Game` call-site, a region arrival, a badge, a raid, a seasonal event, a legend, or the gallery path, and every runtime cut-scene id must resolve. Browser smoke coverage also drives the real cinematic overlay controls through player input. Future heroes, raids, regions, and events should ship with the same proof: a Loop-facing beat, a route into play, and a test or lint that keeps it from drifting.
+
 ---
 
 ## 1. DESIGN PILLARS

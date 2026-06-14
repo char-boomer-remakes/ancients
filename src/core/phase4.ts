@@ -12,7 +12,7 @@ export function defaultAudioSettings(): AudioSettings {
 }
 
 export function defaultGraphicsSettings(): GraphicsSettings {
-  return { quality: 'auto', exposure: 0.92, grade: 1, reducedMotion: false };
+  return { quality: 'auto', autoAdjustQuality: true, frameTarget: 60, exposure: 0.92, grade: 1, reducedMotion: false };
 }
 
 export function defaultCutsceneSettings(): CutsceneSettings {
@@ -37,6 +37,8 @@ export function migrateAudioSettings(old: (LegacySettings & { audio?: AudioSetti
     minimap: old?.minimap,
     graphics: {
       quality: gx?.quality ?? gd.quality,
+      autoAdjustQuality: gx?.autoAdjustQuality ?? gd.autoAdjustQuality,
+      frameTarget: gx?.frameTarget === 30 || gx?.frameTarget === 60 ? gx.frameTarget : gd.frameTarget,
       exposure: gx?.exposure ?? gd.exposure,
       grade: gx?.grade ?? gd.grade,
       reducedMotion: gx?.reducedMotion ?? gd.reducedMotion

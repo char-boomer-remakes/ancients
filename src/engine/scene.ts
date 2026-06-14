@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { AttackVisualSpec, DungeonRoom, ItemAppearanceSpec, RegionDef, RoomTemplate, StageAction, VfxSpec } from '../core/types';
+import type { AttackVisualSpec, DungeonRoom, ItemAppearanceSpec, RegionDef, RoomTemplate, StageAction, Vec2, VfxSpec } from '../core/types';
 import type { Sim } from '../core/sim';
 import type { Unit } from '../core/unit';
 import { REG } from '../core/registry';
@@ -12,7 +12,7 @@ import type { CinematicView } from './cinematic';
 import { lodForDistance, shouldAnimateAtLod } from './lod';
 import { WORLD_SCALE } from './scale';
 import { TUNING } from '../data/tuning';
-import { clampedPixelRatio, qualityPreset, type QualityTier, type QualityPreset } from './performance';
+import { clampedPixelRatio, higherQualityTier, lowerQualityTier, qualityPreset, type QualityTier, type QualityPreset } from './performance';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -45,6 +45,8 @@ interface UnitView {
   materialMode: 'shared' | 'unique';
   materialOriginals: Map<THREE.Mesh, THREE.Material | THREE.Material[]>;
   materialClones: Set<THREE.Material>;
+  shadowCasters: THREE.Mesh[];
+  shadowCasting: boolean;
   removeAt: number; // time to despawn after death
 }
 
@@ -64,8 +66,11 @@ export interface GraphicsRenderStats {
   textures: number;
   programs: number | null;
   qualityTier: QualityTier;
+  qualityCeiling: QualityTier;
   dpr: number;
   adaptiveScale: number;
+  adaptiveAuto: boolean;
+  frameTarget: 30 | 60;
 }
 
 // Hemi is deliberately low: the PBR env map now supplies most of the ambient
@@ -264,6 +269,7 @@ const HP_BAR_GEOMETRY = new THREE.PlaneGeometry(1, 1);
 const HP_BAR_WIDTH = 1.5;
 const HP_BAR_HEIGHT = 0.16;
 const MANA_BAR_HEIGHT = 0.035;
+const BLOOM_RESOLUTION_SCALE = 0.5;
 
 export class GameScene {
   readonly renderer: THREE.WebGLRenderer;
@@ -325,8 +331,12 @@ export class GameScene {
   private frameMsSamples: number[] = [];
   private lastRenderCalls = 0;
   private lastRenderTriangles = 0;
+  private qualityCeiling: QualityTier;
+  private adaptiveAuto = true;
+  private adaptiveFrameTargetMs = 1000 / 60;
   private adaptiveScale = 1;
   private adaptiveOverBudgetSec = 0;
+  private adaptiveUnderBudgetSec = 0;
   private adaptiveCooldownSec = 0;
   // WS-H micro-feedback: bounded camera shake (crits / big stuns) and a transient
   // per-element grade accent during marquee casts. Both decay every frame and are
@@ -338,6 +348,7 @@ export class GameScene {
   constructor(canvas: HTMLCanvasElement, region: RegionDef, quality: QualityTier = 'high') {
     const qualityCfg = qualityPreset(quality);
     this.quality = qualityCfg;
+    this.qualityCeiling = quality;
     this.biome = region.biome;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !qualityCfg.smaa });
     // EffectComposer performs multiple renders per frame. Keep renderer.info
@@ -399,7 +410,7 @@ export class GameScene {
     this.skyDome.renderOrder = -1;
     this.scene.add(this.skyDome);
 
-    this.terrain = buildTerrain(region, () => this.isLive());
+    this.terrain = buildTerrain(region, () => this.isLive(), { staticPropShadows: qualityCfg.staticPropShadows });
     this.scene.add(this.terrain.group);
 
     if (qualityCfg.weatherDensity > 0) this.buildWeather(region.biome, qualityCfg.weatherDensity);
@@ -435,7 +446,8 @@ export class GameScene {
     const composer = new EffectComposer(this.renderer);
     composer.addPass(new RenderPass(this.scene, this.camera));
     if (q.bloom) {
-      this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), q.bloomStrength, q.bloomRadius, 1.0);
+      const [bloomW, bloomH] = this.bloomSize(w, h);
+      this.bloomPass = new UnrealBloomPass(new THREE.Vector2(bloomW, bloomH), q.bloomStrength, q.bloomRadius, 1.0);
       composer.addPass(this.bloomPass);
     }
     if (q.grade) {
@@ -448,6 +460,13 @@ export class GameScene {
       composer.addPass(this.smaaPass);
     }
     this.composer = composer;
+  }
+
+  private bloomSize(w = window.innerWidth, h = window.innerHeight): [number, number] {
+    return [
+      Math.max(1, Math.floor(w * BLOOM_RESOLUTION_SCALE)),
+      Math.max(1, Math.floor(h * BLOOM_RESOLUTION_SCALE))
+    ];
   }
 
   /** Ambient weather: a camera-following cloud of additive soft particles
@@ -514,7 +533,10 @@ export class GameScene {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.composer?.setSize(w, h);
-    this.bloomPass?.setSize(w, h);
+    if (this.bloomPass) {
+      const [bloomW, bloomH] = this.bloomSize(w, h);
+      this.bloomPass.setSize(bloomW, bloomH);
+    }
     this.smaaPass?.setSize(w, h);
   }
 
@@ -523,6 +545,7 @@ export class GameScene {
    *  as one visible hitch (GRAPHICS_SPEC §9.4). Call behind a loading screen. */
   prewarm(): void {
     this.renderer.compile(this.scene, this.camera);
+    this.composer?.render();
   }
 
   dispose(): void {
@@ -568,8 +591,8 @@ export class GameScene {
     });
   }
 
-  /** Live-apply user graphics settings: exposure, grade strength, reduced motion. */
-  setGraphics(g: { exposure?: number; grade?: number; reducedMotion?: boolean }): void {
+  /** Live-apply user graphics settings: exposure, grade strength, reduced motion, and adaptive policy. */
+  setGraphics(g: { exposure?: number; grade?: number; reducedMotion?: boolean; autoAdjustQuality?: boolean; frameTarget?: 30 | 60 }): void {
     if (g.exposure !== undefined) {
       this.exposureBase = Math.max(0.5, Math.min(1.5, g.exposure));
       this.renderer.toneMappingExposure = this.exposureBase;
@@ -581,6 +604,15 @@ export class GameScene {
     if (g.reducedMotion !== undefined) {
       this.reducedMotion = g.reducedMotion;
       if (this.weather) this.weather.visible = !this.reducedMotion;
+    }
+    if (g.frameTarget !== undefined) {
+      this.adaptiveFrameTargetMs = g.frameTarget === 30 ? 1000 / 30 : 1000 / 60;
+      this.resetAdaptiveCounters();
+    }
+    if (g.autoAdjustQuality !== undefined) {
+      this.adaptiveAuto = g.autoAdjustQuality;
+      this.resetAdaptiveCounters();
+      if (!this.adaptiveAuto) this.restoreQualityCeiling();
     }
   }
 
@@ -603,11 +635,28 @@ export class GameScene {
   /** Rebuild quality-gated systems for a new tier at runtime (Settings UI §6).
    *  Disposes the old post stack/weather/shadow map so switching is leak-free. */
   setQuality(tier: QualityTier): void {
+    this.qualityCeiling = tier;
+    this.adaptiveScale = 1;
+    this.resetAdaptiveCounters();
+    this.applyQualityTier(tier);
+  }
+
+  private restoreQualityCeiling(): void {
+    if (this.quality.tier === this.qualityCeiling && this.adaptiveScale === 1) return;
+    this.adaptiveScale = 1;
+    this.applyQualityTier(this.qualityCeiling, false);
+  }
+
+  private resetAdaptiveCounters(): void {
+    this.adaptiveOverBudgetSec = 0;
+    this.adaptiveUnderBudgetSec = 0;
+    this.adaptiveCooldownSec = 0;
+  }
+
+  private applyQualityTier(tier: QualityTier, resetCounters = false): void {
     const q = qualityPreset(tier);
     this.quality = q;
-    this.adaptiveScale = 1;
-    this.adaptiveOverBudgetSec = 0;
-    this.adaptiveCooldownSec = 0;
+    if (resetCounters) this.resetAdaptiveCounters();
     this.applyPixelRatio();
 
     this.renderer.shadowMap.enabled = q.shadows;
@@ -616,6 +665,10 @@ export class GameScene {
     this.sun.shadow.mapSize.set(q.shadowMapSize, q.shadowMapSize);
     this.sun.shadow.map?.dispose();
     this.sun.shadow.map = null as unknown as THREE.WebGLRenderTarget; // re-alloc at new size
+    this.terrain.setStaticPropShadows?.(q.staticPropShadows);
+    if (!q.shadows) {
+      for (const view of this.views.values()) this.setUnitShadowCasting(view, false);
+    }
 
     if (q.envMap && !this.scene.environment) {
       const pmrem = new THREE.PMREMGenerator(this.renderer);
@@ -765,16 +818,64 @@ export class GameScene {
   }
 
   private updateAdaptiveDpr(frameMs: number, dt: number): void {
-    if (this.quality.tier === 'low' || this.quality.tier === 'medium') return;
+    if (!this.adaptiveAuto) return;
     this.adaptiveCooldownSec = Math.max(0, this.adaptiveCooldownSec - dt);
-    if (frameMs > 22) this.adaptiveOverBudgetSec += dt;
-    else if (frameMs < 17) this.adaptiveOverBudgetSec = Math.max(0, this.adaptiveOverBudgetSec - dt * 2);
-    if (this.adaptiveOverBudgetSec < 4 || this.adaptiveCooldownSec > 0 || this.adaptiveScale <= 0.75) return;
-    this.adaptiveScale = Math.max(0.75, this.adaptiveScale * 0.9);
-    this.applyPixelRatio();
-    this.resize();
-    this.adaptiveCooldownSec = 8;
-    this.adaptiveOverBudgetSec = 0;
+    const overBudgetMs = this.adaptiveFrameTargetMs * 1.32;
+    const recoverMs = this.adaptiveFrameTargetMs * 0.9;
+
+    if (frameMs > overBudgetMs) {
+      this.adaptiveOverBudgetSec += dt;
+      this.adaptiveUnderBudgetSec = 0;
+    } else if (frameMs < recoverMs) {
+      this.adaptiveUnderBudgetSec += dt;
+      this.adaptiveOverBudgetSec = Math.max(0, this.adaptiveOverBudgetSec - dt * 2);
+    } else {
+      this.adaptiveOverBudgetSec = Math.max(0, this.adaptiveOverBudgetSec - dt);
+      this.adaptiveUnderBudgetSec = Math.max(0, this.adaptiveUnderBudgetSec - dt);
+    }
+
+    if (this.adaptiveCooldownSec > 0) return;
+
+    if (this.adaptiveOverBudgetSec >= 4) {
+      if (this.adaptiveScale > 0.75) {
+        this.adaptiveScale = Math.max(0.75, this.adaptiveScale * 0.9);
+        this.applyPixelRatio();
+        this.resize();
+      } else {
+        this.degradeAdaptiveTier();
+      }
+      this.adaptiveCooldownSec = 8;
+      this.adaptiveOverBudgetSec = 0;
+      this.adaptiveUnderBudgetSec = 0;
+      return;
+    }
+
+    if (this.adaptiveUnderBudgetSec >= 12) {
+      if (this.adaptiveScale < 1) {
+        this.adaptiveScale = Math.min(1, this.adaptiveScale * 1.1);
+        this.applyPixelRatio();
+        this.resize();
+      } else {
+        this.recoverAdaptiveTier();
+      }
+      this.adaptiveCooldownSec = 8;
+      this.adaptiveOverBudgetSec = 0;
+      this.adaptiveUnderBudgetSec = 0;
+    }
+  }
+
+  private degradeAdaptiveTier(): void {
+    const next = lowerQualityTier(this.quality.tier);
+    if (!next) return;
+    this.adaptiveScale = 1;
+    this.applyQualityTier(next, false);
+  }
+
+  private recoverAdaptiveTier(): void {
+    const next = higherQualityTier(this.quality.tier, this.qualityCeiling);
+    if (!next) return;
+    this.adaptiveScale = 1;
+    this.applyQualityTier(next, false);
   }
 
   graphicsStats(): GraphicsRenderStats {
@@ -790,14 +891,18 @@ export class GameScene {
       textures: info.memory.textures,
       programs: programs ? programs.length : null,
       qualityTier: this.quality.tier,
+      qualityCeiling: this.qualityCeiling,
       dpr: this.renderer.getPixelRatio(),
-      adaptiveScale: this.adaptiveScale
+      adaptiveScale: this.adaptiveScale,
+      adaptiveAuto: this.adaptiveAuto,
+      frameTarget: this.adaptiveFrameTargetMs > 25 ? 30 : 60
     };
   }
 
   resetGraphicsStats(): void {
     this.frameMsSamples = [];
     this.adaptiveOverBudgetSec = 0;
+    this.adaptiveUnderBudgetSec = 0;
     this.adaptiveCooldownSec = 0;
   }
 
@@ -841,42 +946,45 @@ export class GameScene {
       color: roomColor,
       transparent: true,
       opacity: 0.09,
+      depthTest: false,
       depthWrite: false
     });
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, h), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(w / 2, 0.05, h / 2);
+    floor.position.set(w / 2, this.terrain.heightAt(template.size.x / 2, template.size.y / 2) + 0.08, h / 2);
     floor.renderOrder = 6;
     group.add(floor);
 
-    const edgePoints = [
-      new THREE.Vector3(0, 0.12, 0),
-      new THREE.Vector3(w, 0.12, 0),
-      new THREE.Vector3(w, 0.12, h),
-      new THREE.Vector3(0, 0.12, h),
-      new THREE.Vector3(0, 0.12, 0)
-    ];
+    const edgePoints: THREE.Vector3[] = [];
+    const edgeSegments = 24;
+    const pushEdgePoint = (x: number, y: number): void => {
+      edgePoints.push(new THREE.Vector3(x / WORLD_SCALE, this.terrain.heightAt(x, y) + 0.24, y / WORLD_SCALE));
+    };
+    for (let i = 0; i <= edgeSegments; i++) pushEdgePoint(template.size.x * (i / edgeSegments), 0);
+    for (let i = 1; i <= edgeSegments; i++) pushEdgePoint(template.size.x, template.size.y * (i / edgeSegments));
+    for (let i = 1; i <= edgeSegments; i++) pushEdgePoint(template.size.x * (1 - i / edgeSegments), template.size.y);
+    for (let i = 1; i <= edgeSegments; i++) pushEdgePoint(0, template.size.y * (1 - i / edgeSegments));
     const edgeGeo = new THREE.BufferGeometry().setFromPoints(edgePoints);
-    const edge = new THREE.Line(edgeGeo, new THREE.LineBasicMaterial({ color: roomColor, transparent: true, opacity: 0.75 }));
+    const edge = new THREE.Line(edgeGeo, new THREE.LineBasicMaterial({ color: roomColor, transparent: true, opacity: 0.75, depthTest: false, depthWrite: false }));
     edge.renderOrder = 7;
     group.add(edge);
 
     const doorGeo = new THREE.RingGeometry(0.25, 0.42, 24);
-    const doorMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false });
+    const doorMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthTest: false, depthWrite: false });
     for (const c of template.connectors) {
       const door = new THREE.Mesh(doorGeo, doorMat);
       door.rotation.x = -Math.PI / 2;
-      door.position.set(c.at.x / WORLD_SCALE, 0.14, c.at.y / WORLD_SCALE);
+      door.position.set(c.at.x / WORLD_SCALE, this.terrain.heightAt(c.at.x, c.at.y) + 0.3, c.at.y / WORLD_SCALE);
       door.renderOrder = 8;
       group.add(door);
     }
 
     const anchorGeo = new THREE.CircleGeometry(0.18, 18);
-    const anchorMat = new THREE.MeshBasicMaterial({ color: 0xff7a3a, transparent: true, opacity: 0.32, depthWrite: false });
+    const anchorMat = new THREE.MeshBasicMaterial({ color: 0xff7a3a, transparent: true, opacity: 0.32, depthTest: false, depthWrite: false });
     for (const a of template.spawnAnchors) {
       const marker = new THREE.Mesh(anchorGeo, anchorMat);
       marker.rotation.x = -Math.PI / 2;
-      marker.position.set(a.x / WORLD_SCALE, 0.13, a.y / WORLD_SCALE);
+      marker.position.set(a.x / WORLD_SCALE, this.terrain.heightAt(a.x, a.y) + 0.28, a.y / WORLD_SCALE);
       marker.renderOrder = 8;
       group.add(marker);
     }
@@ -931,6 +1039,7 @@ export class GameScene {
     for (const echo of region.echoSpawns ?? []) add(echo.pos.x, echo.pos.y, 0.42, 0x8fe8ff, 'ring');
     for (const gate of region.gates ?? []) add(gate.pos.x, gate.pos.y, 0.5, 0x7aff9a, 'ring');
     for (const gym of region.gyms ?? []) add(gym.pos.x, gym.pos.y, 0.58, 0xff9ad5, 'ring');
+    for (const dungeon of region.dungeons ?? []) add(dungeon.pos.x, dungeon.pos.y, 0.6, 0xb28cff, 'ring');
   }
 
   /** Game layer forwards sim events here (it also consumes them for UI). */
@@ -963,17 +1072,23 @@ export class GameScene {
     });
   }
 
+  showOrderFeedback(point: Vec2, kind: 'move' | 'attack-move' | 'attack-unit', queued = false): void {
+    this.vfx.orderPing(point, kind, queued);
+  }
+
   private syncUnits(sim: Sim, dt: number): void {
     const seen = new Set<number>();
+    let fullAnimationBudget = this.quality.fullRigAnimationBudget;
     for (const u of sim.unitsArr) {
       if (u.kind === 'npc' && !u.alive) continue;
       seen.add(u.uid);
       let view = this.views.get(u.uid);
       if (!view) {
+        if (!u.alive) continue;
         view = this.createView(u);
         this.views.set(u.uid, view);
       }
-      this.updateView(u, view, dt, sim.time);
+      fullAnimationBudget = this.updateView(u, view, dt, sim.time, fullAnimationBudget);
     }
     // remove views for despawned units or finished death anims
     for (const [uid, view] of this.views) {
@@ -1089,7 +1204,9 @@ export class GameScene {
       if (creatureUrl) {
         void loadModelAsset(creatureUrl).then((asset) => {
           if (asset && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
-            mountHeroModel(rig, cloneModel(asset.scene), asset.animations);
+            const model = cloneModel(asset.scene);
+            recolorToPalette(model, palette, undefined, { solid: true, opaque: true });
+            mountHeroModel(rig, model, asset.animations);
           }
         });
       }
@@ -1154,16 +1271,19 @@ export class GameScene {
     immuneShell.visible = false;
     rig.root.add(immuneShell);
 
-    return {
+    const view: UnitView = {
       rig, anim: newAnimState(), ring, hpBar, hpFill, manaFill, hpMaterial,
       lastHpPct: -1, lastManaPct: -1, lastTeamColor: '',
       stars, immuneShell, lastItemVisualIds: this.itemVisualIds(u),
       materialMode: 'shared', materialOriginals: new Map(), materialClones: new Set(),
+      shadowCasters: [], shadowCasting: true,
       removeAt: 0
     };
+    this.refreshShadowCasters(view);
+    return view;
   }
 
-  private updateView(u: Unit, view: UnitView, dt: number, simTime: number): void {
+  private updateView(u: Unit, view: UnitView, dt: number, simTime: number, fullAnimationBudget: number): number {
     const { rig } = view;
     const wx = u.pos.x / WORLD_SCALE;
     const wz = u.pos.y / WORLD_SCALE;
@@ -1176,9 +1296,11 @@ export class GameScene {
 
     if (this.shouldSkipOffscreenUnit(u, view, wx, wz, tier)) {
       rig.root.visible = false;
+      this.setUnitShadowCasting(view, false);
       this.restoreSharedMaterials(view);
-      return;
+      return fullAnimationBudget;
     }
+    this.setUnitShadowCasting(view, this.shouldUnitCastShadow(tier));
 
     if (this.itemVisualChanged(u, view)) {
       applyItemAppearances(rig, this.itemAppearancesFor(u));
@@ -1206,8 +1328,11 @@ export class GameScene {
     else this.restoreSharedMaterials(view);
 
     // Overworld LOD (§3.16): far units freeze their pose, mid units animate at
-    // a reduced cadence. The gate also covers authored AnimationMixer updates.
-    if (shouldAnimateAtLod(tier, this.frameParity)) {
+    // a reduced cadence. The crowd budget prevents same-screen armies from all
+    // paying full authored-mixer cost at once; overflow drops to reduced cadence.
+    const animationTier = tier === 'full' && u.uid !== this.selectedUid && fullAnimationBudget <= 0 ? 'reduced' : tier;
+    if (tier === 'full' && u.uid !== this.selectedUid && fullAnimationBudget > 0) fullAnimationBudget--;
+    if (shouldAnimateAtLod(animationTier, this.frameParity)) {
       animateRig(rig, u, view.anim, dt, this.time, simTime);
     }
 
@@ -1241,6 +1366,7 @@ export class GameScene {
       (view.immuneShell.material as THREE.MeshBasicMaterial).opacity = 0.13 + Math.sin(this.time * 6) * 0.05;
     }
     if (tier === 'full') rig.itemLayer.rotation.y = Math.sin(this.time * 1.6 + u.uid) * 0.035;
+    return fullAnimationBudget;
   }
 
   private shouldSkipOffscreenUnit(u: Unit, view: UnitView, wx: number, wz: number, tier: ReturnType<typeof lodForDistance>): boolean {
@@ -1252,6 +1378,31 @@ export class GameScene {
     this.unitCullSphere.center.set(wx, centerY, wz);
     this.unitCullSphere.radius = radius;
     return !this.viewFrustum.intersectsSphere(this.unitCullSphere);
+  }
+
+  private shouldUnitCastShadow(tier: ReturnType<typeof lodForDistance>): boolean {
+    if (!this.quality.shadows) return false;
+    if (this.quality.tier === 'medium') return tier === 'full';
+    return tier !== 'culled';
+  }
+
+  private refreshShadowCasters(view: UnitView): void {
+    view.shadowCasters = [];
+    view.rig.root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || (!mesh.castShadow && !mesh.userData.unitShadowCaster)) return;
+      mesh.userData.unitShadowCaster = true;
+      view.shadowCasters.push(mesh);
+    });
+  }
+
+  private setUnitShadowCasting(view: UnitView, enabled: boolean): void {
+    if (view.shadowCasting === enabled) return;
+    // Authored models can arrive after the procedural view was created; refresh
+    // only when the state flips, not on every frame.
+    this.refreshShadowCasters(view);
+    for (const mesh of view.shadowCasters) mesh.castShadow = enabled;
+    view.shadowCasting = enabled;
   }
 
   private needsUniqueMaterials(u: Unit, view: UnitView, simTime: number): boolean {

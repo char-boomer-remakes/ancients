@@ -1127,3 +1127,87 @@ button:disabled { opacity: 0.45; cursor: default; }
 .attr.uni { background: #4a3e5a; color: #cdb8ff; }
 .starter-card p { color: var(--dim); font-size: 11px; }
 .starter-card em { color: var(--dim); font-size: 11px; min-height: 28px; }
+
+/* ============================================================
+   Rich hover card: spell / item descriptions.
+   Blurb -> what it does -> stats -> meta chips.
+   ============================================================ */
+#hover-card {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 99999;
+  max-width: 340px;
+  min-width: 210px;
+  pointer-events: none;
+  background: var(--panel-grad);
+  border: 1px solid var(--panel-line);
+  border-radius: 9px;
+  box-shadow: var(--brass-frame);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow: hidden;
+}
+.tip-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 2px solid var(--brass);
+  background: rgba(0, 0, 0, 0.28);
+}
+.tip-name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--brass-lite);
+}
+.tip-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--dim);
+  white-space: nowrap;
+  align-self: center;
+}
+.tip-blurb {
+  padding: 8px 12px 0;
+  font-style: italic;
+  color: var(--brass-lite);
+  opacity: 0.85;
+  font-size: 12px;
+}
+.tip-effect { padding: 8px 12px; }
+.tip-effect p { margin: 0 0 5px; }
+.tip-effect p:last-child { margin-bottom: 0; }
+.tip-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--panel-line);
+}
+.tip-stats span { color: var(--good); font-size: 12px; white-space: nowrap; }
+.tip-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--panel-line);
+  background: rgba(0, 0, 0, 0.2);
+}
+.tip-meta span {
+  font-size: 10.5px;
+  color: var(--text);
+  padding: 2px 8px;
+  border: 1px solid var(--brass-dark);
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+/* Inline ability/item descriptions in the Compendium */
+.codex-effect { margin: 4px 0 2px; color: var(--text); font-size: 12px; }
+.codex-lore { margin: 2px 0 0; color: var(--dim); font-style: italic; font-size: 11.5px; }

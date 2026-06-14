@@ -52,6 +52,20 @@ describe('gameplay overhaul: locomotion and discovery', () => {
     expect(Game.validateSave(game.buildSave())).toBe(true);
   });
 
+  it('projects move orders out of tree and rock obstacle circles', () => {
+    const game = Game.headless(newGameSave('juggernaut'));
+    const hero = game.activeUnit()!;
+    const obstacle = { pos: { x: hero.pos.x + 240, y: hero.pos.y }, radius: 120 };
+    game.sim.obstacles = [obstacle];
+
+    game.orderMove({ ...obstacle.pos });
+
+    expect(hero.order.kind).toBe('move');
+    if (hero.order.kind !== 'move') return;
+    const d = Math.hypot(hero.order.point.x - obstacle.pos.x, hero.order.point.y - obstacle.pos.y);
+    expect(d).toBeGreaterThanOrEqual(obstacle.radius + hero.radius + 9.9);
+  });
+
   it('tag-in items reduce swap cooldown and apply an entrance burst', () => {
     const save = newGameSave('juggernaut');
     const axeSave = newGameSave('axe').roster[0];

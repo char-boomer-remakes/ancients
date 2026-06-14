@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampedPixelRatio, qualityPreset } from '../engine/performance';
+import { clampedPixelRatio, higherQualityTier, lowerQualityTier, qualityPreset } from '../engine/performance';
 
 describe('performance quality presets', () => {
   it('clamps device pixel ratio by quality tier', () => {
@@ -11,7 +11,21 @@ describe('performance quality presets', () => {
 
   it('reduces expensive render features on lower tiers', () => {
     expect(qualityPreset('low').shadows).toBe(false);
+    expect(qualityPreset('high').staticPropShadows).toBe(false);
+    expect(qualityPreset('ultra').staticPropShadows).toBe(true);
     expect(qualityPreset('low').shadowMapSize).toBeLessThan(qualityPreset('high').shadowMapSize);
     expect(qualityPreset('medium').transientVfxCap).toBeLessThan(qualityPreset('high').transientVfxCap);
+    expect(qualityPreset('medium').fullRigAnimationBudget).toBeLessThan(qualityPreset('high').fullRigAnimationBudget);
+  });
+
+  it('keeps ambient occlusion disabled until a pass is wired', () => {
+    expect(qualityPreset('ultra').ao).toBe(false);
+  });
+
+  it('walks quality tiers within the requested ceiling', () => {
+    expect(lowerQualityTier('ultra')).toBe('high');
+    expect(lowerQualityTier('low')).toBeNull();
+    expect(higherQualityTier('medium', 'ultra')).toBe('high');
+    expect(higherQualityTier('high', 'high')).toBeNull();
   });
 });

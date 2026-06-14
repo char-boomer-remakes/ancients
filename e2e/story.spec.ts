@@ -2,6 +2,65 @@ import { test, expect } from '@playwright/test';
 import { boot } from './helpers';
 
 test.describe('story and cinematics', () => {
+  test('prologue cinematic overlay controls work through player input', async ({ page }) => {
+    test.setTimeout(60_000);
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+
+    await boot(page, { hero: 'juggernaut', seed: 202, hud: true });
+
+    await page.waitForFunction(() => {
+      const layer = document.getElementById('cinematic-layer');
+      return !!layer &&
+        !layer.classList.contains('hidden') &&
+        layer.textContent?.includes('The Moon Breaks') &&
+        layer.querySelector('[data-cinematic="next"]') &&
+        layer.querySelector('[data-cinematic="ff"]') &&
+        layer.querySelector('[data-cinematic="skip"]');
+    }, null, { timeout: 30_000 });
+
+    const initialHandle = await page.waitForFunction(() => (window as any).__game?.cinematic.view(), null, { timeout: 30_000 });
+    const initial = await initialHandle.jsonValue() as { id: string; beatIndex: number };
+    expect(initial.id).toBe('prologue-moon-breaks');
+    expect(initial.beatIndex).toBe(0);
+    await page.keyboard.press('Space');
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => ((window as any).__game?.cinematic.view()?.beatIndex ?? 0) > 0, null, { timeout: 5_000 });
+
+    await page.evaluate(() => {
+      document.querySelector('[data-cinematic="ff"]')?.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
+    });
+    await page.waitForFunction(() => ((window as any).__game?.cinematic.view()?.speed ?? 1) > 1, null, { timeout: 5_000 });
+    await page.evaluate(() => {
+      document.querySelector('[data-cinematic="ff"]')?.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true }));
+    });
+    await page.waitForFunction(() => ((window as any).__game?.cinematic.view()?.speed ?? 0) === 1, null, { timeout: 5_000 });
+
+    const skipProgress = await page.evaluate(() => {
+      const btn = document.querySelector('[data-cinematic="skip"]');
+      if (!btn) throw new Error('skip button missing');
+      btn.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
+      (window as any).__test.step();
+      return (window as any).__game.cinematic.view()?.skipProgress ?? 0;
+    });
+    expect(skipProgress).toBeGreaterThan(0);
+    await page.evaluate(() => (window as any).__test.fastForward(1));
+    await page.waitForFunction(() => {
+      const g = (window as any).__game;
+      return g?.cinematic.active === false || g?.cinematic.view()?.id !== 'prologue-moon-breaks';
+    }, null, { timeout: 5_000 });
+    await page.evaluate(() => {
+      document.querySelector('[data-cinematic="skip"]')?.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true }));
+      const g = (window as any).__game;
+      let guard = 0;
+      while (g?.cinematic.active && guard++ < 20) g.cinematicSkip();
+      (window as any).__test.step();
+    });
+    await page.waitForFunction(() => document.getElementById('cinematic-layer')?.classList.contains('hidden'), null, { timeout: 5_000 });
+
+    expect(errors).toEqual([]);
+  });
+
   test('prologue, gallery, Loop codex, bind scene, and festival intro work in-browser', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));

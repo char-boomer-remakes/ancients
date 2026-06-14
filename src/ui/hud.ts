@@ -10,6 +10,7 @@ import { itemReady, sellValue, computeBuyPlan } from '../core/items';
 import { buybackCost } from '../core/phase3';
 import { levelArr } from '../core/values';
 import { buildDefaultGambit } from '../core/controllers';
+import { statLabel, fmtStatValue, statLines, buildAbilityCard, buildItemCard, buildNeutralItemCard, type TooltipCard } from '../core/describe';
 import { abilityIcon, itemIcon, heroPortrait } from '../engine/icons';
 import { WORLD_SCALE } from '../engine/scale';
 import { Game } from '../systems/game';
@@ -26,39 +27,6 @@ const ABILITY_KEYS = ['Q', 'W', 'E', 'R', 'D', 'F'];
 const ITEM_KEYS = ['Z', 'X', 'C', 'V', '·', '·'];
 const GOLD_STREAK_WINDOW_MS = 1500;
 const RARITY_ORDER: ItemRarity[] = ['common', 'uncommon', 'rare', 'mythical', 'legendary', 'immortal', 'arcana'];
-const STAT_LABELS: Partial<Record<keyof StatModMap, string>> = {
-  str: 'STR',
-  agi: 'AGI',
-  int: 'INT',
-  damage: 'Damage',
-  damagePct: 'Damage %',
-  armor: 'Armor',
-  attackSpeed: 'Attack speed',
-  moveSpeed: 'Move speed',
-  moveSpeedPct: 'Move speed %',
-  hpRegen: 'HP regen',
-  manaRegen: 'Mana regen',
-  manaRegenPctMax: 'Mana % regen',
-  maxHp: 'Max HP',
-  maxMana: 'Max mana',
-  magicResistPct: 'Magic resist',
-  spellAmpPct: 'Spell amp',
-  statusResistPct: 'Status resist',
-  evasionPct: 'Evasion',
-  lifestealPct: 'Lifesteal',
-  attackRange: 'Attack range',
-  hpRegenPctMax: 'HP % regen',
-  damageTakenReductionPct: 'Damage taken',
-  attackDamageTakenReductionPct: 'Attack damage taken',
-  castRange: 'Cast range',
-  visionPct: 'Vision',
-  swapCdReductionPct: 'Swap CD',
-  swapInDamagePct: 'Swap-in damage',
-  swapInHealPct: 'Swap-in heal',
-  reactionAmpPct: 'Reaction amp',
-  elementalGaugeSec: 'Element gauge',
-  staminaBonus: 'Stamina'
-};
 const STAT_WEIGHTS: Partial<Record<keyof StatModMap, number>> = {
   damage: 1.5,
   damagePct: 3,
@@ -97,17 +65,6 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 }
 
-function statLabel(key: keyof StatModMap): string {
-  return STAT_LABELS[key] ?? key;
-}
-
-function fmtStatValue(key: keyof StatModMap, value: number, signed = true): string {
-  const sign = signed && value > 0 ? '+' : '';
-  const pct = key.toLowerCase().includes('pct') ? '%' : '';
-  const rounded = Math.abs(value) >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
-  return `${sign}${rounded}${pct}`;
-}
-
 function mergeMods(...parts: (StatModMap | undefined)[]): StatModMap {
   const out: StatModMap = {};
   for (const mods of parts) {
@@ -120,14 +77,6 @@ function mergeMods(...parts: (StatModMap | undefined)[]): StatModMap {
 
 function itemMods(item: ItemSave, def: ItemDef): StatModMap {
   return mergeMods(def.passiveMods, item.resolvedMods);
-}
-
-function statLines(mods: StatModMap, limit = 6): string[] {
-  return (Object.entries(mods) as [keyof StatModMap, number][])
-    .filter(([, value]) => Math.abs(value) > 0.0001)
-    .sort(([a], [b]) => statLabel(a).localeCompare(statLabel(b)))
-    .slice(0, limit)
-    .map(([key, value]) => `${fmtStatValue(key, value)} ${statLabel(key)}`);
 }
 
 function itemScore(item: ItemSave, def: ItemDef): number {
@@ -205,11 +154,10 @@ function setProgressLines(item: ItemSave, equipped: (ItemSave | null)[] = []): s
   return [`Set: ${set.name} ${pieces}/${set.pieces.length}`, ...bonuses, `Pieces: ${pieceNames}`];
 }
 
-function itemTooltip(def: ItemDef, item: ItemSave, equipped: (ItemSave | null)[] = []): string {
-  const lines = [
-    def.name,
+/** Instance-specific lines (grade, affixes, sockets, set progress) shown beneath the base stats. */
+function itemDetailLines(item: ItemSave, equipped: (ItemSave | null)[] = []): string[] {
+  return [
     gradeLabel(item),
-    ...statLines(itemMods(item, def), 10),
     ...(item.affixes ?? []).map((affix) => {
       const defn = affixDef(affix.affixId);
       const mods = statLines(affix.resolved, 4).join(', ');
@@ -219,7 +167,15 @@ function itemTooltip(def: ItemDef, item: ItemSave, equipped: (ItemSave | null)[]
       const gem = socket ? gemDef(socket) : null;
       return `Socket ${i + 1}: ${gem ? gem.name : 'empty'}`;
     }),
-    ...setProgressLines(item, equipped),
+    ...setProgressLines(item, equipped)
+  ].filter(Boolean);
+}
+
+function itemTooltip(def: ItemDef, item: ItemSave, equipped: (ItemSave | null)[] = []): string {
+  const lines = [
+    def.name,
+    ...statLines(itemMods(item, def), 10),
+    ...itemDetailLines(item, equipped),
     def.lore
   ].filter(Boolean);
   return lines.join('\n');
@@ -262,6 +218,9 @@ export class Hud {
   private lastTrialChoiceKey = '';
   private liveGymBar: HTMLElement;
   private cinematicLayer: HTMLElement;
+  private hoverCard!: HTMLElement;
+  private tips = new Map<string, string>();
+  private hoverKey: string | null = null;
   private lastLiveGymKey = '';
 
   // gambit editor working state (§3.5)
@@ -307,6 +266,7 @@ export class Hud {
       <div id="live-gym-bar" class="hidden"></div>
       <div id="cinematic-layer" class="hidden"></div>
       <div id="modal-root" class="hidden"></div>
+      <div id="hover-card" class="hidden"></div>
     `;
     this.topBar = this.root.querySelector('#top-bar')!;
     this.partyCol = this.root.querySelector('#party-col')!;
@@ -371,6 +331,63 @@ export class Hud {
       const kind = open?.dataset.open as 'journal' | 'codex' | undefined;
       if (kind) this.toggleModal(kind);
     });
+    this.hoverCard = this.root.querySelector('#hover-card')!;
+    this.setupHoverCard();
+  }
+
+  // ---------- hover card (rich tooltips) ----------
+
+  private setupHoverCard(): void {
+    document.addEventListener('mousemove', (e) => {
+      const target = e.target as HTMLElement | null;
+      const tipEl = target?.closest?.('[data-tip]') as HTMLElement | null;
+      const key = tipEl?.dataset.tip ?? null;
+      if (key && this.tips.has(key)) {
+        if (key !== this.hoverKey) {
+          this.hoverKey = key;
+          this.hoverCard.innerHTML = this.tips.get(key)!;
+          this.hoverCard.classList.remove('hidden');
+        }
+        this.positionHoverCard(e.clientX, e.clientY);
+      } else if (this.hoverKey !== null) {
+        this.hideHoverCard();
+      }
+    });
+  }
+
+  private hideHoverCard(): void {
+    if (this.hoverKey === null) return;
+    this.hoverKey = null;
+    this.hoverCard.classList.add('hidden');
+  }
+
+  private positionHoverCard(x: number, y: number): void {
+    const margin = 16;
+    const w = this.hoverCard.offsetWidth || 300;
+    const h = this.hoverCard.offsetHeight || 180;
+    let left = x + margin;
+    let top = y + margin;
+    if (left + w > window.innerWidth - 8) left = x - w - margin;
+    if (top + h > window.innerHeight - 8) top = window.innerHeight - h - 8;
+    this.hoverCard.style.left = `${Math.max(8, left)}px`;
+    this.hoverCard.style.top = `${Math.max(8, top)}px`;
+  }
+
+  /** Register a tooltip card under a key and return the attribute to drop on the trigger element. */
+  private registerTip(key: string, card: TooltipCard, opts: { accent?: string; extra?: string[] } = {}): string {
+    this.tips.set(key, this.cardHtml(card, opts));
+    return ` data-tip="${key}"`;
+  }
+
+  private cardHtml(card: TooltipCard, opts: { accent?: string; extra?: string[] } = {}): string {
+    const accent = opts.accent ?? 'var(--brass)';
+    const head = `<div class="tip-head" style="border-bottom-color:${accent}"><span class="tip-name" style="color:${accent}">${esc(card.name)}</span><span class="tip-kind">${esc(card.kind)}</span></div>`;
+    const blurb = card.blurb ? `<div class="tip-blurb">${esc(card.blurb)}</div>` : '';
+    const effect = card.effect.length > 0 ? `<div class="tip-effect">${card.effect.map((e) => `<p>${esc(e)}</p>`).join('')}</div>` : '';
+    const allStats = [...card.stats, ...(opts.extra ?? [])].filter(Boolean);
+    const stats = allStats.length > 0 ? `<div class="tip-stats">${allStats.map((s) => `<span>${esc(s)}</span>`).join('')}</div>` : '';
+    const meta = card.meta.length > 0 ? `<div class="tip-meta">${card.meta.map((m) => `<span>${esc(m)}</span>`).join('')}</div>` : '';
+    return `${head}${blurb}${effect}${stats}${meta}`;
   }
 
   // ---------- per frame ----------
@@ -462,6 +479,7 @@ export class Hud {
     for (const echo of g.region.echoSpawns ?? []) dot(echo.pos.x, echo.pos.y, 2.2, '#8fe8ff', true);
     for (const gate of g.region.gates ?? []) dot(gate.pos.x, gate.pos.y, 2.7, '#7aff9a', true);
     for (const gym of g.region.gyms ?? []) dot(gym.pos.x, gym.pos.y, 3, '#ff9ad5', true);
+    for (const dungeon of g.region.dungeons ?? []) dot(dungeon.pos.x, dungeon.pos.y, 3, '#b28cff', true);
     for (const wp of g.region.waypoints ?? []) dot(wp.pos.x, wp.pos.y, 2.5, g.discovered.has(wp.id) ? '#7af7ff' : '#446b73', true);
     for (const chest of g.region.chests ?? []) {
       if (!g.openedChests.has(chest.id)) dot(chest.pos.x, chest.pos.y, 2, '#ffd86a', true);
@@ -552,9 +570,9 @@ export class Hud {
       const noMana = mana > 0 && u.mana < mana;
       const passive = ['passive', 'aura', 'attack-modifier'].includes(a.def.targeting);
       const toggledOn = a.toggled;
+      const abTip = this.registerTip(`ab-${i}`, buildAbilityCard(a.def, a.level));
       abilitiesHtml += `
-        <div class="ab-slot ${a.level <= 0 ? 'unlearned' : ''} ${noMana ? 'nomana' : ''} ${passive ? 'passive' : ''} ${toggledOn ? 'toggled' : ''}"
-             title="${a.def.name}${a.def.lore ? ' — ' + a.def.lore : ''}">
+        <div class="ab-slot ${a.level <= 0 ? 'unlearned' : ''} ${noMana ? 'nomana' : ''} ${passive ? 'passive' : ''} ${toggledOn ? 'toggled' : ''}"${abTip}>
           <img src="${abilityIcon(a.def)}" alt="">
           ${cdLeft > 0 ? `<div class="cd" style="height:${cdPct}%"></div><span class="cd-num">${cdLeft.toFixed(cdLeft > 5 ? 0 : 1)}</span>` : ''}
           <span class="hotkey">${passive ? '' : ABILITY_KEYS[i]}</span>
@@ -576,16 +594,19 @@ export class Hud {
       const cdLeft = Math.max(0, it.cooldownUntil - now);
       const lockout = !ready.ok && ready.reason === 'damage-lockout';
       const hasQuality = !!it.quality && it.quality !== 'standard';
-      const qTip = hasQuality
-        ? ` [${QUALITY_GRADES[it.quality!].name}${it.quality === 'inscribed' && it.inscribedKills ? ` ${it.inscribedKills}` : ''}]`
+      const qLine = hasQuality
+        ? `${QUALITY_GRADES[it.quality!].name}${it.quality === 'inscribed' && it.inscribedKills ? ` (${it.inscribedKills} kills)` : ''}`
         : '';
       const qBorder = hasQuality ? `box-shadow: inset 0 0 0 2px ${qualityColor(it.quality)};` : '';
       const gDef = GRADE_DEFS[it.grade ?? 'standard'];
       const savedItem: ItemSave = { ...it, id: it.defId };
-      const gTip = ` [${gradeLabel(savedItem)}]`;
       const gradeFrame = `outline:2px solid ${gDef.frame};`;
+      const itemTip = this.registerTip(`item-${i}`, buildItemCard(idef, { mods: itemMods(savedItem, idef) }), {
+        accent: rarityColor(idef.rarity),
+        extra: [...(qLine ? [qLine] : []), ...itemDetailLines(savedItem, equippedSaves)]
+      });
       itemsHtml += `
-        <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}" title="${esc(itemTooltip(idef, savedItem, equippedSaves))}${qTip}${gTip}" style="border-color:${rarityColor(idef.rarity)};${gradeFrame}${qBorder}">
+        <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}"${itemTip} style="border-color:${rarityColor(idef.rarity)};${gradeFrame}${qBorder}">
           <img src="${itemIcon(idef)}" alt="">
           ${cdLeft > 0 ? `<span class="cd-num">${cdLeft.toFixed(cdLeft > 5 ? 0 : 1)}</span>` : ''}
           ${it.charges >= 0 ? `<span class="charges">${it.charges}</span>` : ''}
@@ -877,7 +898,9 @@ export class Hud {
   private renderHint(): void {
     const g = this.game;
     let hint = '';
-    if (this.input.hoverUid >= 0) {
+    if (this.input.attackMoveArmed()) {
+      hint = 'Attack-move: left-click ground to advance and fight · click an enemy to attack · Esc cancels';
+    } else if (this.input.hoverUid >= 0) {
       const u = g.sim.unit(this.input.hoverUid);
       if (u) {
         if (g.npcAt(u.uid)) hint = `${u.name} — right-click to recruit`;
@@ -1513,7 +1536,8 @@ export class Hud {
       const canEnchant = !!def.enchantsInto && s.count >= 3;
       const gradeDet = g.neutralGradeUpQuote(s.id, true);
       const gradeGamble = g.neutralGradeUpQuote(s.id, false);
-      stashHtml += `<div class="svc-row">
+      const neutralTip = this.registerTip(`neutral-${s.id}`, buildNeutralItemCard(def));
+      stashHtml += `<div class="svc-row"${neutralTip}>
         <div class="svc-main"><b>${def.name}</b> <em>T${def.tier} ·×${s.count}</em><div class="rr-sub">${def.lore}</div></div>
         <div class="svc-actions">
           <button class="btn small" data-neq="${s.id}">Equip → ${activeName}</button>
@@ -1663,7 +1687,11 @@ export class Hud {
           const augmentButton = augmentKind
             ? `<button class="btn small accent" data-arm-augment="${i}" ${activeHero?.augments?.[augmentKind] ? 'disabled' : ''}>Absorb</button>`
             : '';
-          return `<div class="svc-row item-row ${it.locked ? 'locked' : ''}" title="${esc(itemTooltip(def, it, activeHero?.items ?? []))}" style="border-left:3px solid ${rarityColor(def.rarity)}; outline:1px solid ${gDef.frame}">
+          const armoryTip = this.registerTip(`armory-${i}`, buildItemCard(def, { mods: gem ? gem.mods : itemMods(it, def) }), {
+            accent: rarityColor(def.rarity),
+            extra: gem ? [] : itemDetailLines(it, activeHero?.items ?? [])
+          });
+          return `<div class="svc-row item-row ${it.locked ? 'locked' : ''}"${armoryTip} style="border-left:3px solid ${rarityColor(def.rarity)}; outline:1px solid ${gDef.frame}">
             <div class="svc-main"><b style="color:${rarityColor(def.rarity)}">${def.name}</b> <em>${flags}${qLabel}${it.locked ? ' · locked' : ''}</em><div class="rr-sub">${def.lore}</div>${comparisonHtml}${detailsHtml}</div>
             <div class="svc-actions">
               ${gem ? '' : `<select class="small-select" data-arm-pick="${i}">${heroOptions}</select><button class="btn small" data-arm-hero-eq="${i}">Equip</button>`}
@@ -2134,9 +2162,10 @@ export class Hud {
     for (const d of groups[this.shopTab]) {
       const plan = computeBuyPlan(d, u, g.gold);
       const discounted = plan.goldCost < d.cost;
+      const components = d.components && d.components.length > 0 ? [`Built from: ${d.components.map((c) => REG.item(c).name).join(', ')}`] : [];
+      const shopTip = this.registerTip(`shop-${d.id}`, buildItemCard(d), { accent: rarityColor(d.rarity), extra: components });
       grid += `
-        <div class="shop-item ${plan.affordable && plan.fits ? '' : 'cant'}" data-buy="${d.id}"
-             title="${d.name} — ${d.lore}${d.components?.length ? ' | Components: ' + d.components.map((c) => REG.item(c).name).join(', ') : ''}">
+        <div class="shop-item ${plan.affordable && plan.fits ? '' : 'cant'}" data-buy="${d.id}"${shopTip}>
           <img src="${itemIcon(d)}" alt="">
           <div class="si-name">${d.name}</div>
           <div class="si-cost ${discounted ? 'discount' : ''}">${plan.goldCost} g</div>
@@ -2387,7 +2416,10 @@ export class Hud {
     if (hc.heroes.length === 0) return '<p class="dim">No heroes encountered yet — recruit or meet heroes to reveal their kits.</p>';
     const cards = hc.heroes.map((h) => {
       const abilities = h.abilities
-        .map((a) => `<li><b>${a.ult ? '★ ' : ''}${a.name}</b> <em>cd ${a.cooldown} · mana ${a.manaCost}</em>${a.lore ? `<p>${a.lore}</p>` : ''}</li>`)
+        .map((a) => {
+          const effect = a.effect.length > 0 ? `<p class="codex-effect">${a.effect.map((e) => esc(e)).join(' ')}</p>` : '';
+          return `<li><b>${a.ult ? '★ ' : ''}${a.name}</b> <em>${a.kind} · cd ${a.cooldown} · mana ${a.manaCost}</em>${effect}${a.lore ? `<p class="codex-lore">${a.lore}</p>` : ''}</li>`;
+        })
         .join('');
       const talents = h.talents
         .map((t) => {
@@ -2428,9 +2460,13 @@ export class Hud {
       const sources = i.sources.length > 0
         ? `<ul class="codex-list">${i.sources.map((s) => `<li><b>${s.label}</b> <em>${s.detail}</em></li>`).join('')}</ul>`
         : '<p class="dim">No farmable source yet — shop or recipe only.</p>';
+      const card = buildItemCard(REG.item(i.id));
+      const effect = card.effect.length > 0 ? `<p class="codex-effect">${card.effect.map((e) => esc(e)).join(' ')}</p>` : '';
+      const stats = card.stats.length > 0 ? `<div class="atlas-qual">${card.stats.map((s) => esc(s)).join(' · ')}</div>` : '';
       return `
         <div class="codex-note" style="border-left:3px solid ${rarityColor(i.rarity)}">
           <b style="color:${rarityColor(i.rarity)}">${i.name}</b> <em>${i.rarity} · ${i.tier} · ${i.cost}g${reserved}</em>
+          ${effect}${stats}
           ${recipe}
           <div class="atlas-qual dim">Qualities: ${i.qualities.join(', ')}</div>
           <h4>Sources</h4>${sources}
@@ -2523,6 +2559,14 @@ export class Hud {
                 .join('')}
             </select>
           </label>
+          <label class="opt-row"><input type="checkbox" id="opt-auto-quality" ${(g.settings.graphics?.autoAdjustQuality ?? true) ? 'checked' : ''}> Auto-adjust quality when frames drop</label>
+          <label class="opt-row">Frame target
+            <select id="opt-frame-target">
+              ${([60, 30] as const)
+                .map((v) => `<option value="${v}"${(g.settings.graphics?.frameTarget ?? 60) === v ? ' selected' : ''}>${v} fps</option>`)
+                .join('')}
+            </select>
+          </label>
           <label class="opt-row">Exposure <input type="range" id="opt-exposure" min="0.5" max="1.5" step="0.02" value="${g.settings.graphics?.exposure ?? 0.92}"></label>
           <label class="opt-row">Color grade <input type="range" id="opt-grade" min="0" max="1.5" step="0.05" value="${g.settings.graphics?.grade ?? 1}"></label>
           <label class="opt-row"><input type="checkbox" id="opt-reduced-motion" ${g.settings.graphics?.reducedMotion ? 'checked' : ''}> Reduced motion (ambient FX)</label>
@@ -2597,6 +2641,14 @@ export class Hud {
     });
     this.modal.querySelector('#opt-quality')?.addEventListener('change', (e) => {
       g.setQualityTier((e.target as HTMLSelectElement).value as GraphicsSettings['quality']);
+    });
+    this.modal.querySelector('#opt-auto-quality')?.addEventListener('change', (e) => {
+      if (g.settings.graphics) g.settings.graphics.autoAdjustQuality = (e.target as HTMLInputElement).checked;
+      g.applyGraphics();
+    });
+    this.modal.querySelector('#opt-frame-target')?.addEventListener('change', (e) => {
+      if (g.settings.graphics) g.settings.graphics.frameTarget = Number((e.target as HTMLSelectElement).value) as 30 | 60;
+      g.applyGraphics();
     });
     this.modal.querySelector('#opt-exposure')?.addEventListener('input', (e) => {
       if (g.settings.graphics) g.settings.graphics.exposure = Number((e.target as HTMLInputElement).value);
