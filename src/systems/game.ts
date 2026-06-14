@@ -47,6 +47,7 @@ import { levelFromXp, xpForLevel } from '../core/stats';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
 import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroLoadoutSlots, HeroSave, ItemDropTable, ItemQuality, ItemRarity, ItemSave, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, RoomTemplate, RoomType, SimEvent, StingerId, Vec2 } from '../core/types';
 import { ProceduralAudio } from '../engine/audio';
+import { CinematicDirector, type CutsceneContext } from '../engine/cinematic';
 import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
 import { LiveRaid } from './raid-session';
@@ -418,6 +419,7 @@ export class Game {
   private liveDungeonId: string | null = null;
   private liveDungeonTier: DifficultyTier = 'normal';
   private liveDungeonModifiers: string[] = [];
+  cinematic = new CinematicDirector();
   /** HUD hook: open the gym pre-fight screen (§3.5). Null in headless. */
   onOpenGymPrefight: ((gymId: string) => void) | null = null;
   onOpenDungeonEntry: ((dungeonId: string) => void) | null = null;
@@ -554,6 +556,8 @@ export class Game {
     this.audio.setSettings(this.settings);
     this.refreshResonanceMods(true);
     this.applyGraphics();
+    if (save.playtimeSec === 0 && this.region.id === 'tranquil-vale') this.playCutscene('prologue-moon-breaks');
+    this.playRegionArrival();
   }
 
   settings: GameSave['settings'] = { quickcast: true, resonance: true, minimap: true, audio: defaultAudioSettings(), graphics: defaultGraphicsSettings() };
@@ -820,6 +824,37 @@ export class Game {
   msg(text: string, kind: Toast['kind'] = 'info', color?: string): void {
     this.toasts.push({ text, kind, at: performance.now() / 1000, color });
     if (this.toasts.length > 60) this.toasts.splice(0, this.toasts.length - 60);
+  }
+
+  playCutscene(id: string, ctx: CutsceneContext = {}): boolean {
+    const def = REG.cutscenes.get(id);
+    if (!def) return false;
+    const seenKey = `cinematic:${id}`;
+    const seen = this.journalSeen.has(seenKey);
+    this.journalSeen.add(seenKey);
+    if (def.tier === 'bark') {
+      const line = def.beats[0]?.line?.text;
+      if (line) this.msg(line.replace(/\{([a-zA-Z0-9_-]+)\}/g, (_, key: string) => String(ctx[key] ?? '')), 'bark');
+      return true;
+    }
+    this.cinematic.play(def, ctx, seen);
+    return true;
+  }
+
+  cinematicAdvance(): void {
+    this.cinematic.advance();
+  }
+
+  cinematicSkip(): void {
+    this.cinematic.skip();
+  }
+
+  cinematicFastForward(active: boolean): void {
+    this.cinematic.setFastForward(active);
+  }
+
+  private playRegionArrival(): void {
+    if (this.region.arrivalBeat) this.playCutscene(this.region.arrivalBeat);
   }
 
   /** The Valve rarity color of the richest item in a drop (LOOT L6). */
@@ -1180,6 +1215,7 @@ export class Game {
       this.applyRecruitCeiling(); // a new badge raises the ceiling; banked XP catches up (§3.4)
       this.audio.playStinger('badge');
       this.msg(`${gym.leader} awards the ${gym.badgeId.replace('-', ' ')}!`, 'good');
+      this.playCutscene(`badge-${gym.badgeId}`, { badge: gym.badgeId.replace(/-/g, ' ') });
       this.autosave('badge');
       return true;
     }
@@ -1252,6 +1288,7 @@ export class Game {
         ? `dropped ${REG.item(loot.assembled.id).name}${loot.pityUsed ? ' (pity!)' : ''}!`
         : `${loot.guaranteed.length} component${loot.guaranteed.length === 1 ? '' : 's'}`;
     this.msg(`${REG.hero(boss.heroId).name} (${tier}) defeated — ${drop}`, 'good');
+    this.playCutscene('boss-clear-stinger', { boss: REG.hero(boss.heroId).name });
     this.autosave('boss');
     return { won: true, loot };
   }
@@ -1310,6 +1347,7 @@ export class Game {
     const prog = this.raidProgress[raidId];
     const clears = prog?.clears ?? 0;
     const aegis = this.aegisReady();
+    this.playCutscene(`raid-intro-${raidId}`, { raid: def.name });
     const result = runRaidEncounter({
       def,
       party: this.gymPlayerTeam(),
@@ -1329,6 +1367,7 @@ export class Game {
     this.deliverRaidLoot(def, tier, raidId, clears);
     this.codexUnlock('raid:' + raidId); // killing the raid boss is the encounter (§3.14)
     this.msg(`${def.name} cleared! (clear #${clears + 1})`, 'good');
+    this.playCutscene('raid-clear-stinger', { raid: def.name });
     this.audio.playStinger('raid-clear');
     this.autosave('raid');
     return { won: true, result };
@@ -1354,6 +1393,7 @@ export class Game {
     this.liveRaidClears = prog?.clears ?? 0;
     this.liveRaidAegis = this.aegisReady();
     this.liveRaid = new LiveRaid(def, this.gymPlayerTeam(), tier, stableContentSeed(`${raidId}:${tier}`, this.liveRaidClears) + Math.round(this.playtime), { aegis: this.liveRaidAegis });
+    this.playCutscene(`raid-intro-${raidId}`, { raid: def.name });
     this.queuedOrders = [];
     this.scene.resetUnitViews();
     const u = this.liveRaid.drivenUnit();
@@ -1407,6 +1447,7 @@ export class Game {
     this.deliverRaidLoot(def, tier, raidId, clears);
     this.codexUnlock('raid:' + raidId);
     this.msg(`${def.name} cleared! (clear #${clears + 1})`, 'good');
+    this.playCutscene('raid-clear-stinger', { raid: def.name });
     this.audio.playStinger('raid-clear');
     this.autosave('raid');
   }
@@ -1706,6 +1747,8 @@ export class Game {
     const seed = opts.seed ?? (this.region.seed + idx * 101 + Math.round(this.playtime));
     const draft = this.eliteDraftFor(idx, seed);
     const player = opts.playerTeam ?? draft.player;
+    if (idx === 0 && this.eliteFive.defeated === 0) this.playCutscene('elite-gauntlet-open');
+    this.playCutscene(`elite-persona-${idx}`);
     const result = runMacroBattle({ seed, teamA: player, teamB: draft.enemy });
     const member = ELITE_DRAFT.members[idx];
     const won = result.winner === 0;
@@ -1737,6 +1780,7 @@ export class Game {
     if (result.winner === 0) {
       this.eliteFive.championDown = true;
       this.msg('The Champion is dethroned. The ancients answer to you now.', 'good');
+      this.playCutscene('champion-clear');
       this.audio.playStinger('raid-clear');
     } else {
       this.msg('The Champion endures. Sharpen the draft and return.', 'bad');
@@ -3345,6 +3389,7 @@ export class Game {
   private recruitHero(heroId: string, npcUid?: number): boolean {
     const def = REG.hero(heroId);
     if (this.recruited.has(heroId)) return false;
+    const firstBind = this.recruited.size <= 1;
     if (npcUid !== undefined) {
       this.sim.removeUnit(npcUid);
       this.npcHeroes.delete(npcUid);
@@ -3385,6 +3430,11 @@ export class Game {
     this.refreshResonanceMods(true);
     this.msg(this.party.some((rec) => rec.heroId === heroId) ? `${def.name} joins the party! (key ${this.party.length})` : `${def.name} joins the bench. Gear them from the Armory.`, 'good');
     if (def.barks.length > 0) this.msg(`${def.name}: "${def.barks[0]}"`, 'bark');
+    this.playCutscene(firstBind ? 'bind-first' : 'bind-stinger', {
+      hero: def.name,
+      heroId: def.id,
+      bark: def.barks[0] ?? `${def.name} joins.`
+    });
     if (def.recruitmentQuestId) {
       this.questProgress[def.recruitmentQuestId] = { ...(this.questProgress[def.recruitmentQuestId] ?? defaultQuestProgress()), stage: 'bound' };
     }
@@ -3579,16 +3629,26 @@ export class Game {
     rec.echo = result.progress;
 
     const def = REG.hero(heroId);
-    if (result.firstFacetUnlock) this.msg(`${def.name}'s facets are now swappable.`, 'good');
+    const echoLines: string[] = [];
+    if (result.firstFacetUnlock) {
+      const line = `${def.name}'s facets are now swappable.`;
+      echoLines.push(line);
+      this.msg(line, 'good');
+    }
     if (result.unlockedTier !== null) {
       const tier = def.talents[result.unlockedTier];
       const pick = rec.talentPicks[result.unlockedTier];
       const branchName = pick === null ? `level ${tier.level} echo branch` : tier.options[pick === 0 ? 1 : 0].name;
-      this.msg(`${def.name}'s echo unlocks ${branchName}.`, 'good');
+      const line = `${def.name}'s echo unlocks ${branchName}.`;
+      echoLines.push(line);
+      this.msg(line, 'good');
     } else {
-      this.msg(`${def.name}'s echo yields surplus attunement gold.`, 'info');
+      const line = `${def.name}'s echo yields surplus attunement gold.`;
+      echoLines.push(line);
+      this.msg(line, 'info');
       this.awardGold(Math.round(def.bounty.gold * 1.5), 'echo', this.activeUnit()?.pos ?? this.region.town.pos);
     }
+    this.playCutscene('echo-milestone-stinger', { hero: def.name, echoLine: echoLines[0] ?? `${def.name}'s echo deepens.` });
 
     this.rollEchoComponentDrop(heroId);
     this.rebuildHeroUnit(recIdx);
@@ -4240,6 +4300,7 @@ export class Game {
   // ---------- main update ----------
 
   update(realDt: number): void {
+    this.cinematic.update(Math.min(realDt, 0.1));
     if (this.liveGym) {
       this.updateLiveGym(realDt);
       return;

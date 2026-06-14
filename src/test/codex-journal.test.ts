@@ -68,6 +68,20 @@ describe('codex/journal state (test 24)', () => {
     expect(g.codexEntries().lore.map((l) => l.id)).toContain('loop-tower');
   });
 
+  it('cutscenes play from registry data and persist seen state', () => {
+    const g = freshGame();
+    while (g.cinematic.active) g.cinematicSkip();
+
+    expect(g.playCutscene('bind-stinger', { hero: 'Lich', heroId: 'lich', bark: 'The cold remembers.' })).toBe(true);
+    const view = g.cinematic.view();
+    expect(view?.title).toBe('Lich Joins');
+    expect(view?.text).toBe('The cold remembers.');
+    expect(g.buildSave().journalSeen).toContain('cinematic:bind-stinger');
+
+    g.cinematicAdvance();
+    expect(g.cinematic.active).toBe(false);
+  });
+
   it('the journal reflects raids, factions, reputation, and elite progress', () => {
     const g = freshGame();
     g.reputation = 12;

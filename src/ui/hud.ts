@@ -58,6 +58,7 @@ export class Hud {
   private trialChoice: HTMLElement;
   private lastTrialChoiceKey = '';
   private liveGymBar: HTMLElement;
+  private cinematicLayer: HTMLElement;
   private lastLiveGymKey = '';
 
   // gambit editor working state (§3.5)
@@ -101,6 +102,7 @@ export class Hud {
       <div id="hud-hint"></div>
       <div id="trial-choice" class="hidden"></div>
       <div id="live-gym-bar" class="hidden"></div>
+      <div id="cinematic-layer" class="hidden"></div>
       <div id="modal-root" class="hidden"></div>
     `;
     this.topBar = this.root.querySelector('#top-bar')!;
@@ -119,9 +121,15 @@ export class Hud {
       if (btn?.dataset.choice) this.game.resolveTrialChoice(btn.dataset.choice);
     });
     this.liveGymBar = this.root.querySelector('#live-gym-bar')!;
+    this.cinematicLayer = this.root.querySelector('#cinematic-layer')!;
     this.liveGymBar.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('[data-livegym]') as HTMLElement | null;
       if (btn?.dataset.livegym === 'call') this.game.liveGymPlayerCall();
+    });
+    this.cinematicLayer.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('[data-cinematic]') as HTMLElement | null;
+      if (btn?.dataset.cinematic === 'next') this.game.cinematicAdvance();
+      if (btn?.dataset.cinematic === 'skip') this.game.cinematicSkip();
     });
     this.game.onOpenGymPrefight = (gymId) => this.openGymPrefight(gymId);
     this.game.onOpenDungeonEntry = (dungeonId) => this.openDungeonEntry(dungeonId);
@@ -164,6 +172,7 @@ export class Hud {
     this.renderHint();
     this.renderTrialChoice();
     this.renderLiveGym();
+    this.renderCinematic();
     if (this.modalKind === 'shop' || this.modalKind === 'party') this.refreshModalDynamic();
     // auto-open talent picker (never over a live gym fight or a blocking modal)
     if (this.modalKind === 'none' && !this.game.liveGym) {
@@ -1603,6 +1612,38 @@ export class Hud {
       <div class="lg-calls">Foe <span class="lg-dots foe">${dots(ec.remaining, ecTotal)}</span></div>
       <button class="btn accent" data-livegym="call" ${canCall ? '' : 'disabled'}>${active ? 'Call active…' : 'Captain Call (Space)'}</button>`;
     this.liveGymBar.classList.remove('hidden');
+  }
+
+  private renderCinematic(): void {
+    const view = this.game.cinematic.view();
+    if (!view) {
+      this.cinematicLayer.classList.add('hidden');
+      this.cinematicLayer.innerHTML = '';
+      return;
+    }
+    this.cinematicLayer.classList.remove('hidden');
+    this.cinematicLayer.classList.toggle('letterbox', view.letterbox);
+    this.cinematicLayer.innerHTML = `
+      <div class="cin-bar top"></div>
+      <div class="cin-card ${view.tier}">
+        <div class="cin-meta">
+          <span>${view.title}</span>
+          <em>${view.tier} · ${view.beatIndex + 1}/${view.beatCount} · ${view.shot.angle}/${view.shot.move}</em>
+        </div>
+        ${view.stageText ? `<div class="cin-stage">${view.stageText}</div>` : ''}
+        ${view.text ? `
+          <div class="cin-line">
+            <b>${view.speaker ?? 'Narration'}</b>
+            <p>${view.text}</p>
+          </div>` : ''}
+        <div class="cin-controls">
+          <span>${view.controls}${view.speed > 1 ? ` · ${view.speed}x` : ''}</span>
+          <button class="btn small" data-cinematic="next">Next</button>
+          <button class="btn small" data-cinematic="skip">Skip</button>
+        </div>
+      </div>
+      <div class="cin-bar bottom"></div>
+    `;
   }
 
   // --- shop ---

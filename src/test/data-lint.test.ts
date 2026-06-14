@@ -8,6 +8,7 @@ import { ALL_NEUTRAL_ITEMS } from '../data/neutral-items';
 import { ALL_BOSSES } from '../data/bosses';
 import { ALL_RAIDS } from '../data/raids';
 import { ALL_LORE_ENTRIES } from '../data/lore';
+import { ALL_CUTSCENES } from '../data/cutscenes';
 import { ALL_DRAFTS } from '../data/drafts';
 import { ALL_TRAINERS } from '../data/trainers';
 import { ESPORTS_DENYLIST, denylistHit } from '../data/denylist';
@@ -40,6 +41,9 @@ const STATUS_IDS = [
 
 const ANIM_GESTURES: AnimGesture[] = ['melee-swing', 'ranged-shot', 'staff-cast', 'ground-slam', 'dash', 'channel-loop', 'summon-gesture', 'item-use', 'global-cast'];
 const SOUND_ARCHETYPES: SoundArchetype[] = ['blade', 'bow', 'impact', 'frost', 'fire', 'storm', 'void', 'heal', 'summon', 'item', 'roar'];
+const STINGER_IDS = ['capture', 'merge', 'levelup', 'badge', 'raid-clear'];
+const CUTSCENE_SHOT_ANGLES = ['wide', 'close', 'low', 'high', 'over-shoulder', 'title-card'];
+const CUTSCENE_SHOT_MOVES = ['hold', 'push-in', 'pull-back', 'crane', 'snap'];
 const GATED_TOP_TIER = ['divine-rapier', 'butterfly', 'scythe-of-vyse', 'heart-of-tarrasque', 'eye-of-skadi', 'refresher-orb', 'aghanims-scepter', 'abyssal-blade', 'bloodthorn', 'radiance', 'satanic', 'octarine-core', 'aghanims-blessing', 'aghanims-shard', 'aegis-of-the-immortal', 'refresher-shard', 'cheese'];
 const RARITY_RANK = { common: 0, uncommon: 1, rare: 2, mythical: 3, legendary: 4, immortal: 5, arcana: 6 } as const;
 const RESERVED_DROP_SOURCES: DropSource[] = ['boss', 'raid', 'dungeon', 'special-battle'];
@@ -621,6 +625,35 @@ describe('data lint: Phase 3 registries', () => {
       if (entry.unlock.kind === 'badge') {
         const { badgeId } = entry.unlock;
         expect(ALL_GYMS.some((g) => g.badgeId === badgeId), `${entry.id}: badge unlock`).toBe(true);
+      }
+    }
+    expect(ALL_CUTSCENES.length).toBeGreaterThanOrEqual(20);
+    for (const scene of ALL_CUTSCENES) {
+      expect(REG.cutscenes.has(scene.id), `${scene.id}: registered`).toBe(true);
+      expect(['setpiece', 'stinger', 'bark'], `${scene.id}: tier`).toContain(scene.tier);
+      expect(scene.skippable, `${scene.id}: skippable`).toBe(true);
+      expect(scene.beats.length, `${scene.id}: beats`).toBeGreaterThan(0);
+      if (scene.trigger.kind === 'region-arrival') expect(REG.regions.has(scene.trigger.regionId), `${scene.id}: region trigger`).toBe(true);
+      if (scene.trigger.kind === 'badge') {
+        const { badgeId } = scene.trigger;
+        expect(ALL_GYMS.some((g) => g.badgeId === badgeId), `${scene.id}: badge trigger`).toBe(true);
+      }
+      if (scene.trigger.kind === 'raid-intro' || scene.trigger.kind === 'raid-clear') {
+        if (scene.trigger.raidId) expect(REG.raids.has(scene.trigger.raidId), `${scene.id}: raid trigger`).toBe(true);
+      }
+      if (scene.trigger.kind === 'elite-persona') expect(ALL_DRAFTS[0].members[scene.trigger.index], `${scene.id}: elite trigger`).toBeDefined();
+      for (const beat of scene.beats) {
+        expect(CUTSCENE_SHOT_ANGLES, `${scene.id}: shot angle`).toContain(beat.shot.angle);
+        expect(CUTSCENE_SHOT_MOVES, `${scene.id}: shot move`).toContain(beat.shot.move);
+        if (beat.sound) expect([...SOUND_ARCHETYPES, ...STINGER_IDS], `${scene.id}: sound`).toContain(beat.sound);
+        for (const action of beat.stage ?? []) {
+          if (action.kind === 'vfx') {
+            expect(VFX_ARCHETYPES, `${scene.id}: stage vfx`).toContain(action.archetype);
+            expectHex(action.color, `${scene.id}: stage color`);
+          }
+          if (action.kind === 'gesture') expect(ANIM_GESTURES, `${scene.id}: stage gesture`).toContain(action.gesture);
+        }
+        if (beat.line?.portraitHeroId && !beat.line.portraitHeroId.includes('{')) expect(REG.heroes.has(beat.line.portraitHeroId), `${scene.id}: portrait`).toBe(true);
       }
     }
     expect(ALL_NEUTRAL_ITEMS.length).toBeGreaterThanOrEqual(15);

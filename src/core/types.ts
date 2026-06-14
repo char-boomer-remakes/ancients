@@ -621,6 +621,64 @@ export interface LoreEntryDef {
   unlock: LoreUnlock;
 }
 
+// ---------- Cut-scenes ----------
+export type CutsceneTier = 'setpiece' | 'stinger' | 'bark';
+export type CutsceneTrigger =
+  | { kind: 'new-game' }
+  | { kind: 'bind'; first?: boolean }
+  | { kind: 'region-arrival'; regionId: string }
+  | { kind: 'badge'; badgeId: string }
+  | { kind: 'boss-clear' }
+  | { kind: 'raid-intro'; raidId: string }
+  | { kind: 'raid-clear'; raidId?: string }
+  | { kind: 'echo-milestone' }
+  | { kind: 'elite-start' }
+  | { kind: 'elite-persona'; index: number }
+  | { kind: 'champion-clear' };
+
+export type ShotAngle = 'wide' | 'close' | 'low' | 'high' | 'over-shoulder' | 'title-card';
+export type ShotMove = 'hold' | 'push-in' | 'pull-back' | 'crane' | 'snap';
+
+export interface ShotSpec {
+  angle: ShotAngle;
+  move: ShotMove;
+  palette: string;
+  mood: string;
+}
+
+export type StageAction =
+  | { kind: 'title'; text: string }
+  | { kind: 'focus'; target: 'player' | 'ally' | 'boss' | 'region' | 'item' | 'tower' }
+  | { kind: 'vfx'; archetype: VfxArchetype; color: string }
+  | { kind: 'gesture'; target: 'ally' | 'boss' | 'player'; gesture: AnimGesture };
+
+export interface DialogueCard {
+  speaker: string;
+  text: string;
+  portraitHeroId?: string;
+}
+
+export interface CutsceneBeat {
+  shot: ShotSpec;
+  stage?: StageAction[];
+  line?: DialogueCard;
+  hold?: number;
+  sound?: SoundArchetype | StingerId;
+}
+
+export interface CutsceneDef {
+  id: string;
+  title: string;
+  tier: CutsceneTier;
+  trigger: CutsceneTrigger;
+  skippable: true;
+  letterbox?: boolean;
+  music?: SoundArchetype | StingerId | 'duck' | 'silence';
+  beats: CutsceneBeat[];
+  replayable?: boolean;
+  category?: 'Prologue' | 'Binds' | 'Regions' | 'Bosses' | 'Raids' | 'Items' | 'Endgame';
+}
+
 // ---------- Dungeons ----------
 export type RoomType = 'entrance' | 'combat' | 'elite' | 'treasure' | 'shrine' | 'rest' | 'boss';
 export type MonsterRarity = 'normal' | 'champion' | 'rare';

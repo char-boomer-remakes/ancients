@@ -177,6 +177,23 @@ export class InputController {
 
   private onKeyDown(e: KeyboardEvent): void {
     const key = e.key.toLowerCase();
+    if (this.game.cinematic.active) {
+      if (key === ' ' || key === 'spacebar' || key === 'enter') {
+        e.preventDefault();
+        this.game.cinematicAdvance();
+        return;
+      }
+      if (key === 'tab') {
+        e.preventDefault();
+        this.game.cinematicFastForward(true);
+        return;
+      }
+      if (key === 'escape') {
+        e.preventDefault();
+        this.game.cinematicSkip();
+        return;
+      }
+    }
     if (e.code === 'AltLeft' || e.code === 'AltRight') {
       this.game.setSprintHeld(true);
       return;
@@ -307,6 +324,9 @@ export class InputController {
   }
 
   private onKeyUp(e: KeyboardEvent): void {
+    if (e.key.toLowerCase() === 'tab') {
+      this.game.cinematicFastForward(false);
+    }
     if (e.code === 'AltLeft' || e.code === 'AltRight') {
       this.game.setSprintHeld(false);
     }
