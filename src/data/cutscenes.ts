@@ -515,6 +515,118 @@ const SEASONAL_INTROS: CutsceneDef[] = [
         hold: 3.4
       }
     ]
+  },
+  {
+    id: 'seasonal-cycle-beast',
+    title: 'The Cycle Beast',
+    tier: 'setpiece',
+    trigger: { kind: 'seasonal-event', eventId: 'cycle-beast' },
+    skippable: true,
+    letterbox: true,
+    category: 'Festivals',
+    replayable: true,
+    beats: [
+      {
+        shot: { angle: 'low', move: 'push-in', palette: 'new bloom gold', mood: 'damage race' },
+        stage: [{ kind: 'vfx', archetype: 'global-mark', color: '#ffd86a' }],
+        line: { speaker: 'The Cycle Beast', text: 'Every year thinks it is the first. Prove this one wrong quickly.' },
+        sound: 'levelup',
+        hold: 3.2
+      }
+    ]
+  },
+  {
+    id: 'seasonal-dark-reef-crawl',
+    title: 'The Dark Reef',
+    tier: 'setpiece',
+    trigger: { kind: 'seasonal-event', eventId: 'dark-reef-crawl' },
+    skippable: true,
+    letterbox: true,
+    category: 'Festivals',
+    replayable: true,
+    beats: [
+      {
+        shot: { angle: 'wide', move: 'crane', palette: 'reef teal', mood: 'old feud' },
+        stage: [{ kind: 'title', text: 'Below Shadeshore, the tide keeps every grudge.' }],
+        line: { speaker: 'The Dark Reef', text: 'The sea does not forget. It only waits for deeper water.' },
+        hold: 3.4
+      }
+    ]
+  },
+  {
+    id: 'seasonal-collapsing-hollow',
+    title: 'The Collapsing Hollow',
+    tier: 'setpiece',
+    trigger: { kind: 'seasonal-event', eventId: 'collapsing-hollow' },
+    skippable: true,
+    letterbox: true,
+    category: 'Festivals',
+    replayable: true,
+    beats: [
+      {
+        shot: { angle: 'high', move: 'pull-back', palette: 'hollow amber', mood: 'closing walls' },
+        stage: [{ kind: 'vfx', archetype: 'dome', color: '#ffb65c' }],
+        line: { speaker: 'The Hollow', text: 'Run while the walls still remember being apart.' },
+        sound: 'capture',
+        hold: 3.2
+      }
+    ]
+  },
+  {
+    id: 'seasonal-nemestice-fall',
+    title: 'Nemestice Fall',
+    tier: 'setpiece',
+    trigger: { kind: 'seasonal-event', eventId: 'nemestice-fall' },
+    skippable: true,
+    letterbox: true,
+    category: 'Festivals',
+    replayable: true,
+    beats: [
+      {
+        shot: { angle: 'high', move: 'crane', palette: 'zet violet', mood: 'falling seal' },
+        stage: [{ kind: 'vfx', archetype: 'storm', color: '#9d7cff' }],
+        line: { speaker: 'Nemestice', text: 'The seal falls in pieces. Gather what still wants the war closed.' },
+        sound: 'levelup',
+        hold: 3.5
+      }
+    ]
+  },
+  {
+    id: 'seasonal-crowns-fall',
+    title: "A Crown's Fall",
+    tier: 'setpiece',
+    trigger: { kind: 'seasonal-event', eventId: 'crowns-fall' },
+    skippable: true,
+    letterbox: true,
+    category: 'Festivals',
+    replayable: true,
+    beats: [
+      {
+        shot: { angle: 'title-card', move: 'hold', palette: 'crown gold', mood: 'act break' },
+        stage: [{ kind: 'title', text: 'Every crown is a loop someone mistook for an ending.' }],
+        line: { speaker: 'Crownfall', text: 'Acts begin when a ruler says forever. They end when the world answers.' },
+        sound: 'badge',
+        hold: 3.6
+      }
+    ]
+  },
+  {
+    id: 'seasonal-dark-moon-hunt',
+    title: 'Dark Moon Hunt',
+    tier: 'setpiece',
+    trigger: { kind: 'seasonal-event', eventId: 'dark-moon-hunt' },
+    skippable: true,
+    letterbox: true,
+    category: 'Festivals',
+    replayable: true,
+    beats: [
+      {
+        shot: { angle: 'wide', move: 'push-in', palette: 'nightsilver blue', mood: 'watched' },
+        stage: [{ kind: 'title', text: 'Nightsilver hears two moons at once.' }],
+        line: { speaker: 'Dark Moon', text: 'Hunt softly. The sky is listening.' },
+        hold: 3.1
+      }
+    ]
   }
 ];
 
@@ -554,6 +666,63 @@ const LEGEND_CALLOUTS: CutsceneDef[] = [
         line: { speaker: 'Legend', text: 'A hook is a line. This one remembered home.' },
         sound: 'capture',
         hold: 2.6
+      }
+    ]
+  },
+  {
+    id: 'legend-call-paid-out',
+    title: 'The Call That Paid Out',
+    tier: 'stinger',
+    trigger: { kind: 'legend-callout', legendId: 'call-paid-out' },
+    skippable: true,
+    letterbox: false,
+    category: 'Legends',
+    replayable: true,
+    beats: [
+      {
+        shot: { angle: 'low', move: 'snap', palette: 'axe red', mood: 'paid for' },
+        stage: [{ kind: 'gesture', target: 'player', gesture: 'ground-slam' }],
+        line: { speaker: 'Legend', text: 'The call cost everything. The answer was worth more.' },
+        sound: 'levelup',
+        hold: 2.7
+      }
+    ]
+  },
+  {
+    id: 'legend-coil-closed-game',
+    title: 'The Coil That Closed the Game',
+    tier: 'stinger',
+    trigger: { kind: 'legend-callout', legendId: 'coil-closed-game' },
+    skippable: true,
+    letterbox: false,
+    category: 'Legends',
+    replayable: true,
+    beats: [
+      {
+        shot: { angle: 'high', move: 'snap', palette: 'faerie violet', mood: 'escape denied' },
+        stage: [{ kind: 'vfx', archetype: 'global-mark', color: '#ff9ad8' }],
+        line: { speaker: 'Legend', text: 'A perfect circle is just a door closing from every side.' },
+        sound: 'capture',
+        hold: 2.6
+      }
+    ]
+  },
+  {
+    id: 'legend-rampage',
+    title: 'Rampage',
+    tier: 'stinger',
+    trigger: { kind: 'legend-callout', legendId: 'rampage' },
+    skippable: true,
+    letterbox: false,
+    category: 'Legends',
+    replayable: true,
+    beats: [
+      {
+        shot: { angle: 'wide', move: 'push-in', palette: 'victory gold', mood: 'crowd roar' },
+        stage: [{ kind: 'vfx', archetype: 'global-mark', color: '#ffd86a' }],
+        line: { speaker: 'Legend', text: 'Rampage.' },
+        sound: 'raid-clear',
+        hold: 2.4
       }
     ]
   }

@@ -1,13 +1,14 @@
 import * as THREE from 'three';
-import type { AttackVisualSpec, DungeonRoom, ItemAppearanceSpec, RegionDef, RoomTemplate } from '../core/types';
+import type { AttackVisualSpec, DungeonRoom, ItemAppearanceSpec, RegionDef, RoomTemplate, StageAction, VfxSpec } from '../core/types';
 import type { Sim } from '../core/sim';
 import type { Unit } from '../core/unit';
 import { REG } from '../core/registry';
 import { buildTerrain, type TerrainInfo } from './terrain';
 import { applyHeroLikeness, applyItemAppearances, buildUnitRig, buildSelectionRing, mountHeroModel, recolorToPalette, type UnitRig } from './models';
 import { HeroAssetLoader, heroAssetEntry, creepCreatureUrl, heroBaseId } from './assets';
-import { animateRig, newAnimState, type AnimState } from './animator';
+import { animateRig, applyCinematicGesture, newAnimState, type AnimState } from './animator';
 import { loadVfxTextureAtlas, VfxManager } from './vfx';
+import type { CinematicView } from './cinematic';
 import { lodForDistance, shouldAnimateAtLod } from './lod';
 import { WORLD_SCALE } from './scale';
 import { TUNING } from '../data/tuning';
@@ -49,7 +50,7 @@ interface MapMarker {
   material: THREE.MeshBasicMaterial;
 }
 
-export type CameraMode = 'follow' | 'map';
+export type CameraMode = 'follow' | 'map' | 'cinematic';
 
 export interface GraphicsRenderStats {
   frameMsAvg: number;
@@ -287,7 +288,11 @@ export class GameScene {
   private dungeonRoomGroup: THREE.Group | null = null;
 
   cameraMode: CameraMode = 'follow';
+  private gameplayCameraMode: 'follow' | 'map' = 'follow';
   private camTarget = new THREE.Vector3();
+  private cinematicTarget = new THREE.Vector3();
+  private cinematicLookAt = new THREE.Vector3();
+  private cinematicBeatKey = '';
   private camZoom = 1; // user wheel zoom within mode
   private modeBlend = 0; // 0 = follow, 1 = map
   selectedUid = -1;
@@ -655,13 +660,15 @@ export class GameScene {
   }
 
   toggleCameraMode(): CameraMode {
-    this.cameraMode = this.cameraMode === 'follow' ? 'map' : 'follow';
+    const current = this.cameraMode === 'cinematic' ? this.gameplayCameraMode : this.cameraMode;
+    this.cameraMode = current === 'follow' ? 'map' : 'follow';
+    this.gameplayCameraMode = this.cameraMode;
     return this.cameraMode;
   }
 
   // ---------- per-frame ----------
 
-  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number): void {
+  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView: CinematicView | null = null): void {
     this.recordFrameMs(renderDt * 1000, renderDt);
     this.time += renderDt;
     this.frameParity ^= 1;
@@ -669,6 +676,7 @@ export class GameScene {
     if (this.shakeTrauma > 0) this.shakeTrauma = Math.max(0, this.shakeTrauma - renderDt * 1.9);
     if (this.accentStrength > 0) this.accentStrength = Math.max(0, this.accentStrength - renderDt * 0.85);
     this.syncUnits(sim, renderDt);
+    this.applyCinematicStage(cinematicView, sim, followUnit);
     this.vfx.syncProjectiles(sim.projectiles);
     this.vfx.syncZoneFollow((uid) => {
       const u = sim.unit(uid);
@@ -676,7 +684,7 @@ export class GameScene {
     });
     this.vfx.update(renderDt);
     this.updateDayNight(timeOfDay01);
-    this.updateCamera(followUnit, renderDt);
+    this.updateCamera(followUnit, renderDt, sim, cinematicView);
     this.updateMapMarkers();
     if (!this.reducedMotion) this.terrain.update?.(this.time);
     this.skyDome.position.copy(this.camera.position);
@@ -1290,7 +1298,142 @@ export class GameScene {
 
   // ---------- camera ----------
 
-  private updateCamera(follow: Unit | null, dt: number): void {
+  private worldPosForUnit(u: Unit): THREE.Vector3 {
+    return new THREE.Vector3(
+      u.pos.x / WORLD_SCALE,
+      this.terrain.heightAt(u.pos.x, u.pos.y),
+      u.pos.y / WORLD_SCALE
+    );
+  }
+
+  private stageUnit(target: Extract<StageAction, { kind: 'focus' | 'gesture' }>['target'], sim: Sim, follow: Unit | null): Unit | null {
+    if (target === 'player') return follow ?? sim.unitsArr.find((u) => u.alive && u.team === this.playerTeam) ?? null;
+    if (target === 'ally') return sim.unitsArr.find((u) => u.alive && u.team === this.playerTeam && u.uid !== follow?.uid) ?? follow ?? null;
+    if (target === 'boss') {
+      return sim.unitsArr.find((u) => u.alive && u.team !== this.playerTeam && u.ctrl.kind === 'boss')
+        ?? sim.unitsArr.find((u) => u.alive && u.team !== this.playerTeam)
+        ?? null;
+    }
+    return null;
+  }
+
+  private primaryStageTarget(view: CinematicView): Extract<StageAction, { kind: 'focus' | 'gesture' }>['target'] | null {
+    const explicit = view.stage.find((s): s is Extract<StageAction, { kind: 'focus' }> => s.kind === 'focus');
+    if (explicit) return explicit.target;
+    const gesture = view.stage.find((s): s is Extract<StageAction, { kind: 'gesture' }> => s.kind === 'gesture');
+    return gesture?.target ?? null;
+  }
+
+  private stageWorldTarget(view: CinematicView, sim: Sim, follow: Unit | null): THREE.Vector3 {
+    const target = this.primaryStageTarget(view);
+    if (target === 'region') return this.camTarget.clone();
+    if (target === 'tower') return new THREE.Vector3(this.camTarget.x, this.camTarget.y + 2.5, this.camTarget.z - 8);
+    if (target === 'item') {
+      const base = follow ? this.worldPosForUnit(follow) : this.camTarget.clone();
+      return base.add(new THREE.Vector3(0, 1.1, 0));
+    }
+    if (target) {
+      const u = this.stageUnit(target, sim, follow);
+      if (u) return this.worldPosForUnit(u).add(new THREE.Vector3(0, 0.9, 0));
+    }
+    if (follow) return this.worldPosForUnit(follow).add(new THREE.Vector3(0, 0.9, 0));
+    return this.camTarget.clone();
+  }
+
+  private stageSimTarget(view: CinematicView, sim: Sim, follow: Unit | null): { x: number; y: number } {
+    const target = this.primaryStageTarget(view);
+    if (target && target !== 'region' && target !== 'tower' && target !== 'item') {
+      const u = this.stageUnit(target, sim, follow);
+      if (u) return { x: u.pos.x, y: u.pos.y };
+    }
+    if (follow) return { x: follow.pos.x, y: follow.pos.y };
+    return { x: this.camTarget.x * WORLD_SCALE, y: this.camTarget.z * WORLD_SCALE };
+  }
+
+  private applyCinematicStage(view: CinematicView | null, sim: Sim, follow: Unit | null): void {
+    if (!view) {
+      this.cinematicBeatKey = '';
+      return;
+    }
+    const firstFrameOfBeat = view.beatKey !== this.cinematicBeatKey;
+    if (firstFrameOfBeat) {
+      this.cinematicBeatKey = view.beatKey;
+      for (const action of view.stage) {
+        if (action.kind !== 'vfx') continue;
+        const vfx: VfxSpec = { archetype: action.archetype, color: action.color };
+        this.vfx.cinematicStage(this.stageSimTarget(view, sim, follow), vfx);
+        this.accentGrade(action.color, 0.38);
+        if (!this.reducedMotion) this.addShake(action.archetype === 'storm' || action.archetype === 'global-mark' ? 0.22 : 0.12);
+      }
+    }
+
+    for (const action of view.stage) {
+      if (action.kind !== 'gesture') continue;
+      const u = this.stageUnit(action.target, sim, follow);
+      const unitView = u ? this.views.get(u.uid) : undefined;
+      if (unitView) applyCinematicGesture(unitView.rig, action.gesture, this.time);
+    }
+  }
+
+  private updateCinematicCamera(view: CinematicView, sim: Sim, follow: Unit | null, dt: number): void {
+    if (this.cameraMode !== 'cinematic') {
+      if (this.cameraMode === 'follow' || this.cameraMode === 'map') this.gameplayCameraMode = this.cameraMode;
+      this.cameraMode = 'cinematic';
+      this.cinematicTarget.copy(this.stageWorldTarget(view, sim, follow));
+      this.cinematicLookAt.copy(this.cinematicTarget);
+    }
+
+    const target = this.stageWorldTarget(view, sim, follow);
+    const shotT = Math.max(0, Math.min(1, view.beatElapsed / Math.max(0.1, view.beatHold)));
+    const ease = shotT * shotT * (3 - 2 * shotT);
+    const move =
+      view.shot.move === 'push-in' ? 1.18 + (0.72 - 1.18) * ease :
+      view.shot.move === 'pull-back' ? 0.82 + (1.42 - 0.82) * ease :
+      1;
+
+    let back = 15;
+    let up = 12;
+    let side = 0;
+    switch (view.shot.angle) {
+      case 'close':
+        back = 6.8; up = 4.8; break;
+      case 'low':
+        back = 9.5; up = 3.2; break;
+      case 'high':
+        back = 9; up = 23; break;
+      case 'over-shoulder':
+        back = 8; up = 5.5; side = 2.8; break;
+      case 'title-card':
+        back = 14; up = 15; break;
+      case 'wide':
+      default:
+        back = 21; up = 15; break;
+    }
+    if (view.shot.move === 'crane') up += 8 * ease;
+    if (view.shot.move === 'snap') {
+      back *= 0.78;
+      up *= 0.86;
+    }
+
+    const k = view.shot.move === 'snap' ? 1 : Math.min(1, dt * 5.5);
+    this.cinematicTarget.lerp(target, k);
+    const orbit = this.time * 0.08;
+    const desired = new THREE.Vector3(
+      this.cinematicTarget.x + (side * Math.cos(orbit) - back * 0.45) * move,
+      this.cinematicTarget.y + up * move,
+      this.cinematicTarget.z + (back + side * Math.sin(orbit)) * move
+    );
+    this.camera.position.lerp(desired, k);
+    this.cinematicLookAt.lerp(this.cinematicTarget, Math.min(1, dt * 8));
+    this.camera.lookAt(this.cinematicLookAt.x, this.cinematicLookAt.y, this.cinematicLookAt.z);
+  }
+
+  private updateCamera(follow: Unit | null, dt: number, sim: Sim, cinematicView: CinematicView | null): void {
+    if (cinematicView) {
+      this.updateCinematicCamera(cinematicView, sim, follow, dt);
+      return;
+    }
+    if (this.cameraMode === 'cinematic') this.cameraMode = this.gameplayCameraMode;
     const targetBlend = this.cameraMode === 'map' ? 1 : 0;
     this.modeBlend += (targetBlend - this.modeBlend) * Math.min(1, dt * 5);
 

@@ -3,6 +3,7 @@ import { registerAllContent } from '../data/index';
 import { REG } from '../core/registry';
 import { Game, newGameSave } from '../systems/game';
 import { CinematicDirector } from '../engine/cinematic';
+import { compileCutsceneDsl } from '../engine/cutscene-dsl';
 import { StoryDetector } from '../engine/story-detectors';
 import type { Sim } from '../core/sim';
 import type { CutsceneDef, SimEvent } from '../core/types';
@@ -77,6 +78,30 @@ describe('STORY §7.3 legend detector', () => {
     const sim = fakeSim([pudge, victim]);
     const events: SimEvent[] = [castEvent(1, 'pudge-meat-hook'), { t: 'death', uid: 2, killer: 1 }];
     expect(new StoryDetector().observe(events, { sim, nowSec: 1, playerTeam: 0, townPos: { x: 0, y: 0 }, townRadius: 900 })).toHaveLength(0);
+  });
+
+  it('fires The Coil That Closed the Game when Puck coils 2+ enemies', () => {
+    const puck: FakeUnit = { uid: 1, team: 0, pos: { x: 0, y: 0 }, alive: true, hp: 500, stats: { maxHp: 500 }, ctrl: { kind: 'gambit' } };
+    const sim = fakeSim([puck, ...enemyRing(2, { x: 100, y: 0 }, 50)]);
+    const out = new StoryDetector().observe([castEvent(1, 'puck-dream-coil')], { sim, nowSec: 1, playerTeam: 0 });
+    expect(out).toContainEqual({ kind: 'legend', legendId: 'coil-closed-game' });
+  });
+
+  it('fires The Call That Paid Out when Axe dies after a decisive call', () => {
+    const axe: FakeUnit = { uid: 1, team: 0, pos: { x: 0, y: 0 }, alive: false, hp: 0, stats: { maxHp: 500 }, ctrl: { kind: 'player' } };
+    const enemy: FakeUnit = { uid: 2, team: 1, pos: { x: 100, y: 0 }, alive: false, hp: 0, stats: { maxHp: 100 }, ctrl: { kind: 'gambit' } };
+    const det = new StoryDetector();
+    const out = det.observe([castEvent(1, 'axe-berserkers-call'), { t: 'death', uid: 1, killer: 2 }], { sim: fakeSim([axe, enemy]), nowSec: 1, playerTeam: 0 });
+    expect(out).toContainEqual({ kind: 'legend', legendId: 'call-paid-out' });
+  });
+
+  it('fires Rampage on five player kills in the streak window', () => {
+    const carry: FakeUnit = { uid: 1, team: 0, pos: { x: 0, y: 0 }, alive: true, hp: 500, stats: { maxHp: 500 }, ctrl: { kind: 'player' } };
+    const enemies = enemyRing(5, { x: 100, y: 0 }, 50).map((e) => ({ ...e, alive: false, hp: 0 }));
+    const det = new StoryDetector();
+    const events = enemies.map((e) => ({ t: 'death' as const, uid: e.uid, killer: 1 }));
+    const out = det.observe(events, { sim: fakeSim([carry, ...enemies]), nowSec: 1, playerTeam: 0 });
+    expect(out).toContainEqual({ kind: 'legend', legendId: 'rampage' });
   });
 });
 
@@ -178,6 +203,36 @@ describe('STORY §3.4 cut-scene controls', () => {
 });
 
 // ----------------------------------------------------------------
+// STORY §5 — cut-scene authoring DSL
+// ----------------------------------------------------------------
+describe('STORY §5 cut-scene DSL', () => {
+  it('compiles authored beats into CutsceneDef data', () => {
+    const def = compileCutsceneDsl(`
+      BEAT {
+        SHOT: low/push-in/Bluescale/Ominous
+        STAGE: {DevelopCharacter(target="boss", gesture="ground-slam")}
+        LINE: The Last Eldwurm : "The last of my brothers fell. I did not."
+        HOLD: 2.4
+        SOUND: raid-clear
+      }
+    `, {
+      id: 'dsl-last-eldwurm',
+      title: 'The Last Eldwurm',
+      tier: 'setpiece',
+      trigger: { kind: 'raid-intro', raidId: 'last-eldwurm' },
+      category: 'Raids',
+      replayable: true
+    });
+    expect(def.skippable).toBe(true);
+    expect(def.beats[0].shot).toEqual({ angle: 'low', move: 'push-in', palette: 'Bluescale', mood: 'Ominous' });
+    expect(def.beats[0].stage).toContainEqual({ kind: 'focus', target: 'boss' });
+    expect(def.beats[0].stage).toContainEqual({ kind: 'gesture', target: 'boss', gesture: 'ground-slam' });
+    expect(def.beats[0].line?.text).toContain('brothers fell');
+    expect(def.beats[0].sound).toBe('raid-clear');
+  });
+});
+
+// ----------------------------------------------------------------
 // STORY §8 — cinematics gallery + §7.4 titles + §2.6/§7.4 content
 // ----------------------------------------------------------------
 describe('STORY gallery, titles & content', () => {
@@ -218,5 +273,12 @@ describe('STORY gallery, titles & content', () => {
     const goldBefore = g.gold;
     expect(g.runSeasonalEvent('wraith-night-altar')).toBe(true);
     expect(g.gold).toBeGreaterThan(goldBefore); // festival purse paid out immediately
+  });
+
+  it('registers the full STORY §7 festival and legend roster', () => {
+    expect(REG.seasonalEvents.size).toBeGreaterThanOrEqual(9);
+    expect(REG.legends.size).toBeGreaterThanOrEqual(5);
+    for (const event of REG.seasonalEvents.values()) expect(REG.cutscenes.has(event.cutsceneId)).toBe(true);
+    for (const legend of REG.legends.values()) expect(REG.cutscenes.has(legend.cutsceneId)).toBe(true);
   });
 });

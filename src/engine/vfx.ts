@@ -359,6 +359,16 @@ export class VfxManager {
     }
   }
 
+  /** Renderer-only STORY cut-scene staging. This mirrors cast VFX without creating sim events. */
+  cinematicStage(pos: Vec2, vfx: VfxSpec): void {
+    this.castFlash(pos.x, pos.y, vfx);
+    const radius = vfx.archetype === 'global-mark' || vfx.archetype === 'storm' ? 2.1 : 1.25;
+    this.burst(pos.x, pos.y, vfx.color, radius, 0.5, vfx.color2);
+    if (vfx.archetype === 'shield' || vfx.archetype === 'beam' || vfx.archetype === 'global-mark') {
+      this.pillar(pos.x, pos.y, vfx.color2 ?? vfx.color, vfx.archetype === 'shield' ? 0.55 : 0.34);
+    }
+  }
+
   /** Track in-flight projectile positions from the sim each frame. */
   syncProjectiles(list: Iterable<{ pid: number; pos: { x: number; y: number } }>): void {
     const seen = this.projectileSeen;

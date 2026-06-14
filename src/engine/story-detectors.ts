@@ -9,7 +9,11 @@ const ECHO_SLAM_ID = 'es-echo-slam';
 const ECHO_SLAM_RADIUS = 650;
 const PIT_RAID_ID = 'roshan-pit';
 const HOOK_ID = 'pudge-meat-hook';
+const AXE_CALL_ID = 'axe-berserkers-call';
+const DREAM_COIL_ID = 'puck-dream-coil';
 const HOOK_WINDOW_SEC = 5;       // a death this long after a hook still counts as "hooked home"
+const AXE_CALL_WINDOW_SEC = 6;
+const RAMPAGE_WINDOW_SEC = 8;
 const PHASE_BREAK_PCT = 0.5;     // §6.6: the boss "breaks" at half health
 
 export interface StoryObserveCtx {
@@ -34,18 +38,28 @@ function dist2(a: Vec2, b: Vec2): number {
 
 export class StoryDetector {
   private recentHooks: { atSec: number; casterUid: number }[] = [];
+  private recentAxeCalls: { atSec: number; casterUid: number }[] = [];
+  private recentKills = new Map<number, number[]>();
   private phaseFired = new Set<number>(); // boss uids whose break already fired this encounter
 
   /** Reset per-encounter state when a live fight begins. */
   beginEncounter(): void {
     this.phaseFired.clear();
     this.recentHooks = [];
+    this.recentAxeCalls = [];
+    this.recentKills.clear();
   }
 
   observe(events: readonly SimEvent[], ctx: StoryObserveCtx): StoryTrigger[] {
     const out: StoryTrigger[] = [];
     // prune stale hook records
     this.recentHooks = this.recentHooks.filter((h) => ctx.nowSec - h.atSec <= HOOK_WINDOW_SEC);
+    this.recentAxeCalls = this.recentAxeCalls.filter((h) => ctx.nowSec - h.atSec <= AXE_CALL_WINDOW_SEC);
+    for (const [uid, kills] of this.recentKills) {
+      const fresh = kills.filter((t) => ctx.nowSec - t <= RAMPAGE_WINDOW_SEC);
+      if (fresh.length > 0) this.recentKills.set(uid, fresh);
+      else this.recentKills.delete(uid);
+    }
 
     for (const ev of events) {
       if (ev.t === 'cast') {
@@ -72,6 +86,21 @@ export class StoryDetector {
       return null;
     }
 
+    if (ev.abilityId === AXE_CALL_ID) {
+      this.recentAxeCalls.push({ atSec: ctx.nowSec, casterUid: ev.uid });
+      return null;
+    }
+
+    // The Coil That Closed the Game — Dream Coil catching multiple enemies.
+    if (ev.abilityId === DREAM_COIL_ID) {
+      let caught = 0;
+      const r2 = 550 * 550;
+      for (const u of ctx.sim.unitsArr) {
+        if (u.alive && u.team !== ctx.playerTeam && dist2(u.pos, caster.pos) <= r2) caught += 1;
+      }
+      if (caught >= 2) return { kind: 'legend', legendId: 'coil-closed-game' };
+    }
+
     // The Pit Remembers — a player Echo Slam catching 4+ enemies inside Roshan's Pit.
     if (ev.abilityId === ECHO_SLAM_ID && ctx.raidId === PIT_RAID_ID) {
       let caught = 0;
@@ -85,9 +114,29 @@ export class StoryDetector {
   }
 
   private onDeath(ev: Extract<SimEvent, { t: 'death' }>, ctx: StoryObserveCtx): StoryTrigger | null {
-    if (!ctx.townPos || this.recentHooks.length === 0) return null;
     const victim = ctx.sim.unit(ev.uid);
-    if (!victim || victim.team === ctx.playerTeam) return null;
+    if (!victim) return null;
+
+    if (victim.team === ctx.playerTeam) {
+      const paid = this.recentAxeCalls.some((h) => h.casterUid === ev.uid);
+      if (paid) {
+        const enemiesAlive = ctx.sim.unitsArr.filter((u) => u.team !== ctx.playerTeam && u.alive).length;
+        if (enemiesAlive <= 1) return { kind: 'legend', legendId: 'call-paid-out' };
+      }
+      return null;
+    }
+
+    if (ev.killer !== undefined) {
+      const killer = ctx.sim.unit(ev.killer);
+      if (killer?.team === ctx.playerTeam) {
+        const kills = this.recentKills.get(ev.killer) ?? [];
+        kills.push(ctx.nowSec);
+        this.recentKills.set(ev.killer, kills);
+        if (kills.length >= 5) return { kind: 'legend', legendId: 'rampage' };
+      }
+    }
+
+    if (!ctx.townPos || this.recentHooks.length === 0) return null;
     const r = ctx.townRadius ?? 900;
     // "Hooked home": a recent player Pudge stands in the base/fountain zone as the victim dies.
     const homed = this.recentHooks.some((h) => {

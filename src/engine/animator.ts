@@ -454,3 +454,14 @@ export function animateRig(rig: UnitRig, unit: Unit, st: AnimState, dt: number, 
     eye.rotation.y = time * 2.5;
   }
 }
+
+/** Presentation-only gesture pose for STORY cut-scene beats.
+ *  The sim continues unchanged; the scene applies this after the normal pose update. */
+export function applyCinematicGesture(rig: UnitRig, gesture: AnimGesture, time: number): void {
+  const pose = castPose(gesture, undefined, time, rig.scale);
+  if (rig.armL) rig.armL.rotation.z = pose.l;
+  if (rig.armR) rig.armR.rotation.z = pose.r;
+  rig.body.rotation.z = pose.bodyZ;
+  rig.body.position.y += pose.bodyY;
+  rig.body.position.x += pose.bodyX;
+}

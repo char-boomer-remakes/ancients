@@ -17,11 +17,16 @@ export interface CinematicView {
   tier: CutsceneTier;
   beatIndex: number;
   beatCount: number;
+  beatKey: string;
+  beatElapsed: number;
+  beatHold: number;
   letterbox: boolean;
   speed: number;
   seen: boolean;
   shot: CutsceneBeat['shot'];
+  stage: NonNullable<CutsceneBeat['stage']>;
   stageText: string;
+  sound?: CutsceneBeat['sound'];
   speaker?: string;
   text?: string;
   revealedText: string;   // typewriter reveal (STORY §3.4: tap completes the line)
@@ -215,11 +220,16 @@ export class CinematicDirector {
       tier: def.tier,
       beatIndex,
       beatCount: beats.length,
+      beatKey: `${def.id}:${beatIndex}`,
+      beatElapsed: p.elapsed,
+      beatHold: beat.hold ?? DEFAULT_HOLD_SEC,
       letterbox: def.letterbox ?? def.tier !== 'bark',
       speed,
       seen,
       shot: beat.shot,
+      stage: beat.stage ?? [],
       stageText: stageText(beat, ctx),
+      sound: beat.sound,
       speaker: line ? fillTemplate(line.speaker, ctx) : undefined,
       text: fullText,
       revealedText,

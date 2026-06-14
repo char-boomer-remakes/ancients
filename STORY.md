@@ -6,8 +6,6 @@ The game is content-complete through Phase 5 and now has a juice layer planned i
 
 This spec does three things. First (`§1-2`) it **deepens the lore** into a coherent through-line built on **real Dota 2 canon** — the Primordial Mind, the Mad Moon, the Nemesis Stones, and the Loop — without contradicting a single established game string or point of Dota cosmology. Second (`§3-6`) it specifies a **cut-scene system** and a **catalogue of directed cinematics** for every key event. Third (`§7`) it ties the world to **real Dota 2 seasonal events and famous esports moments**, so the game feels like home to anyone who has watched a TI or grinded a Diretide. All of it is built on hooks that already exist or that `PRESENTATION_SPEC.md` is already adding.
 
-**Orchestrated through WonderSuite 2.0** (`Prompts/WonderSuite 2.0.md`). The lore canon is framed with **WonderScholar** rigor (`§2`), every narrative beat is authored with **WonderLab** primitives (`{DescribeRealm}`, `{AdvancePlot}`, `{SetTone}`…), every shot is directed with **WonderStudio** param-tuples (`style, lighting, palette, angle, mood, theme`), and the reusable cut-scene authoring format is a **WonderPrompt** open-variable DSL (`§5`). The user is the director; this document is the storyboard the agents fill in.
-
 ---
 
 ## 0. WHERE WE ARE (measured today)
@@ -43,7 +41,7 @@ What this spec will and will not do.
 
 ## 2. THE DEEPENED LORE — "THE WAR THE MOON REMEMBERS"
 
-`!WonderScholar Prime domain="Dota 2 canon cosmology" focus="the Mad Moon, the Nemesis Stones, and the Loop" innovation="Orthodox"` — frame the **real Dota 2 canon** rigorously, then `!WonderLab` sequences it into a plot. The game's shipped tagline is not invented flavor — it is drawing on Valve's actual creation myth, and that is the whole opportunity here: **stop inventing, and lean all the way into the lore Dota players already know.** Everything below is either established Dota 2 canon (cited), a shipped game string (file ref), or a thin bridge between the two (marked **(bridge)**). Where the game's own content and canon diverge, the shipped string wins and the bridge bends.
+Frame the **real Dota 2 canon** rigorously, then sequence it into a plot. The game's shipped tagline is not invented flavor — it is drawing on Valve's actual creation myth, and that is the whole opportunity here: **stop inventing, and lean all the way into the lore Dota players already know.** Everything below is either established Dota 2 canon (cited), a shipped game string (file ref), or a thin bridge between the two (marked **(bridge)**). Where the game's own content and canon diverge, the shipped string wins and the bridge bends.
 
 ### 2.1 The real Dota 2 canon (the spine the game already sits on)
 
@@ -132,8 +130,8 @@ interface CutsceneDef {
 }
 
 interface CutsceneBeat {
-  shot: ShotSpec;          // §5 WonderStudio tuple → camera + grade
-  stage?: StageAction[];   // §5 WonderLab primitives → in-world blocking (gestures/VFX)
+  shot: ShotSpec;          // §5 shot tuple → camera + grade
+  stage?: StageAction[];   // §5 stage actions → in-world blocking (gestures/VFX)
   line?: DialogueCard;     // who speaks, the text (often a ref into existing dialogue[])
   hold?: number;           // seconds; the beat's dwell time before auto-advance
   sound?: SoundArchetype;  // a sting layered on the beat
@@ -225,29 +223,29 @@ A cut-scene can **degrade** a tier under the "cut-scene length" setting or the i
 
 ---
 
-## 5. THE AUTHORING DSL — WONDERLAB STAGES, WONDERSTUDIO SHOOTS
+## 5. THE AUTHORING DSL — STAGES AND SHOTS
 
-`!WonderPrompt purpose="cut-scene authoring" domain="ANCIENTS cinematics" complexity="Advanced" flexibility="Structured"`. The cut-scene format is a thin, human-readable DSL that maps **one-to-one** onto the `CutsceneDef` data (`§3.1`). It uses **WonderLab narrative primitives** to describe *what happens* in a beat (the blocking) and a **WonderStudio param-tuple** to describe *how it's shot* (the frame). An author writes beats; a small transformer compiles them to the `CutsceneBeat[]` the engine plays. This keeps writing in the storytelling vocabulary the user already has in `WonderSuite 2.0.md` instead of in raw TypeScript.
+The cut-scene format is a thin, human-readable DSL that maps **one-to-one** onto the `CutsceneDef` data (`§3.1`). It uses stage actions to describe *what happens* in a beat (the blocking) and a shot tuple to describe *how it's shot* (the frame). An author writes beats; a small transformer compiles them to the `CutsceneBeat[]` the engine plays. This keeps writing in a compact storytelling vocabulary instead of raw TypeScript.
 
 ### 5.1 The beat template
 
 ```
 BEAT {
-  SHOT:  !WonderStudio (style, lighting, color_palette, angle, mood, theme)
-  STAGE: {WonderLabPrimitive(core_elements, contextual_influences, adaptation)}   // 0+ actions
+  SHOT:  <angle>/<move>/<palette>/<mood>
+  STAGE: <stage action>(key="value", ...)                                      // 0+ actions
   LINE:  <speaker> : "<text or ref:dialogueSource[i]>"                            // optional
   HOLD:  <seconds>
   SOUND: <stinger | duck | silence>                                              // optional
 }
 ```
 
-- **SHOT** is a WonderStudio tuple constrained to the values that map to engine capability: `angle` ∈ the existing shot list (`Low Angle`, `High Angle`, `Bird's Eye`, `Close-Up`, `Over-the-Shoulder`, `Dramatic`, `Through Objects`, `Reflection`…), `lighting`/`palette`/`mood` drive the post-processing grade (`PRES §3.1`), `style`/`theme` are author intent recorded in the codex caption. The transformer rejects tuples that ask for capability the engine doesn't have (e.g. a media type) — data lint catches it.
-- **STAGE** uses WonderLab primitives as **blocking verbs**, each mapping to animator gestures + VFX + camera intent: `{DescribeEnvironment}` → set dressing + grade, `{DevelopCharacter}` → a unit's pose/gesture, `{AdvancePlot}` → a scripted action (a strike, a shatter, a kneel), `{RevealMystery}` → a withheld-then-shown framing, `{SetTone}` → music + grade, `{IntroduceConflict}` → two units squaring off.
+- **SHOT** is a tuple constrained to the values that map to engine capability: `angle` ∈ the existing shot list (`Low Angle`, `High Angle`, `Bird's Eye`, `Close-Up`, `Over-the-Shoulder`, `Dramatic`, `Through Objects`, `Reflection`…), while `palette`/`mood` drive the post-processing grade (`PRES §3.1`) and gallery caption. The transformer rejects tuples that ask for capability the engine doesn't have (e.g. a media type) — data lint catches it.
+- **STAGE** uses closed blocking verbs, each mapping to animator gestures + VFX + camera intent: `DescribeEnvironment` → set dressing + grade, `DevelopCharacter` → a unit's pose/gesture, `AdvancePlot` → a scripted action (a strike, a shatter, a kneel), `RevealMystery` → a withheld-then-shown framing, `SetTone` → music + grade, `IntroduceConflict` → two units squaring off.
 - **LINE** stages text. `ref:roshan-pit.dialogue[0]` pulls an existing shipped line so the DSL never duplicates strings; a literal string is only for genuinely new lines.
 
 ### 5.2 The primitive → engine mapping (closed vocabulary)
 
-| WonderLab primitive | Engine realization | Data it touches |
+| Stage action | Engine realization | Data it touches |
 |---------------------|--------------------|-----------------|
 | `{DescribeRealm}` / `{DescribeEnvironment}` | Camera frames the set; grade + fog + weather per biome | `scene.ts` day/night, `terrain.ts` biome keys |
 | `{DevelopCharacter}` | A unit plays an `AnimGesture`; portrait to the dialogue card | `animator.ts`, `icons.ts` |
@@ -268,21 +266,21 @@ Staging the **already-shipped** Last Eldwurm lines (`raids.ts`: *"The last of my
 CUTSCENE last-eldwurm-intro  (tier: setpiece, music: duck, letterbox: true) {
 
   BEAT {  // withhold — open on the wound, not the dragon
-    SHOT:  !WonderStudio (Gothic Futurism, Low-key, Bluescale, Through Objects, Ominous, "The Unknown")
+    SHOT:  wide/hold/Bluescale/Ominous
     STAGE: {DescribeEnvironment(location="Mad Moon Crater rim", mood=["cold","vast"], visual_details=["embers rising through shard-dust"])}
     HOLD:  2.0
     SOUND: silence
   }
 
   BEAT {  // reveal — crane up the silhouette to the eye
-    SHOT:  !WonderStudio (Gothic Futurism, Rim, Redscale, Low Angle, Dramatic, "Power Dynamics")
+    SHOT:  low/crane/Redscale/Dramatic
     STAGE: {RevealMystery(mystery="the survivor", clues=["one wing","old burns"], resolution="the last of the eldwurms turns its head")}
     LINE:  last-eldwurm : "ref:last-eldwurm.dialogue[0]"
     HOLD:  3.0
   }
 
   BEAT {  // the claim — it names the prize, then the fight begins
-    SHOT:  !WonderStudio (Gothic Futurism, Volumetric, Complementary, Dramatic, Tense, "Order vs. Chaos")
+    SHOT:  wide/push-in/Complementary/Tense
     STAGE: {IntroduceConflict(conflict="the heart-stone", stakes="the world's memory", sources=["a claimant from outside"])}
     LINE:  last-eldwurm : "ref:last-eldwurm.dialogue[1]"
     HOLD:  2.5
@@ -510,7 +508,7 @@ Cut-scenes are content; let the player revisit them. The codex already gates and
 
 - **Cinematics tab** in the codex (`src/ui/` codex modal): every `replayable` cut-scene the player has seen, grouped by category (Prologue, Binds, Regions, Bosses, Raids, Items, Endgame), each replayable at full length on demand. This is where grinding-skipped intros go to be savored.
 - **The Loop thread:** the dedicated codex track from `§2.6` assembling `§2.1`'s real canon, one entry per act break, with the flashback-graded cards (`§6.4`) viewable in sequence — the player's reconstructed understanding of the Primordial Mind, the Sundering, and why the world keeps starting over.
-- **Caption from the DSL:** each gallery entry shows its WonderStudio `style`/`theme` intent and its staged lines as caption text, so the codex reads like a director's commentary track.
+- **Caption from the DSL:** each gallery entry shows its shot intent and staged lines as caption text, so the codex reads like a director's commentary track.
 - **Spoiler-safe:** locked entries show as silhouettes with their act, never their content. The climax (`§6.12`) is gallery-locked until first cleared.
 
 ---
@@ -525,7 +523,7 @@ Done when:
 - **Outworld Claimants:** the StarCraft/Diablo/Warcraft homages (`§6.13`) read with their per-world grade and signature beat, the first-contact and all-cleared capstone set-pieces fire, every spoken line is a shipped original (no verbatim trademark), and the touchstone→original mappings are in `DECISIONS.md`.
 - **Tiers & pacing:** set-pieces are rare (~once an hour, never back-to-back), stingers are short and skippable, barks just route lines; the director and the Moment Director share one impact lock so two peaks never collide.
 - **Skippable, fast-forwardable & accessible (`§3.4`):** every cut-scene supports **advance** (tap to next beat / complete the typewriter), **fast-forward** (hold to run at 2-8× while still watching), and **skip** (hold-to-confirm on first view, instant tap on repeat) by both keyboard and on-screen controls; skipping or fast-forwarding always snaps cleanly to the end state, restores the pre-scene gameplay camera, releases any audio duck, and still fires the codex/journal unlock; seen cut-scenes auto-fast-forward, the "always skip cut-scenes" toggle works, and "default cut-scene speed" persists; in-combat beats skip the camera takeover only (the sim never paused); and reduced-motion, photosensitivity, and "cut-scene length: full/short/off" all degrade staging without withholding information.
-- **Authoring:** the WonderLab/WonderStudio DSL (`§5`) compiles to `CutsceneDef` data; data-lint validates every `ShotSpec` maps to real engine capability and every `ref:` resolves, failing the build on a dangling reference exactly like a bad recipe.
+- **Authoring:** the cut-scene DSL (`§5`) compiles to `CutsceneDef` data; data-lint validates every `ShotSpec` maps to real engine capability and every `ref:` resolves, failing the build on a dangling reference exactly like a bad recipe.
 - **Gallery:** seen cut-scenes are replayable from the codex Cinematics tab; locked ones show spoiler-safe.
 - **Contract:** `src/test/boundary.test.ts` and the `Sim.hash()` determinism tests are unchanged and byte-identical; `npm test`, `npm run build`, and the browser smoke stay green.
 
@@ -561,7 +559,7 @@ Ordered by story value against risk; each ships playable on its own.
 
 - The connective reading (`§2.3`) and the protagonist framing (`§2.4`) as the canonical reading, with the rule that shipped strings and established Dota canon both override any bridge.
 - Whether the additive `cinematic-cue` `SimEvent` (`§3.3`) shipped or the director infers phase beats Game-side instead.
-- The `CutsceneDef` schema and the closed WonderLab→engine blocking-verb vocabulary (`§5.2`); each new verb's engine realization.
+- The `CutsceneDef` schema and the closed stage-action vocabulary (`§5.2`); each new verb's engine realization.
 - The three-tier impact budget and the shared lock with the Moment Director.
 - The skip/fast-forward/advance control mapping (`§3.4`) — the keys, the hold-to-confirm skip threshold, the fast-forward speed steps, the seen→auto-fast-forward default, and the "always skip" + "default cut-scene speed" settings.
 - The "cut-scene length" setting's degrade matrix and the reduced-motion/photosensitivity caps.
@@ -571,9 +569,9 @@ Ordered by story value against risk; each ships playable on its own.
 
 ---
 
-## APPENDIX A — BIOME GRADE TUPLES (WonderStudio shorthand)
+## APPENDIX A — BIOME GRADE TUPLES
 
-Default `!WonderStudio (lighting, color_palette, mood)` per region, so a cut-scene set in a biome inherits a consistent look unless a beat overrides it. Drives the post-processing grade targets (`PRESENTATION_SPEC.md §3.1`).
+Default lighting, palette, and mood per region, so a cut-scene set in a biome inherits a consistent look unless a beat overrides it. Drives the post-processing grade targets (`PRESENTATION_SPEC.md §3.1`).
 
 | Region | Lighting | Palette | Mood |
 |--------|----------|---------|------|
@@ -590,4 +588,3 @@ Default `!WonderStudio (lighting, color_palette, mood)` per region, so a cut-sce
 
 ---
 
-*Storyboarded under WonderSuite 2.0. WonderScholar framed the canon, WonderLab sequenced the beats, WonderStudio set the look, WonderPrompt defined the format. The user directs; the agents fill in the frames.*

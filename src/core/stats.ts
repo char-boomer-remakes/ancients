@@ -22,8 +22,15 @@ export interface DerivedStats {
   lifestealPct: number;
   castRangeBonus: number;
   hpRegenPctMax: number;
+  manaRegenPctMax: number;
   damageTakenReductionPct: number;
   attackDamageTakenReductionPct: number;
+  swapCdReductionPct: number;
+  swapInDamagePct: number;
+  swapInHealPct: number;
+  reactionAmpPct: number;
+  elementalGaugeSec: number;
+  staminaBonus: number;
 }
 
 export interface StatInputs {
@@ -92,8 +99,15 @@ export function deriveStats(inp: StatInputs): DerivedStats {
     lifestealPct: M(mods, 'lifestealPct'),
     castRangeBonus: M(mods, 'castRange'),
     hpRegenPctMax: M(mods, 'hpRegenPctMax'),
+    manaRegenPctMax: M(mods, 'manaRegenPctMax'),
     damageTakenReductionPct: clamp(M(mods, 'damageTakenReductionPct'), -100, 90),
-    attackDamageTakenReductionPct: clamp(M(mods, 'attackDamageTakenReductionPct'), 0, 95)
+    attackDamageTakenReductionPct: clamp(M(mods, 'attackDamageTakenReductionPct'), 0, 95),
+    swapCdReductionPct: M(mods, 'swapCdReductionPct'),
+    swapInDamagePct: M(mods, 'swapInDamagePct'),
+    swapInHealPct: M(mods, 'swapInHealPct'),
+    reactionAmpPct: M(mods, 'reactionAmpPct'),
+    elementalGaugeSec: M(mods, 'elementalGaugeSec'),
+    staminaBonus: M(mods, 'staminaBonus')
   };
 }
 
