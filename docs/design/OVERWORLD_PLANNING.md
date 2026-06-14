@@ -230,4 +230,6 @@ Gates 1–3 land first (cheap, high-coverage, no asset work). 4–6 follow as `p
 3. **Stamp the manifest** (`build_assets.mjs` `dimsM`), turn on gate 5, and render the `§7` matrix (gate 9).
 4. **Generate against the bands** — every new GLB is prompted with its `sizeClass`/`heightM` (`§5.6`), so coherence is built in at authoring time, not patched after.
 
+**Runtime fit contract (landed).** The renderer now honors a unit's resolved world size at render time, closing the `§0` boss gap: a boss-controlled unit lifts its source-hero rig to its `bossWorldSize` height via a render-only `Unit.visualScale` (rank-precise on the dungeon path; `TUNING.bossVisualScale` ≈ huge-floor fallback on the raid-arena path). The lift is render-only — the sim keeps the hero's stats and collision, and everything anchored to rig height (HP bar, selection ring, camera framing) follows for free. `data-lint` asserts every boss reads above the human band and that the lift reproduces the declared boss height.
+
 End state: one matrix, every box green — every hero, monster, creep, boss, NPC, building, and prop carries a real-world size from one source, the fit pipeline honors it, the manifest proves it, and a generated world reads as a single, lifelike place.

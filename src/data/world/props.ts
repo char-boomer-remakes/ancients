@@ -30,7 +30,9 @@ export const DRESSING_PROP_SIZES = {
 /** Instanced foliage fit targets — replaces the 4.6 / 1.5 literals in terrain.ts. */
 export const FOLIAGE_SIZES = {
   tree: { heightM: 4.6, footprintM: 1.2, sizeClass: 'structure', pose: 'static' },
-  rock: { heightM: 1.5, footprintM: 0.9, sizeClass: 'prop', pose: 'static' }
+  rock: { heightM: 1.5, footprintM: 0.9, sizeClass: 'prop', pose: 'static' },
+  bush: { heightM: 0.9, footprintM: 0.7, sizeClass: 'prop', pose: 'static' },
+  fern: { heightM: 0.7, footprintM: 0.45, sizeClass: 'prop', pose: 'static' }
 } as const satisfies Record<string, WorldSize>;
 
 export interface AmbientCritterDef {

@@ -28,13 +28,13 @@ This is a full game, playable start to finish right now. A fresh save runs all t
 
 **Roster and content**
 
-- **122 heroes**, each a faithful Dota kit: four abilities, a talent tree, a facet, original in-character barks, and a recruitment quest of its own. 19 already carry their Aghanim's upgrade.
-- **145 items** built on real Dota recipes, with the passives and actives you remember, plus **15 neutral items** in a dedicated slot and a Tinker's Bench for rerolls and enchants.
+- **122 heroes**, each a faithful Dota kit: four abilities, a talent tree, a facet, original in-character barks, and a recruitment quest of its own. Every one carries an Aghanim's Scepter and Shard upgrade.
+- **176 items** built on real Dota recipes, with the passives and actives you remember, plus **15 neutral items** in a dedicated slot and a Tinker's Bench for rerolls and enchants.
 - **36 catchable creeps**, from kobolds to ancients, each fighting with its real Dota abilities. Weaken one, bind it, and it joins your collection.
 - **10 regions** across one continent, every one gated behind a badge and packed with a town, a shop, wild spawns, hero echoes, bosses, and a gym.
 - **8 gyms**, an **Elite Five** draft gauntlet, and a final **Champion** fight at the Tower of the Ancients.
 - **41 bosses and mini-bosses** across Normal, Nightmare, and Hell tiers, each with its own themed loot table to chase.
-- **10 raid bosses**, from Roshan's Pit to the Outworld Claimants, guests who crossed worlds for the prize at the planet's heart.
+- **11 raid bosses**, from Roshan's Pit to the Outworld Claimants, guests who crossed worlds for the prize at the planet's heart.
 - **4 dungeons** with multi-room descents and affixes, plus an endless escalating mode on daily and weekly seeds.
 
 **Systems**
@@ -44,9 +44,11 @@ This is a full game, playable start to finish right now. A fresh save runs all t
 - **Macro combat**: 5v5 gym and Elite battles that resolve on the core. You write each hero a **gambit** rule list before the fight, then spend **Captain Calls** to seize direct control for a few seconds when it counts.
 - **Capture and merge**: weaken a creep, channel a Binding Totem, and add it to your collection. Three copies merge into a star upgrade, and you can field up to three caught creeps as an AI entourage. Summoner heroes like Chen and Nature's Prophet turn the overworld into a walk-the-map-with-an-army playstyle.
 - **Recruitment**: every hero follows a three-beat chain of Find, Trial, and Bind, with 15 trial kinds (honor duels, stealth hunts, combo exams, faction choices, reputation gates, and more). Losing a Bind relocates the hero rather than failing the quest.
+- **Quests and bounties**: a quest board that runs alongside recruitment, with recurring per-region bounties, multi-step story chapters, timed contracts, and branching choice-quests that pay distinct titles. The board floats your current region to the top as you travel.
 - **Hero echoes**: farmable boss-fragments of every hero. Beating echoes advances recruitment, unlocks talent branches and facet swaps, and pays gold and XP bounties, so duplicates always matter.
 - **Loot quality**: items roll a quality grade (Standard, Inscribed, Genuine, Frozen, Corrupted, Unusual) and a rarity tint. An Armory holds bound loot per hero with saveable loadouts, a Black Market sells gated recipes and relics, and salvaged gear becomes essence you spend to upgrade quality.
-- **Resonance**: a Genshin-style elemental layer, on by default and reversible to vanilla Dota with one setting. Seven elements apply to enemies, react when they overlap (Vaporize, Melt, Freeze, Superconduct, and others), and a party that shares an element gains a team-wide resonance buff. It runs in the overworld and raids while gyms and the Elite Five stay pure Dota.
+- **Resonance**: a Genshin-style elemental layer, on by default and reversible to vanilla Dota with one setting. Seven elements apply to enemies, react when they overlap (Vaporize, Melt, Freeze, Superconduct, and others), and a party that shares an element gains a team-wide resonance buff. It runs in the overworld and raids while gyms and the Elite Five stay pure Dota. Elemental **weather** sweeps some regions on the day/night clock, and **domains** and **ley-line** outcrops offer element-gated challenge runs.
+- **Exploration**: verticality you can climb, glide, and swim through on a stamina budget, plus a Field Kitchen where cooked dishes heal a party, grant a timed buff, or revive a fallen hero out of combat.
 
 **Presentation**
 
@@ -54,9 +56,10 @@ This is a full game, playable start to finish right now. A fresh save runs all t
 - A PBR rendering path with bloom, ambient occlusion, color grading, and tonemapping, plus a day/night cycle, animated water, and per-biome skies. Quality scales across tiers and can be tuned live in settings.
 - Hero-specific likeness overlays, item appearance geometry that wears on the model, and attack-animation overrides that read an item's identity on sight.
 - A procedural audio layer that synthesizes per-hero attack, cast, and ability sounds keyed off each ability's sound archetype, with stingers for capture, level-up, merges, and badges.
-- A minimap, quest journal, and an encounter-gated codex that fills in as you meet heroes, regions, items, creeps, and raids.
+- A minimap, quest journal, an encounter-gated codex that fills in as you meet heroes, regions, items, creeps, and raids, and a Cinematics gallery that replays seen cut-scenes.
+- A combat-readability overlay (cast bars, boss threat and taunt, shared-focus and ult-ready cues) and a colorblind-safe rarity palette, both optional in settings.
 
-The combat core stays headless: it never imports Three.js or touches the DOM. Over 1,300 headless tests cover data linting, combat determinism, capture and merge, saves and migrations, gym and raid simulation, resonance, dungeon generation, loot quality, and a full critical-path playthrough.
+The combat core stays headless: it never imports Three.js or touches the DOM. Over 1,600 headless tests cover data linting, combat determinism, capture and merge, saves and migrations, gym and raid simulation, resonance, quests, dungeon generation, loot quality, traversal, and a full critical-path playthrough, backed by a Playwright browser smoke suite.
 
 Design targets live in `SPEC.md`, current acceptance status in `PROGRESS.md`, and implementation calls in `DECISIONS.md`. The overhaul and design docs (`docs/design/LOOT_OVERHAUL.md`, `docs/design/DUNGEON_OVERHAUL.md`, `docs/design/GRAPHICS_SPEC.md`, and others) track the work past the original phase plan.
 
@@ -88,6 +91,7 @@ Open the Vite URL in your browser, start a new game, and choose a starter hero.
 npm test          # run the vitest suite
 npm run build     # typecheck and build the Vite app
 npm run typecheck # run TypeScript without emitting
+npm run test:e2e  # run the Playwright browser smoke suite
 npm run assets:check  # build the asset manifest and check size budgets
 ```
 
@@ -103,17 +107,20 @@ npm run assets:check  # build the asset manifest and check size budgets
 - `A` then click: attack-move
 - `Shift` while ordering: queue the order
 - `S`: stop/hold
+- `Space`: dash; `Alt` (hold): sprint
 - `T`: channel Binding Totem on a weakened creep
-- `G`: interact with nearby gates, gyms, and portals
+- `G`: interact with nearby gates, gyms, portals, and climb/glide points
 - `B`: shop while in town
-- `Y`: Town Services (boss reruns, Tinker's Bench, Armory, gold sinks)
+- `Y`: Town Services (boss reruns, Tinker's Bench, Armory, Field Kitchen, gold sinks)
 - `Tab`: party, inventory, and caught creep panel
+- `H`: character sheet
 - `J`: quest journal
 - `K`: codex
 - `M`: toggle map view
+- `F5`: quicksave
 - `Esc`: pause, save, and load
 
-Quick-cast is enabled by default.
+Quick-cast is enabled by default, and every key is rebindable in settings.
 
 ## 60-second demo
 

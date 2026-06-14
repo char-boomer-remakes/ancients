@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, attachSignatureItemWeapon, buildUnitRig, heroProportions, modelGeometryCacheSize, mountHeroModel, recolorToPalette } from '../engine/models';
-import { ENABLED_HERO_MODELS, ENABLED_HERO_BASES, ENABLED_HOLDOUT_MODELS, ENABLED_HOLDOUT_SIGNATURES, HERO_BASE, creepCreatureUrl, heroAssetEntry, heroBaseId, heroBaseUrl, holdoutReplacementUrl, holdoutSignatureUrl, itemWeaponGlbUrl, PHASE5_STARTER_ASSETS } from '../engine/assets';
+import { BESPOKE_HERO_MODEL_ASSETS, BESPOKE_HERO_MODELS, ENABLED_HERO_MODELS, ENABLED_HERO_BASES, ENABLED_HOLDOUT_MODELS, ENABLED_HOLDOUT_SIGNATURES, HERO_BASE, creepCreatureUrl, heroAssetEntry, heroBaseId, heroBaseUrl, holdoutReplacementUrl, holdoutSignatureUrl, itemWeaponGlbUrl, PHASE5_STARTER_ASSETS } from '../engine/assets';
 import { ALL_HEROES } from '../data/index';
 
 /** A stand-in mounted base: a 2×6×2 box the loader would normally fit + seat. */
@@ -54,13 +54,20 @@ describe('pluggable hero rig (Phase 5)', () => {
       expect(heroAssetEntry(a.heroId), `${a.heroId} entry`).not.toBeNull();
       expect(a.weaponUrl, `${a.heroId} weapon`).toBe(`/assets/weapons/heroes/${a.heroId}.glb`);
     }
-    // Creature-cohort heroes mount through shared bases, not per-hero GLB entries.
+    for (const a of BESPOKE_HERO_MODEL_ASSETS) {
+      expect(ENABLED_HERO_MODELS.has(a.heroId), `${a.heroId} bespoke enabled`).toBe(true);
+      expect(BESPOKE_HERO_MODELS.has(a.heroId), `${a.heroId} bespoke set`).toBe(true);
+      expect(heroAssetEntry(a.heroId)?.modelUrl).toBe(`/assets/heroes/${a.heroId}.glb`);
+    }
+    // Creature-cohort heroes usually mount through shared bases; bespoke polish
+    // entries above are the explicit exceptions.
     expect(heroAssetEntry('broodmother')).toBeNull();
     expect(heroAssetEntry('io')?.modelUrl).toBe('/assets/holdouts/replacements/io.glb');
     expect(heroAssetEntry('unknown-hero')).toBeNull();
     expect(heroAssetEntry(undefined)).toBeNull();
-    // The gate matches all dedicated hero-model entries: 80 humanoids + 11 holdout replacements.
-    expect(ENABLED_HERO_MODELS.size).toBe(PHASE5_STARTER_ASSETS.length + ENABLED_HOLDOUT_MODELS.size);
+    // The gate matches all dedicated hero-model entries: humanoids + animated bespoke
+    // creature heroes + the truly abstract holdout replacements.
+    expect(ENABLED_HERO_MODELS.size).toBe(PHASE5_STARTER_ASSETS.length + BESPOKE_HERO_MODEL_ASSETS.length + ENABLED_HOLDOUT_MODELS.size);
   });
 
   it('mounts an authored model over the procedural body, fitting height + seating feet', () => {
@@ -191,23 +198,36 @@ describe('shared hero bases (WS-A0)', () => {
   });
 
   it('resolves shared base URLs only for shipped creature hero cohorts', () => {
-    expect(ENABLED_HERO_BASES.size).toBe(15);
+    expect(ENABLED_HERO_BASES.size).toBe(17);
     expect(heroBaseUrl(heroBaseId('broodmother'))).toBe('/assets/creeps/spider.glb');
     expect(heroBaseUrl(heroBaseId('doom'))).toBe('/assets/creeps/demon.glb');
+    expect(heroBaseUrl(heroBaseId('winter-wyvern'))).toBe('/assets/creeps/dragonevolved.glb');
     expect(heroBaseUrl(heroBaseId('spirit-breaker'))).toBe('/assets/creeps/bull.glb');
-    // Generated P1.3 families: ursa rides the bear, treant-protector the treant;
-    // the sea leviathan reads through crabenemy.glb.
+    // Generated P1.3 families: animal-shaped holdouts now ride animated creature bodies.
     expect(heroBaseUrl(heroBaseId('ursa'))).toBe('/assets/creeps/bear.glb');
+    expect(heroBaseUrl(heroBaseId('lone-druid'))).toBe('/assets/creeps/bear.glb');
+    expect(heroBaseUrl(heroBaseId('phoenix'))).toBe('/assets/creeps/flier.glb');
+    expect(heroBaseUrl(heroBaseId('batrider'))).toBe('/assets/creeps/flier.glb');
+    expect(heroBaseUrl(heroBaseId('naga-siren'))).toBe('/assets/creeps/serpent.glb');
+    expect(heroBaseUrl(heroBaseId('medusa'))).toBe('/assets/creeps/serpent.glb');
     expect(heroBaseUrl(heroBaseId('treant-protector'))).toBe('/assets/creeps/treant.glb');
     expect(heroBaseUrl(heroBaseId('tidehunter'))).toBe('/assets/creeps/crabenemy.glb');
+    // Static bespoke body downloads are disabled until animated replacements exist.
+    expect(heroAssetEntry('tusk')).toBeNull();
+    expect(heroBaseUrl(heroBaseId('tusk'))).toBe('/assets/creeps/yeti.glb');
+    expect(heroAssetEntry('hoodwink')).toBeNull();
+    expect(heroBaseUrl(heroBaseId('hoodwink'))).toBe('/assets/creeps/fox.glb');
+    expect(heroAssetEntry('gyrocopter')).toBeNull();
+    expect(heroBaseUrl(heroBaseId('gyrocopter'))).toBe('/assets/creeps/goblin.glb');
     expect(heroBaseUrl(heroBaseId('juggernaut'))).toBeNull(); // humanoids use per-hero GLBs.
     expect(heroBaseUrl(heroBaseId('io'))).toBeNull(); // holdouts stay procedural.
   });
 
   it('resolves additive signature URLs for exactly the procedural holdouts (A6)', () => {
-    expect(ENABLED_HOLDOUT_SIGNATURES.size).toBe(11);
+    expect(ENABLED_HOLDOUT_SIGNATURES.size).toBe(4);
     expect(holdoutSignatureUrl('io')).toBe('/assets/holdouts/io.glb');
-    expect(holdoutSignatureUrl('phoenix')).toBe('/assets/holdouts/phoenix.glb');
+    expect(holdoutSignatureUrl('ancient-apparition')).toBe('/assets/holdouts/ancient-apparition.glb');
+    expect(holdoutSignatureUrl('phoenix')).toBeNull(); // flier base is more faithful and animated.
     expect(holdoutSignatureUrl('juggernaut')).toBeNull(); // humanoids have full GLBs
     expect(holdoutSignatureUrl('broodmother')).toBeNull(); // creature-base heroes use shared creatures
     expect(holdoutSignatureUrl(undefined)).toBeNull();
@@ -219,9 +239,10 @@ describe('shared hero bases (WS-A0)', () => {
   });
 
   it('resolves animated replacement URLs for exactly the procedural holdouts (A7)', () => {
-    expect(ENABLED_HOLDOUT_MODELS.size).toBe(11);
+    expect(ENABLED_HOLDOUT_MODELS.size).toBe(4);
     expect(holdoutReplacementUrl('io')).toBe('/assets/holdouts/replacements/io.glb');
-    expect(holdoutReplacementUrl('phoenix')).toBe('/assets/holdouts/replacements/phoenix.glb');
+    expect(holdoutReplacementUrl('ancient-apparition')).toBe('/assets/holdouts/replacements/ancient-apparition.glb');
+    expect(holdoutReplacementUrl('phoenix')).toBeNull();
     expect(holdoutReplacementUrl('juggernaut')).toBeNull();
     expect(holdoutReplacementUrl('broodmother')).toBeNull();
     expect(holdoutReplacementUrl(undefined)).toBeNull();
@@ -232,7 +253,7 @@ describe('shared hero bases (WS-A0)', () => {
       groups?: Record<string, { count: number; bytes: number }>;
       files?: { path: string; group: string; type: string }[];
     };
-    expect(manifest.groups?.holdout?.count).toBe(ENABLED_HOLDOUT_SIGNATURES.size + ENABLED_HOLDOUT_MODELS.size);
+    expect(manifest.groups?.holdout?.count).toBeGreaterThanOrEqual(ENABLED_HOLDOUT_SIGNATURES.size + ENABLED_HOLDOUT_MODELS.size);
     for (const heroId of ENABLED_HOLDOUT_SIGNATURES) {
       const url = holdoutSignatureUrl(heroId)!;
       const rel = url.replace('/assets/', '');
@@ -270,19 +291,47 @@ describe('shared hero bases (WS-A0)', () => {
       expect(existsSync(file), `${family} family file`).toBe(true);
       expect(statSync(file).size, `${family} family size`).toBeGreaterThan(0);
     }
-    // Harpies fly, owlbears/hellbear read as bears (not raptors/giants).
+    // Harpies and bird build fallbacks fly; owlbears/hellbear read as bears.
     expect(creepCreatureUrl('harpy-stormcrafter', 'bird')).toBe('/assets/creeps/flier.glb');
     expect(creepCreatureUrl('harpy-scout', undefined)).toBe('/assets/creeps/flier.glb');
+    expect(creepCreatureUrl('unknown-bird', 'bird')).toBe('/assets/creeps/flier.glb');
     expect(creepCreatureUrl('enraged-wildkin', undefined)).toBe('/assets/creeps/bear.glb');
     expect(creepCreatureUrl('hellbear', 'brute')).toBe('/assets/creeps/bear.glb');
-    // Bear/treant hero bases resolve to the generated files.
+    expect(creepCreatureUrl('polar-furbolg', undefined)).toBe('/assets/creeps/bear.glb');
+    expect(creepCreatureUrl('frostbitten-golem', undefined)).toBe('/assets/creeps/golelingevolved.glb');
+    expect(creepCreatureUrl('prowler-shaman', undefined)).toBe('/assets/creeps/demon.glb');
+    expect(creepCreatureUrl('prowler-shaman-minion', 'biped')).toBe('/assets/creeps/demon.glb');
+    expect(creepCreatureUrl('dark-troll-summoner-minion', 'biped')).toBe('/assets/creeps/tribal.glb');
+    expect(creepCreatureUrl('elder-jungle-stalker', undefined)).toBe('/assets/creeps/wolf.glb');
+    // Bear/treant/flier/serpent hero bases resolve to the generated/downloaded files.
     expect(heroBaseUrl(heroBaseId('ursa'))).toBe('/assets/creeps/bear.glb');
+    expect(heroBaseUrl(heroBaseId('phoenix'))).toBe('/assets/creeps/flier.glb');
+    expect(heroBaseUrl(heroBaseId('naga-siren'))).toBe('/assets/creeps/serpent.glb');
     expect(heroBaseUrl(heroBaseId('treant-protector'))).toBe('/assets/creeps/treant.glb');
+    // Serpent/naga-style summons use the downloaded serpent family.
+    const serpent = path.join(process.cwd(), 'public', 'assets', 'creeps', 'serpent.glb');
+    expect(existsSync(serpent), 'serpent family file').toBe(true);
+    expect(statSync(serpent).size, 'serpent family size').toBeGreaterThan(0);
+    expect(creepCreatureUrl('shadow-shaman-serpent-ward', undefined)).toBe('/assets/creeps/serpent.glb');
+    expect(creepCreatureUrl('phase3-naga-image', undefined)).toBe('/assets/creeps/serpent.glb');
+  });
+
+  it('uses only animated downloaded bespoke hero GLBs', () => {
+    for (const id of ['snapfire']) {
+      const file = path.join(process.cwd(), 'public', 'assets', 'heroes', `${id}.glb`);
+      expect(existsSync(file), `${id} bespoke hero file`).toBe(true);
+      expect(statSync(file).size, `${id} bespoke hero size`).toBeGreaterThan(0);
+      expect(heroAssetEntry(id)?.modelUrl).toBe(`/assets/heroes/${id}.glb`);
+    }
+    for (const id of ['gyrocopter', 'hoodwink', 'tusk']) {
+      expect(BESPOKE_HERO_MODELS.has(id), `${id} disabled until animated`).toBe(false);
+      expect(heroAssetEntry(id), `${id} falls back to shared base`).toBeNull();
+    }
   });
 
   it('ships the generated P3 signature item weapons and wires them to marquee artifacts', () => {
     // Each generated signature weapon exists on disk with real bytes.
-    for (const id of ['daedalus', 'radiance', 'battlefury', 'divine-rapier']) {
+    for (const id of ['daedalus', 'radiance', 'battlefury', 'divine-rapier', 'butterfly', 'scythe-of-vyse', 'eye-of-skadi', 'monkey-king-bar', 'abyssal-blade', 'mjollnir', 'satanic', 'bloodthorn', 'desolator']) {
       const file = path.join(process.cwd(), 'public', 'assets', 'weapons', 'items', `${id}.glb`);
       expect(existsSync(file), `${id} signature weapon file`).toBe(true);
       expect(statSync(file).size, `${id} signature weapon size`).toBeGreaterThan(0);

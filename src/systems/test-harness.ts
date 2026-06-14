@@ -149,6 +149,8 @@ export interface TestApi {
   start(save: GameSave, opts?: { headless?: boolean }): void;
   /** Load a save through the normal in-app event path. */
   load(save: GameSave): void;
+  /** Dispose the live game/HUD/input stack before browser teardown. */
+  shutdown(): void;
   /** Step the sim synchronously for `seconds` of game time (no real-time wait). */
   fastForward(seconds: number, stepMs?: number): void;
   /** One update step (default ~33ms). */
@@ -189,6 +191,7 @@ export interface HarnessDeps {
   getGame: () => Game | null;
   start: (save: GameSave, opts?: { headless?: boolean; hud?: boolean }) => void;
   load: (save: GameSave) => void;
+  shutdown?: () => void;
   headless: boolean;
   hud?: boolean;
   updateUi?: () => void;
@@ -221,6 +224,7 @@ export function makeTestApi(deps: HarnessDeps): TestApi {
     },
     start: (save, opts) => deps.start(save, { headless: opts?.headless ?? deps.headless, hud: deps.hud }),
     load: (save) => deps.load(save),
+    shutdown: () => deps.shutdown?.(),
     fastForward: (seconds, stepMs = 1000 / 30) => {
       const game = deps.getGame();
       if (!game) return;

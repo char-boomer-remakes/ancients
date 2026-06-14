@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot, clearCinematics, state } from './helpers';
+import { boot, clearCinematics, skipActiveCinematic, state } from './helpers';
 
 const MODAL_CARD = '#modal-root:not(.hidden) .modal-card';
 
@@ -8,6 +8,8 @@ const MODAL_CARD = '#modal-root:not(.hidden) .modal-card';
 // in save v7. Drive it entirely through the headless harness checkpoints
 // (__test.advanceQuest + state().quests) plus the __game escape hatch.
 test.describe('quests', () => {
+  test.describe.configure({ mode: 'serial' });
+
   test('a fresh game seeds the board with the no-prereq quests active', async ({ page }) => {
     await boot(page, { hero: 'juggernaut', seed: 301 });
     const q = (await state(page)).quests;
@@ -174,7 +176,7 @@ test.describe('quests', () => {
 
   test('claiming a fork branch from the Journal grants its reward', async ({ page }) => {
     await boot(page, { hero: 'juggernaut', seed: 309, hud: true });
-    await clearCinematics(page);
+    await skipActiveCinematic(page);
 
     await page.evaluate(() => {
       const g = (window as any).__game;
@@ -187,11 +189,15 @@ test.describe('quests', () => {
 
     const breakBtn = page.locator('[data-claim-quest="fork-zets-question"][data-claim-choice="break"]');
     await expect(breakBtn).toBeVisible();
-    await breakBtn.click();
+    // The HUD keeps repainting behind the modal; visibility is the meaningful
+    // guard here, then force the click through Playwright's stability wait.
+    await breakBtn.click({ force: true });
 
     // The Break-the-Loop branch grants its title; the fork remembers the branch.
     expect(await page.evaluate(() => (window as any).__game.quests['fork-zets-question']?.choice ?? null)).toBe('break');
     expect(await page.evaluate(() => (window as any).__game.questTitles().some((t: any) => t.id === 'loop-breaker'))).toBe(true);
+    await page.evaluate(() => (window as any).__test.shutdown());
+    await page.close({ runBeforeUnload: false });
   });
 
   // The other specs drive the model directly; this one proves the full UI loop:
@@ -199,7 +205,7 @@ test.describe('quests', () => {
   // and confirm the reward landed and the row refreshed.
   test('claiming a bounty from the Journal pays out and refreshes the row', async ({ page }) => {
     await boot(page, { hero: 'juggernaut', seed: 306, hud: true });
-    await clearCinematics(page);
+    await skipActiveCinematic(page);
 
     // Drive the bounty to its objective through the harness seam.
     await page.evaluate(() => (window as any).__test.advanceQuest({ kind: 'kill-creeps', amount: 12 }));
@@ -210,11 +216,15 @@ test.describe('quests', () => {
 
     const claimBtn = page.locator('[data-claim-quest="bounty-cull-wilds"]');
     await expect(claimBtn).toBeVisible();
-    await claimBtn.click();
+    // The HUD keeps repainting behind the modal; visibility is the meaningful
+    // guard here, then force the click through Playwright's stability wait.
+    await claimBtn.click({ force: true });
 
     // 400g reward paid, and the re-armed (active) bounty drops its Claim button.
     expect(await page.evaluate(() => (window as any).__game.gold)).toBeGreaterThan(goldBefore);
     await expect(page.locator('[data-claim-quest="bounty-cull-wilds"]')).toHaveCount(0);
     expect(await page.evaluate(() => (window as any).__game.quests['bounty-cull-wilds']?.status ?? null)).toBe('active');
+    await page.evaluate(() => (window as any).__test.shutdown());
+    await page.close({ runBeforeUnload: false });
   });
 });

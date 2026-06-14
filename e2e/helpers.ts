@@ -77,7 +77,7 @@ export async function boot(page: Page, opts: BootOpts = {}): Promise<void> {
   if (opts.region) q.set('region', opts.region);
   if (opts.seed !== undefined) q.set('seed', String(opts.seed));
   if (opts.quality) q.set('quality', opts.quality);
-  await page.goto('/?' + q.toString());
+  await page.goto('/?' + q.toString(), { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => Boolean((window as any).__test?.ready?.()), null, {
     timeout: 60_000
   });

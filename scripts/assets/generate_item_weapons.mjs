@@ -18,7 +18,16 @@ const ITEMS = {
   daedalus: { palette: ['#d23b32', '#c8ccd6', '#ff6a4a'], style: 'crit-greatsword' },
   radiance: { palette: ['#ffd94a', '#fff4c2', '#fff2a0'], style: 'sun-blade' },
   battlefury: { palette: ['#9aa4b2', '#c8cdd8', '#7ad98a'], style: 'great-cleaver' },
-  'divine-rapier': { palette: ['#ffe27d', '#fff6d0', '#ffcf4a'], style: 'divine-rapier' }
+  'divine-rapier': { palette: ['#ffe27d', '#fff6d0', '#ffcf4a'], style: 'divine-rapier' },
+  butterfly: { palette: ['#9affbd', '#d8fff0', '#ffffff'], style: 'wing-blades' },
+  'scythe-of-vyse': { palette: ['#b88cff', '#4a2a6a', '#ffd96a'], style: 'hex-scythe' },
+  'eye-of-skadi': { palette: ['#9fe8ff', '#d8fbff', '#ffffff'], style: 'frost-orb' },
+  'monkey-king-bar': { palette: ['#f0d36a', '#8a5a22', '#fff0a8'], style: 'king-staff' },
+  'abyssal-blade': { palette: ['#8a3cff', '#241038', '#d8a8ff'], style: 'abyssal-mace' },
+  mjollnir: { palette: ['#7ddcff', '#c8f2ff', '#ffffff'], style: 'storm-hammer' },
+  satanic: { palette: ['#b01818', '#4a0a0a', '#ff9a5a'], style: 'blood-axe' },
+  bloodthorn: { palette: ['#b0185a', '#3a1024', '#ff86c8'], style: 'thorn-rapier' },
+  desolator: { palette: ['#d92727', '#2a1111', '#ffb0a0'], style: 'shred-blade' }
 };
 
 function hexToLinearFactor(hex) {
@@ -181,6 +190,79 @@ function partsFor(style) {
       add(box('blade', 'accent', 1.32, 0.07, 0.045, { x: 0.86 }));
       add(box('fuller', 'primary', 1.2, 0.025, 0.06, { x: 0.82 }));
       add(cone('tip', 'accent', 0.045, 0.3, 'x', { x: 1.62 }));
+      break;
+    case 'wing-blades':
+      // Butterfly: paired wing-like blades around a short grip.
+      add(box('grip', 'dark', 0.22, 0.08, 0.08, { x: -0.06 }));
+      add(box('wing-upper', 'primary', 0.82, 0.13, 0.05, { x: 0.52, y: 0.13, rz: 0.22 }));
+      add(box('wing-lower', 'primary', 0.76, 0.1, 0.05, { x: 0.5, y: -0.11, rz: -0.2 }));
+      add(cone('upper-tip', 'accent', 0.06, 0.2, 'x', { x: 0.96, y: 0.23, rz: 0.22 }));
+      add(cone('lower-tip', 'accent', 0.05, 0.18, 'x', { x: 0.88, y: -0.18, rz: -0.2 }));
+      break;
+    case 'hex-scythe':
+      // Scythe of Vyse: crooked purple shaft with a hooked golden sheep-hex blade.
+      add(cylinder('shaft', 'secondary', 0.045, 1.1, 'y', { y: 0.1, rz: 0.18 }, 8));
+      add(box('grip-wrap', 'dark', 0.1, 0.36, 0.1, { y: -0.2 }));
+      add(box('crescent-back', 'accent', 0.48, 0.12, 0.06, { x: 0.28, y: 0.66, rz: -0.4 }));
+      add(box('crescent-hook', 'accent', 0.42, 0.1, 0.06, { x: 0.52, y: 0.46, rz: 0.44 }));
+      add(cone('hex-gem', 'primary', 0.12, 0.18, 'y', { x: 0.1, y: 0.48 }, 8));
+      break;
+    case 'frost-orb':
+      // Eye of Skadi: ice orb mounted as a hand-held scepter.
+      add(cylinder('short-haft', 'secondary', 0.045, 0.8, 'y', { y: -0.08 }, 8));
+      add(box('orb-core', 'primary', 0.28, 0.28, 0.28, { y: 0.42, rz: 0.45 }));
+      add(cylinder('orb-ring-x', 'accent', 0.025, 0.52, 'x', { y: 0.42 }, 12));
+      add(cylinder('orb-ring-z', 'accent', 0.025, 0.52, 'z', { y: 0.42 }, 12));
+      for (let i = 0; i < 4; i++) add(cone(`ice-spike-${i}`, 'accent', 0.04, 0.22, 'x', { x: 0.18 + i * 0.04, y: 0.42, z: (i - 1.5) * 0.1 }, 6));
+      break;
+    case 'king-staff':
+      // Monkey King Bar: ornate gold fighting staff.
+      add(cylinder('staff', 'primary', 0.05, 1.55, 'x', { x: 0.56 }, 10));
+      add(cylinder('band-l', 'accent', 0.075, 0.05, 'x', { x: -0.12 }, 10));
+      add(cylinder('band-r', 'accent', 0.075, 0.05, 'x', { x: 1.24 }, 10));
+      add(box('grip-wrap', 'dark', 0.38, 0.1, 0.1, { x: 0.24 }));
+      add(cone('tip-l', 'accent', 0.07, 0.16, 'x', { x: -0.28, rz: Math.PI }, 8));
+      add(cone('tip-r', 'accent', 0.07, 0.16, 'x', { x: 1.42 }, 8));
+      break;
+    case 'abyssal-mace':
+      // Abyssal Blade: heavy void mace with a cleaver spike.
+      add(cylinder('haft', 'dark', 0.05, 0.85, 'x', { x: 0.28 }, 8));
+      add(box('head-block', 'primary', 0.34, 0.34, 0.28, { x: 0.82 }));
+      add(cone('void-spike', 'accent', 0.16, 0.32, 'x', { x: 1.08 }, 8));
+      add(box('side-blade-l', 'secondary', 0.12, 0.42, 0.06, { x: 0.72, y: 0.26 }));
+      add(box('side-blade-r', 'secondary', 0.12, 0.42, 0.06, { x: 0.72, y: -0.26 }));
+      break;
+    case 'storm-hammer':
+      // Mjollnir: compact storm hammer with charged prongs.
+      add(cylinder('grip', 'dark', 0.045, 0.8, 'y', { y: -0.12 }, 8));
+      add(box('hammer-head', 'secondary', 0.52, 0.24, 0.24, { y: 0.32 }));
+      add(box('core', 'accent', 0.18, 0.18, 0.28, { y: 0.32 }));
+      add(cone('spark-l', 'accent', 0.04, 0.2, 'x', { x: 0.36, y: 0.32 }, 6));
+      add(cone('spark-r', 'accent', 0.04, 0.2, 'x', { x: -0.36, y: 0.32, rz: Math.PI }, 6));
+      break;
+    case 'blood-axe':
+      // Satanic: dark red lifesteal axe with a horned blade.
+      add(cylinder('haft', 'dark', 0.05, 1.0, 'y', { y: 0.05 }, 8));
+      add(box('axe-blade', 'primary', 0.48, 0.5, 0.07, { x: 0.26, y: 0.44 }));
+      add(cone('horn-top', 'accent', 0.07, 0.28, 'y', { x: 0.12, y: 0.86 }, 8));
+      add(cone('horn-bottom', 'accent', 0.07, 0.24, 'y', { x: 0.12, y: 0.08, rz: Math.PI }, 8));
+      add(box('blood-edge', 'accent', 0.5, 0.08, 0.08, { x: 0.48, y: 0.44 }));
+      break;
+    case 'thorn-rapier':
+      // Bloodthorn: thin rapier wrapped in thorn spikes.
+      add(box('grip', 'dark', 0.24, 0.07, 0.07, { x: -0.06 }));
+      add(cylinder('guard', 'primary', 0.13, 0.04, 'z', { x: 0.1 }, 10));
+      add(box('needle', 'primary', 1.12, 0.045, 0.04, { x: 0.74 }));
+      add(cone('tip', 'accent', 0.04, 0.22, 'x', { x: 1.4 }, 8));
+      for (let i = 0; i < 5; i++) add(cone(`thorn-${i}`, 'accent', 0.035, 0.14, 'y', { x: 0.28 + i * 0.18, y: 0.08 * (i % 2 ? 1 : -1) }, 6));
+      break;
+    case 'shred-blade':
+      // Desolator: red serrated armor-shred sword.
+      add(box('grip', 'dark', 0.24, 0.08, 0.08, { x: -0.05 }));
+      add(box('guard', 'secondary', 0.06, 0.42, 0.08, { x: 0.12 }));
+      add(box('blade', 'primary', 1.0, 0.18, 0.055, { x: 0.72 }));
+      for (let i = 0; i < 5; i++) add(cone(`tooth-${i}`, 'accent', 0.04, 0.14, 'y', { x: 0.34 + i * 0.14, y: 0.16 }, 6));
+      add(cone('tip', 'primary', 0.08, 0.24, 'x', { x: 1.26 }));
       break;
     default:
       add(box('grip', 'dark', 0.18, 0.1, 0.09));

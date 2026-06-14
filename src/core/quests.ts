@@ -182,7 +182,7 @@ function clampCount(v: number, max: number): number {
 }
 
 // ============================================================
-// Quest givers (QUEST.md §3): NPCs that walk the world. Position
+// Quest givers (QUEST.md): NPCs that walk the world. Position
 // is a pure, deterministic function of playtime — no save state,
 // no RNG — so the headless core stays authoritative and the
 // renderer (and the proximity check) just read it.

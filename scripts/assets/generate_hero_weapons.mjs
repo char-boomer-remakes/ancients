@@ -1,4 +1,4 @@
-// Generate original low-poly per-hero weapon GLBs for the 80 humanoid authored
+// Generate original low-poly per-hero weapon GLBs for the humanoid authored
 // heroes. These are deliberately simple, stylized meshes that attach to the
 // resolved hand socket at runtime; item weapons can still override them.
 import fs from 'node:fs';
@@ -88,7 +88,6 @@ const STYLE_BY_HERO = {
   'void-spirit': 'katana',
   warlock: 'staff',
   windranger: 'bow',
-  'winter-wyvern': 'frost-staff',
   'witch-doctor': 'staff',
   'wraith-king': 'greatsword',
   zeus: 'lightning-staff'

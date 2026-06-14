@@ -131,3 +131,23 @@ export function bossWorldSize(boss: BossDef, hero: HeroDef): ResolvedWorldSize {
     footprintDecoupled: true
   };
 }
+
+/**
+ * Render-only multiplier that lifts a boss's source-hero silhouette to its
+ * resolved boss height (§3 / §5.1 "the fit pipeline honors it"). The sim keeps
+ * the hero's stats and collision; only the rig height — and everything anchored
+ * to it (HP bar, selection ring, camera framing) — grows. Basis-independent: the
+ * ratio of declared heights, so it lands the same on-screen size relationship
+ * whatever the procedural rig's internal height factor happens to be.
+ */
+export const bossVisualScale = (boss: BossDef, hero: HeroDef): number =>
+  +(bossWorldSize(boss, hero).heightM / heroWorldSize(hero).heightM).toFixed(4);
+
+/** Same lift as {@link bossVisualScale} but for spawn paths that carry only a
+ * rank (the raid arena builds its boss from a hero setup, not a `BossDef`). */
+export function bossVisualScaleForRank(rank: BossDef['rank'], hero: HeroDef): number {
+  const base = heroWorldSize(hero);
+  const floorClass: SizeClass = rank === 'boss' ? 'huge' : 'large';
+  const heightM = Math.max(base.heightM, SIZE_BANDS[floorClass].min);
+  return +(heightM / base.heightM).toFixed(4);
+}

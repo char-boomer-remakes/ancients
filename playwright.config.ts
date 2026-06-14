@@ -22,6 +22,9 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
+        // Use the full Chromium build in headless mode. The headless shell is
+        // faster to launch, but it can hang on context teardown for HUD tests.
+        channel: 'chromium',
         launchOptions: {
           // Software WebGL so the real-renderer boot smoke test passes on
           // headless/CI machines with no GPU.

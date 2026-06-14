@@ -134,6 +134,9 @@ describe('test 20 — audio-coverage + safety', () => {
       }
       audio.playStinger('badge');
       audio.playStinger('raid-clear');
+      audio.playUi('click');
+      audio.playUi('open');
+      audio.playUi('error');
       audio.setListener(null);
       audio.setCinematicMix('duck');
       audio.playDialogueBlip('Narration');

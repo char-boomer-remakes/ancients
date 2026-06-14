@@ -2,7 +2,7 @@ import type { QuestGiverDef, RegionDef, Vec2 } from '../../core/types';
 import { CHAPTER_BOARD, GLOBAL_BOUNTY_BOARD, REGION_BOARD_NAMES } from './board';
 
 // ------------------------------------------------------------------
-// Quest givers (QUEST.md §3): the boards are not abstractions any more —
+// Quest givers (QUEST.md): the boards are not abstractions any more —
 // each is a named NPC who paces a patrol near a region's town and posts
 // the matching board. Givers carry no save state; their position is a
 // pure function of playtime (see core/quests.ts#questGiverPos), so the
@@ -10,8 +10,8 @@ import { CHAPTER_BOARD, GLOBAL_BOUNTY_BOARD, REGION_BOARD_NAMES } from './board'
 //
 // A giver's `board` matches QuestDef.giver, which is how Game decides
 // which quests it posts. Region givers post their region board; the two
-// Vale-hub givers post the region-agnostic global bounties and the
-// chapter spine.
+// Hub givers post the region-agnostic global bounties, the chapter spine,
+// and the Tower fork.
 // ------------------------------------------------------------------
 
 interface GiverFlavor {

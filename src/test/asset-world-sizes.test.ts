@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { ALL_HEROES } from '../data/index';
-import { heroWorldSize, inBand, SIZE_BANDS, type ResolvedWorldSize } from '../engine/world-size';
+import { ALL_CREEPS } from '../data/creeps/index';
+import { creepWorldSize, heroWorldSize, inBand, inferCreatureSizeClass, SIZE_BANDS, type ResolvedWorldSize } from '../engine/world-size';
 import { AMBIENT_CRITTERS, DRESSING_PROP_SIZES, TOWN_BUILDING_SIZE, FOLIAGE_SIZES } from '../data/world/props';
 import { TREE_MODELS, ROCK_MODELS, TOWN_BUILDINGS } from '../engine/terrain';
 import type { SizeClass, WorldSize } from '../core/types';
+import { creepCreatureUrl, heroBaseId, heroBaseUrl, HOLDOUT_REPLACEMENT_ASSETS } from '../engine/assets';
 
 // ============================================================
 // OVERWORLD_PLANNING §5.6 / §10.4: the build pipeline (build_assets.mjs, a plain
@@ -35,6 +37,24 @@ function entryFrom(ws: ResolvedWorldSize | WorldSize, source: string): SizeMapEn
   };
 }
 
+function entryFromHeight(heightM: number, source: string): SizeMapEntry {
+  return {
+    heightM: round(heightM),
+    sizeClass: inferCreatureSizeClass(heightM),
+    pose: 'standing',
+    source
+  };
+}
+
+function assetPath(url: string): string {
+  return url.replace(/^\/assets\//, '');
+}
+
+function putTallest(map: Record<string, SizeMapEntry>, path: string, heightM: number): void {
+  const prev = map[path];
+  if (!prev || heightM > prev.heightM) map[path] = entryFromHeight(heightM, 'shared-creature');
+}
+
 // Dressing-prop keys -> the authored filenames already on disk.
 const DRESSING_FILES: Record<keyof typeof DRESSING_PROP_SIZES, string> = {
   well: 'well',
@@ -43,22 +63,47 @@ const DRESSING_FILES: Record<keyof typeof DRESSING_PROP_SIZES, string> = {
   market: 'market_stand_1'
 };
 
+const FOLIAGE_FILES: Record<keyof typeof FOLIAGE_SIZES, string[]> = {
+  tree: [...new Set(Object.values(TREE_MODELS).flat())],
+  rock: ROCK_MODELS,
+  bush: ['bush'],
+  fern: ['fern']
+};
+
 function buildSizeMap(): Record<string, SizeMapEntry> {
   const map: Record<string, SizeMapEntry> = {};
   // Per-hero GLBs (one file per hero, fit to 1.8 x scale).
   for (const hero of ALL_HEROES) map[`heroes/${hero.id}.glb`] = entryFrom(heroWorldSize(hero), 'hero');
+  // Full-body holdout replacement GLBs live outside /heroes but fit to the same
+  // resolved hero height. Additive signature props are intentionally not mapped.
+  for (const asset of HOLDOUT_REPLACEMENT_ASSETS) {
+    const hero = ALL_HEROES.find((h) => h.id === asset.heroId);
+    if (hero) map[assetPath(asset.modelUrl)] = entryFrom(heroWorldSize(hero), 'holdout-replacement');
+  }
+  // Shared creature GLBs can be reused by multiple creeps/heroes and are fit at
+  // runtime to each unit's rig. The manifest target is therefore a nominal path
+  // target: the tallest current user of that shared asset, enough to stamp `dimsM`
+  // and catch grotesque authored proportions without pretending the path is unique.
+  for (const creep of ALL_CREEPS) {
+    const url = creepCreatureUrl(creep.id, creep.silhouette.build);
+    if (url) putTallest(map, assetPath(url), creepWorldSize(creep).heightM);
+  }
+  for (const hero of ALL_HEROES) {
+    const url = heroBaseUrl(heroBaseId(hero.id));
+    if (url?.startsWith('/assets/creeps/')) putTallest(map, assetPath(url), heroWorldSize(hero).heightM);
+  }
   // Ambient critters.
-  for (const c of AMBIENT_CRITTERS) map[c.url.replace(/^\/assets\//, '')] = entryFrom(c.worldSize, 'critter');
+  for (const c of AMBIENT_CRITTERS) map[assetPath(c.url)] = entryFrom(c.worldSize, 'critter');
   // Town dressing props.
   for (const [key, file] of Object.entries(DRESSING_FILES)) {
     map[`props/town/${file}.glb`] = entryFrom(DRESSING_PROP_SIZES[key as keyof typeof DRESSING_PROP_SIZES], 'prop');
   }
   // Town buildings (all share the structure fit target).
   for (const name of TOWN_BUILDINGS) map[`props/town/${name}.glb`] = entryFrom(TOWN_BUILDING_SIZE, 'building');
-  // Foliage: trees + rocks.
-  const trees = new Set(Object.values(TREE_MODELS).flat());
-  for (const name of trees) map[`props/foliage/${name}.glb`] = entryFrom(FOLIAGE_SIZES.tree, 'foliage');
-  for (const name of ROCK_MODELS) map[`props/foliage/${name}.glb`] = entryFrom(FOLIAGE_SIZES.rock, 'foliage');
+  // Foliage classes: trees, rocks, and shipped low props.
+  for (const [kind, files] of Object.entries(FOLIAGE_FILES)) {
+    for (const name of files) map[`props/foliage/${name}.glb`] = entryFrom(FOLIAGE_SIZES[kind as keyof typeof FOLIAGE_SIZES], 'foliage');
+  }
   // Stable key order so the committed JSON is diff-friendly.
   return Object.fromEntries(Object.keys(map).sort().map((k) => [k, map[k]]));
 }
@@ -67,7 +112,7 @@ describe('asset world sizes (OVERWORLD_PLANNING §5.6)', () => {
   const sizes = buildSizeMap();
 
   it('every mapped GLB declares an in-band height', () => {
-    expect(Object.keys(sizes).length).toBeGreaterThan(80);
+    expect(Object.keys(sizes).length).toBeGreaterThan(130);
     for (const [path, entry] of Object.entries(sizes)) {
       expect(SIZE_BANDS[entry.sizeClass], `${path}: class ${entry.sizeClass}`).toBeDefined();
       expect(inBand(entry.sizeClass, entry.heightM), `${path}: ${entry.heightM}m out of ${entry.sizeClass} band`).toBe(true);

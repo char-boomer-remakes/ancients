@@ -164,6 +164,7 @@ if (testEnabled()) {
     getGame: () => game,
     start: (save, opts) => startGame(save, opts),
     load: (save) => window.dispatchEvent(new CustomEvent('ancients:load', { detail: save })),
+    shutdown: teardown,
     headless: HEADLESS_RENDER,
     hud: TEST_HUD,
     updateUi: updateUiOnce

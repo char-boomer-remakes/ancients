@@ -336,6 +336,11 @@ export const TUNING = {
   regionalBossHpScale: 1.25,
   raidBossDamageScale: 1.25,
   raidBossRadiusScale: 1.7,
+  // OVERWORLD_PLANNING §3/§5.1: render-only height lift for a boss-controlled unit
+  // that carries no explicit per-unit `visualScale` (the raid arena builds its boss
+  // from a hero setup, not a BossDef). ~huge-band floor (3.5 m) over the 1.8 m hero
+  // so a generic boss reads "huge" on screen; the sim keeps the hero's collision.
+  bossVisualScale: 1.95,
   // Roshan (§3.9): respawn timer in playtime-seconds, and the clear at which repeat
   // kills start dropping a Refresher Shard + Cheese alongside the Aegis.
   roshanRespawnSec: 480,

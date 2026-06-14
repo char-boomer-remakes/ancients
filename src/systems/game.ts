@@ -41,7 +41,7 @@ import {
   type LootRoll
 } from '../core/phase3';
 import { Rng } from '../core/rng';
-import { defaultAudioSettings, defaultCutsceneSettings, defaultGraphicsSettings, defaultPhase4SaveFields } from '../core/phase4';
+import { defaultAudioSettings, defaultCutsceneSettings, defaultGraphicsSettings, defaultInterfaceSettings, defaultPhase4SaveFields } from '../core/phase4';
 import { defaultPhase5SaveFields } from '../core/phase5';
 import { higherDungeonTier, migratePhase6Save } from '../core/phase6';
 import { dungeonDailySeed, dungeonWeeklySeed } from '../core/dungeon';
@@ -64,6 +64,7 @@ import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
 import { LiveRaid } from './raid-session';
 import { DungeonSession } from './dungeon-session';
+import { isValidKeyBindings, normalizeKeyBindings } from './keybindings';
 
 /** The Roshan raid — the only one that yields the Aegis, respawns on a timer, and re-drops cheese (§3.9). */
 const ROSHAN_RAID_ID = 'roshan-pit';
@@ -435,7 +436,7 @@ export function newGameSave(starterHeroId: string): GameSave {
     explorationPct: { [region.id]: 0 },
     regionVisits: { [region.id]: 1 },
     discovered: ['tv-waypoint-dawnshade'],
-    settings: { quickcast: true, resonance: true, minimap: true, audio: defaultAudioSettings(), graphics: defaultGraphicsSettings(), cutscene: defaultCutsceneSettings() }
+    settings: { quickcast: true, resonance: true, minimap: true, keyBindings: normalizeKeyBindings(undefined), audio: defaultAudioSettings(), graphics: defaultGraphicsSettings(), cutscene: defaultCutsceneSettings(), interface: defaultInterfaceSettings() }
   };
 }
 
@@ -466,13 +467,14 @@ export interface SceneLike {
   selectedUid: number;
   terrain: { obstacles: { pos: Vec2; radius: number }[] };
   groundHeightAt?(simX: number, simY: number): number;
+  centerOn?(point: Vec2): void;
   pushEvent(ev: SimEvent, sim: Sim): void;
   update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView?: CinematicView | null, groundItems?: readonly GroundItemDrop[]): void;
   pick?(clientX: number, clientY: number, sim: Sim, groundItems?: readonly GroundItemDrop[]): { uid?: number; itemUid?: number; ground?: Vec2 };
   resetUnitViews?(): void;
   setDungeonRoom?(template: RoomTemplate | null, room?: DungeonRoom | null): void;
   showOrderFeedback?(point: Vec2, kind: 'move' | 'attack-move' | 'attack-unit', queued?: boolean): void;
-  /** Optional (real GameScene only): place/move the walking quest-giver NPCs (QUEST.md §3). */
+  /** Optional (real GameScene only): place/move the walking quest-giver NPCs (QUEST.md). */
   syncQuestGivers?(givers: readonly QuestGiverView[]): void;
   /** Optional (real GameScene only): live graphics-settings hooks (§6). */
   setQuality?(tier: QualityTier): void;
@@ -525,6 +527,7 @@ export function eventWorldPos(ev: SimEvent, sim: Sim): Vec2 | undefined {
 export interface AudioLike {
   setSettings(settings: GameSave['settings']): void;
   handleEvent(ev: SimEvent, at?: Vec2): void;
+  playUi?(kind: 'hover' | 'click' | 'open' | 'close' | 'error' | 'ready' | 'heartbeat' | 'tab'): void;
   playStinger(id: StingerId): void;
   setCinematicMix?(mode: CinematicMixMode): void;
   playDialogueBlip?(seed?: string): void;
@@ -552,6 +555,7 @@ export class HeadlessScene implements SceneLike {
 export class HeadlessAudio implements AudioLike {
   setSettings(): void {}
   handleEvent(): void {}
+  playUi(): void {}
   playStinger(): void {}
   setCinematicMix(): void {}
   playDialogueBlip(): void {}
@@ -834,9 +838,11 @@ export class Game {
       quickcast: save.settings.quickcast,
       resonance: save.settings.resonance ?? false,
       minimap: save.settings.minimap ?? true,
+      keyBindings: normalizeKeyBindings(save.settings.keyBindings),
       audio: { ...defaultAudioSettings(), ...save.settings.audio },
       graphics: { ...defaultGraphicsSettings(), ...save.settings.graphics },
-      cutscene: { ...defaultCutsceneSettings(), ...save.settings.cutscene }
+      cutscene: { ...defaultCutsceneSettings(), ...save.settings.cutscene },
+      interface: { ...defaultInterfaceSettings(), ...save.settings.interface }
     };
     this.sim.resonanceEnabled = this.settings.resonance ?? false;
     this.audio.setSettings(this.settings);
@@ -853,7 +859,7 @@ export class Game {
     this.advanceQuests({ kind: 'reach-region', amount: 1, regionId: this.region.id, targetId: this.region.id });
   }
 
-  settings: GameSave['settings'] = { quickcast: true, resonance: true, minimap: true, audio: defaultAudioSettings(), graphics: defaultGraphicsSettings(), cutscene: defaultCutsceneSettings() };
+  settings: GameSave['settings'] = { quickcast: true, resonance: true, minimap: true, keyBindings: normalizeKeyBindings(undefined), audio: defaultAudioSettings(), graphics: defaultGraphicsSettings(), cutscene: defaultCutsceneSettings(), interface: defaultInterfaceSettings() };
 
   // ---------- helpers ----------
 
@@ -3438,7 +3444,7 @@ export class Game {
     return titles;
   }
 
-  // ---------- walking quest givers (QUEST.md §3) ----------
+  // ---------- walking quest givers (QUEST.md) ----------
 
   /** Quests posted by a giver: those whose board (QuestDef.giver) matches it. */
   giverQuests(giverId: string): ReturnType<Game['questBoard']> {
@@ -5612,7 +5618,10 @@ export class Game {
     if (!u || !u.alive) return;
     this.pendingRecruitNpcUid = null;
     const safeOrder = this.sanitizeOrderPoint(sim, u, order);
-    if (feedback) this.showOrderFeedback(sim, safeOrder, queued);
+    if (feedback) {
+      this.showOrderFeedback(sim, safeOrder, queued);
+      this.audio.playUi?.(order.kind === 'attack-move' || order.kind === 'attack-unit' ? 'tab' : 'click');
+    }
     if (queued) {
       this.queuedOrders.push(safeOrder);
       this.msg(`Queued ${safeOrder.kind.replace('-', ' ')}`, 'info');
@@ -6484,7 +6493,7 @@ export class Game {
       regionVisits: { ...this.regionVisits },
       resin: this.resin,
       resinUpdatedAt: this.resinUpdatedAt,
-      settings: { ...this.settings, audio: { ...this.settings.audio }, graphics: { ...defaultGraphicsSettings(), ...this.settings.graphics }, cutscene: { ...defaultCutsceneSettings(), ...this.settings.cutscene } }
+      settings: { ...this.settings, keyBindings: normalizeKeyBindings(this.settings.keyBindings), audio: { ...this.settings.audio }, graphics: { ...defaultGraphicsSettings(), ...this.settings.graphics }, cutscene: { ...defaultCutsceneSettings(), ...this.settings.cutscene }, interface: { ...defaultInterfaceSettings(), ...this.settings.interface } }
     };
   }
 
@@ -6672,8 +6681,10 @@ export class Game {
     if (!v.settings || typeof v.settings.quickcast !== 'boolean') return false;
     if (v.settings.resonance !== undefined && typeof v.settings.resonance !== 'boolean') return false;
     if (v.settings.minimap !== undefined && typeof v.settings.minimap !== 'boolean') return false;
+    if (!isValidKeyBindings(v.settings.keyBindings)) return false;
     const audio = v.settings.audio;
     if (!audio || typeof audio.master !== 'number' || typeof audio.sfx !== 'number') return false;
+    if (audio.ui !== undefined && (typeof audio.ui !== 'number' || audio.ui < 0 || audio.ui > 1)) return false;
     if (typeof audio.voice !== 'number' || typeof audio.stinger !== 'number' || typeof audio.muted !== 'boolean') return false;
     const graphics = v.settings.graphics;
     if (graphics !== undefined) {
@@ -6693,6 +6704,17 @@ export class Game {
       if (typeof graphics.grade !== 'number' || graphics.grade < 0 || graphics.grade > 1.5) return false;
       if (typeof graphics.reducedMotion !== 'boolean') return false;
       if (typeof graphics.colorblind !== 'boolean') return false;
+    }
+    const iface = v.settings.interface;
+    if (iface !== undefined) {
+      if (typeof iface.uiScale !== 'number' || iface.uiScale < 0.75 || iface.uiScale > 1.5) return false;
+      if (typeof iface.textScale !== 'number' || iface.textScale < 1 || iface.textScale > 1.3) return false;
+      if (typeof iface.hudOpacity !== 'number' || iface.hudOpacity < 0.55 || iface.hudOpacity > 1) return false;
+      if (typeof iface.minimapSize !== 'number' || iface.minimapSize < 120 || iface.minimapSize > 240) return false;
+      if (typeof iface.minimapOpacity !== 'number' || iface.minimapOpacity < 0.35 || iface.minimapOpacity > 1) return false;
+      if (typeof iface.helpOverlay !== 'boolean') return false;
+      if (typeof iface.questTracker !== 'boolean') return false;
+      if (!Number.isInteger(iface.questTrackerMax) || iface.questTrackerMax < 1 || iface.questTrackerMax > 3) return false;
     }
     for (const heroId of v.party) {
       if (typeof heroId !== 'string' || !REG.heroes.has(heroId)) return false;

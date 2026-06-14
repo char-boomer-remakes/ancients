@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "src": "tmp/asset_src/poly-pizza/velociraptor_q.glb",
+      "out": "heroes/snapfire.glb",
+      "type": "model",
+      "source": "Quaternius velociraptor via Poly Pizza — CC0",
+      "keepClips": ["idle", "run", "attack", "death"],
+      "renameClips": {
+        "Velociraptor_Idle": "idle",
+        "Velociraptor_Run": "run",
+        "Velociraptor_Attack": "attack",
+        "Velociraptor_Death": "death"
+      },
+      "maxTex": 512
+    },
+    {
+      "src": "tmp/asset_src/poly-pizza/snake.glb",
+      "out": "creeps/serpent.glb",
+      "type": "model",
+      "source": "Quaternius snake via Poly Pizza — CC0",
+      "keepClips": ["idle", "run", "attack"],
+      "renameClips": {
+        "Snake_Idle": "idle",
+        "Snake_Walk": "run",
+        "Snake_Attack": "attack"
+      },
+      "maxTex": 512
+    }
+  ]
+}

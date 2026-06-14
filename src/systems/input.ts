@@ -1,19 +1,27 @@
 import type { Game } from './game';
 import type { Vec2 } from '../core/types';
 import { TUNING } from '../data/tuning';
+import { actionForEvent } from './keybindings';
 
 // ------------------------------------------------------------------
-// Controls (SPEC §6): RMB move/attack, QWER abilities (quickcast),
-// ZXCV item actives, 1-5 swap, T capture, G interact/travel, M map, Tab party, B shop.
+// Controls (SPEC §6): keyboard actions resolve through settings.keyBindings;
+// an empty/old save falls back to the legacy layout.
 // ------------------------------------------------------------------
+
+const svgCursor = (svg: string, x: number, y: number, fallback: string): string =>
+  `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${x} ${y}, ${fallback}`;
+
+const CURSORS = {
+  move: svgCursor('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><path fill="none" stroke="#ffd86a" stroke-width="2.4" d="M16 3v26M3 16h26"/><path fill="#59c0e0" d="m16 3 4 6h-8zm0 26-4-6h8zM3 16l6-4v8zm26 0-6 4v-8z"/></svg>', 16, 16, 'pointer'),
+  attack: svgCursor('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="11" fill="none" stroke="#ff7a6a" stroke-width="2.4"/><path fill="none" stroke="#ffd86a" stroke-width="2" d="M16 1v8m0 14v8M1 16h8m14 0h8"/></svg>', 16, 16, 'crosshair'),
+  cast: svgCursor('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><path fill="none" stroke="#73d9ff" stroke-width="2.4" d="M16 3 29 16 16 29 3 16z"/><circle cx="16" cy="16" r="4" fill="#ffd86a"/></svg>', 16, 16, 'cell'),
+  loot: svgCursor('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><path fill="#ffd86a" stroke="#080a0f" stroke-width="2" d="M16 3 29 12 24 28H8L3 12z"/></svg>', 16, 16, 'pointer')
+} as const;
 
 export type TargetingState =
   | { kind: 'none' }
   | { kind: 'ability'; slot: number }
   | { kind: 'item'; slot: number };
-
-const ABILITY_KEYS = ['q', 'w', 'e', 'r', 'd', 'f'];
-const ITEM_KEYS = ['z', 'x', 'c', 'v'];
 
 export class InputController {
   /** current mouse position (client px) */
@@ -32,6 +40,8 @@ export class InputController {
   onToggleMenu: () => void = () => {};
   onToggleJournal: () => void = () => {};
   onToggleCodex: () => void = () => {};
+  onToggleCharacter: () => void = () => {};
+  onToggleHelp: () => void = () => {};
   onToggleServices: () => void = () => {};
 
   private rmbHeld = false;
@@ -83,12 +93,12 @@ export class InputController {
     this.canvas.style.cursor = this.uiModalOpen
       ? ''
       : this.attackMovePending
-        ? 'crosshair'
+        ? CURSORS.attack
         : this.targeting.kind !== 'none'
-          ? 'cell'
+          ? CURSORS.cast
           : this.hoverItemUid >= 0
-            ? 'pointer'
-            : '';
+            ? CURSORS.loot
+            : CURSORS.move;
   }
 
   /** re-pick at the current mouse position (also called on mousedown so
@@ -213,6 +223,7 @@ export class InputController {
 
   private onKeyDown(e: KeyboardEvent): void {
     const key = e.key.toLowerCase();
+    const action = actionForEvent(this.game.settings, e);
     if (this.game.cinematic.active) {
       if (key === ' ' || key === 'spacebar' || key === 'enter') {
         e.preventDefault();
@@ -230,11 +241,11 @@ export class InputController {
         return;
       }
     }
-    if (e.code === 'AltLeft' || e.code === 'AltRight') {
+    if (action === 'sprint') {
       this.game.setSprintHeld(true);
       return;
     }
-    if (key === 'escape') {
+    if (key === 'escape' || action === 'menu') {
       if (this.attackMovePending) {
         this.attackMovePending = false;
         return;
@@ -247,10 +258,11 @@ export class InputController {
       return;
     }
     if (this.uiModalOpen) {
-      if (key === 'tab' || key === 'b') {
+      if (action === 'party' || action === 'shop' || action === 'help') {
         e.preventDefault();
-        if (key === 'tab') this.onToggleParty();
-        else this.onToggleShop();
+        if (action === 'party') this.onToggleParty();
+        else if (action === 'shop') this.onToggleShop();
+        else this.onToggleHelp();
       }
       return;
     }
@@ -261,16 +273,16 @@ export class InputController {
 
     // Browser key-repeat should not keep re-issuing casts at the moving cursor.
     // This matters for ranged/channeled item quickcasts such as Meteor Hammer.
-    if (e.repeat && (ABILITY_KEYS.includes(key) || ITEM_KEYS.includes(key))) return;
+    if (e.repeat && (action?.startsWith('ability-') || action?.startsWith('item-'))) return;
 
     // hero swap
-    if (key >= '1' && key <= '5') {
-      g.trySwap(Number(key) - 1);
+    if (action?.startsWith('swap-')) {
+      g.trySwap(Number(action.split('-')[1]) - 1);
       return;
     }
 
     // abilities
-    const abilityIdx = ABILITY_KEYS.indexOf(key);
+    const abilityIdx = action?.startsWith('ability-') ? Number(action.split('-')[1]) - 1 : -1;
     if (abilityIdx >= 0 && u) {
       const a = u.abilities[abilityIdx];
       if (!a) return;
@@ -285,17 +297,26 @@ export class InputController {
       return;
     }
 
-    if (key === 'j') {
+    if (action === 'journal') {
       this.onToggleJournal();
       return;
     }
-    if (key === 'k') {
+    if (action === 'codex') {
       this.onToggleCodex();
+      return;
+    }
+    if (action === 'character-sheet') {
+      this.onToggleCharacter();
+      return;
+    }
+    if (action === 'help') {
+      e.preventDefault();
+      this.onToggleHelp();
       return;
     }
 
     // items
-    const itemIdx = ITEM_KEYS.indexOf(key);
+    const itemIdx = action?.startsWith('item-') ? Number(action.split('-')[1]) - 1 : -1;
     if (itemIdx >= 0 && u && itemIdx < TUNING.activeItemSlots) {
       if (g.settings.quickcast) {
         g.useItem(itemIdx, {
@@ -309,15 +330,15 @@ export class InputController {
       return;
     }
 
-    switch (key) {
-      case 't': {
+    switch (action) {
+      case 'capture': {
         if (g.liveGym || g.liveRaid) return;
         // capture hovered (or selected) creep
         const uid = this.hoverUid >= 0 ? this.hoverUid : g.scene.selectedUid;
         if (uid >= 0) g.tryCapture(uid);
         return;
       }
-      case 'a':
+      case 'attack-move':
         if (!g.controlledUnit()) {
           if (g.liveGym) g.msg('Spend a Captain Call to issue orders', 'info');
           return;
@@ -326,15 +347,14 @@ export class InputController {
         this.targeting = { kind: 'none' };
         g.msg('Attack-move: click a point or enemy', 'info');
         return;
-      case 'g':
+      case 'interact':
         if (g.liveGym || g.liveRaid) return;
         g.tryInteract();
         return;
-      case 's':
+      case 'stop':
         g.orderStop();
         return;
-      case ' ':
-      case 'spacebar':
+      case 'dash':
         e.preventDefault();
         if (g.liveGym) {
           if (!g.controlledUnit()) g.liveGymPlayerCall(this.hoverUid >= 0 ? this.hoverUid : undefined);
@@ -342,26 +362,26 @@ export class InputController {
         }
         g.tryDash(this.hoverGround ?? undefined);
         return;
-      case 'm':
+      case 'camera-mode':
         g.scene.toggleCameraMode();
         return;
-      case 'tab':
+      case 'party':
         e.preventDefault();
         this.onToggleParty();
         return;
-      case 'b':
+      case 'shop':
         if (g.liveGym || g.liveRaid) return;
         this.onToggleShop();
         return;
-      case 'y':
+      case 'services':
         if (g.liveGym || g.liveRaid) return;
         this.onToggleServices();
         return;
-      case 'n':
+      case 'neutral':
         if (g.liveGym || g.liveRaid) return;
         g.useNeutralActive();
         return;
-      case 'f5':
+      case 'quicksave':
         e.preventDefault();
         g.saveToSlot(0);
         return;
@@ -376,7 +396,7 @@ export class InputController {
     if (key === 'escape' && this.game.cinematic.active) {
       this.game.cinematicReleaseSkip();
     }
-    if (e.code === 'AltLeft' || e.code === 'AltRight') {
+    if (actionForEvent(this.game.settings, e) === 'sprint') {
       this.game.setSprintHeld(false);
     }
   }

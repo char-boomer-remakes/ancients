@@ -8,6 +8,42 @@
       "pose": "quadruped",
       "source": "critter"
     },
+    "creeps/bear.glb": {
+      "heightM": 2.16,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/bull.glb": {
+      "heightM": 2.61,
+      "sizeClass": "large",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/crabenemy.glb": {
+      "heightM": 2.016,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/demon.glb": {
+      "heightM": 2.61,
+      "sizeClass": "large",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/dragonevolved.glb": {
+      "heightM": 2.61,
+      "sizeClass": "large",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/flier.glb": {
+      "heightM": 1.8,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
     "creeps/fox.glb": {
       "heightM": 0.7,
       "sizeClass": "tiny",
@@ -19,6 +55,84 @@
       "sizeClass": "tiny",
       "pose": "quadruped",
       "source": "critter"
+    },
+    "creeps/ghost.glb": {
+      "heightM": 2.016,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/giant.glb": {
+      "heightM": 2.16,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/goblin.glb": {
+      "heightM": 1.8,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/golelingevolved.glb": {
+      "heightM": 2.7,
+      "sizeClass": "large",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/orc.glb": {
+      "heightM": 2.07,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/orcenemy.glb": {
+      "heightM": 1.53,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/serpent.glb": {
+      "heightM": 2.016,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/spider.glb": {
+      "heightM": 1.8,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/treant.glb": {
+      "heightM": 2.016,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/tribal.glb": {
+      "heightM": 2.07,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/velociraptor.glb": {
+      "heightM": 1.8,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/wolf.glb": {
+      "heightM": 2.61,
+      "sizeClass": "large",
+      "pose": "standing",
+      "source": "shared-creature"
+    },
+    "creeps/yeti.glb": {
+      "heightM": 1.8,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "shared-creature"
     },
     "heroes/abaddon.glb": {
       "heightM": 1.944,
@@ -751,6 +865,42 @@
       "sizeClass": "human",
       "pose": "standing",
       "source": "hero"
+    },
+    "holdouts/replacements/ancient-apparition.glb": {
+      "heightM": 1.8,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "holdout-replacement"
+    },
+    "holdouts/replacements/enigma.glb": {
+      "heightM": 1.8,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "holdout-replacement"
+    },
+    "holdouts/replacements/io.glb": {
+      "heightM": 1.8,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "holdout-replacement"
+    },
+    "holdouts/replacements/morphling.glb": {
+      "heightM": 1.8,
+      "sizeClass": "human",
+      "pose": "standing",
+      "source": "holdout-replacement"
+    },
+    "props/foliage/bush.glb": {
+      "heightM": 0.9,
+      "sizeClass": "prop",
+      "pose": "static",
+      "source": "foliage"
+    },
+    "props/foliage/fern.glb": {
+      "heightM": 0.7,
+      "sizeClass": "prop",
+      "pose": "static",
+      "source": "foliage"
     },
     "props/foliage/oak_1.glb": {
       "heightM": 4.6,

@@ -310,6 +310,7 @@ export interface AnimProfile {
 export interface AudioSettings {
   master: number;
   sfx: number;
+  ui?: number;
   voice: number;
   stinger: number;
   music: number;
@@ -350,6 +351,17 @@ export interface CutsceneSettings {
   alwaysSkip: boolean;              // one switch: route the line as a toast, never stage
   photosensitive: boolean;           // cap flashes/shakes and use instant overlay transitions
   tieIns: boolean;                   // seasonal/legend homages can be fully suppressed
+}
+
+export interface InterfaceSettings {
+  uiScale: number;          // 0.75..1.5, applied to the HUD root
+  textScale: number;        // 1..1.3, accessibility text-size step
+  hudOpacity: number;       // 0.55..1 for persistent non-modal panels
+  minimapSize: number;      // CSS pixels
+  minimapOpacity: number;   // 0.35..1
+  helpOverlay: boolean;     // whether the ?/F1 help affordance is shown
+  questTracker: boolean;    // persistent tracker toggle
+  questTrackerMax: number;  // 1..3 tracked rows
 }
 
 export type StingerId = 'capture' | 'merge' | 'levelup' | 'badge' | 'raid-clear' | 'loot' | 'loot-signature';
@@ -1551,6 +1563,47 @@ export interface CreepInstanceSave {
   star: 1 | 2 | 3;
   faintedFor?: number;          // seconds remaining
 }
+
+export type InputAction =
+  | 'attack-move'
+  | 'stop'
+  | 'dash'
+  | 'sprint'
+  | 'ability-1'
+  | 'ability-2'
+  | 'ability-3'
+  | 'ability-4'
+  | 'ability-5'
+  | 'ability-6'
+  | 'item-1'
+  | 'item-2'
+  | 'item-3'
+  | 'item-4'
+  | 'swap-1'
+  | 'swap-2'
+  | 'swap-3'
+  | 'swap-4'
+  | 'swap-5'
+  | 'capture'
+  | 'interact'
+  | 'shop'
+  | 'services'
+  | 'neutral'
+  | 'party'
+  | 'journal'
+  | 'codex'
+  | 'character-sheet'
+  | 'camera-mode'
+  | 'help'
+  | 'quicksave'
+  | 'menu';
+
+export interface KeyBindings {
+  /** Sparse overrides. Missing actions use the default table in the UI/input layer. */
+  bindings: Partial<Record<InputAction, string>>;
+  mouseMoveButton?: 'right' | 'left';
+}
+
 export interface GameSave {
   version: number;
   name: string;
@@ -1602,7 +1655,7 @@ export interface GameSave {
   regionVisits?: Record<string, number>;
   resin?: number;
   resinUpdatedAt?: number;
-  settings: { quickcast: boolean; resonance?: boolean; minimap?: boolean; audio: AudioSettings; graphics?: GraphicsSettings; cutscene?: CutsceneSettings };
+  settings: { quickcast: boolean; resonance?: boolean; minimap?: boolean; keyBindings?: KeyBindings; audio: AudioSettings; graphics?: GraphicsSettings; cutscene?: CutsceneSettings; interface?: InterfaceSettings };
 }
 
 // ---------- Sim interface available to effect interpreters ----------

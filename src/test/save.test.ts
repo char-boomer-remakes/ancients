@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllContent } from '../data';
 import { TUNING } from '../data/tuning';
 import { Game, newGameSave, SAVE_VERSION } from '../systems/game';
+import { glyphForAction } from '../systems/keybindings';
 
 describe('save game validation', () => {
   beforeAll(() => registerAllContent());
@@ -20,6 +21,17 @@ describe('save game validation', () => {
     expect(save.questProgress).toEqual({});
     expect(save.defeatedGyms).toEqual([]);
     expect(save.echoRespawn).toEqual({});
+    expect(save.settings.interface).toEqual({
+      uiScale: 1,
+      textScale: 1,
+      hudOpacity: 1,
+      minimapSize: 160,
+      minimapOpacity: 1,
+      helpOverlay: true,
+      questTracker: true,
+      questTrackerMax: 3
+    });
+    expect(glyphForAction(save.settings, 'help')).toBe('F1');
     expect(Game.validateSave(save)).toBe(true);
   });
 
@@ -31,5 +43,10 @@ describe('save game validation', () => {
     expect(Game.validateSave({ ...save, party: ['rubick'], recruited: ['rubick'] })).toBe(false);
     expect(Game.validateSave({ ...save, roster: [{ ...save.roster[0], echo: { kills: -1, facetSwapUnlocked: false, talentTierUnlocks: [false, false, false, false] } }] })).toBe(false);
     expect(Game.validateSave({ ...save, defeatedGyms: ['missing-gym'] })).toBe(false);
+    expect(Game.validateSave({ ...save, settings: { ...save.settings, keyBindings: { bindings: { 'missing-action': 'q' } } } })).toBe(false);
+    expect(Game.validateSave({ ...save, settings: { ...save.settings, keyBindings: { bindings: { sprint: 'space' } } } })).toBe(false);
+    expect(Game.validateSave({ ...save, settings: { ...save.settings, audio: { ...save.settings.audio, ui: 2 } } })).toBe(false);
+    expect(Game.validateSave({ ...save, settings: { ...save.settings, interface: { ...save.settings.interface!, uiScale: 2 } } })).toBe(false);
+    expect(Game.validateSave({ ...save, settings: { ...save.settings, interface: { ...save.settings.interface!, questTrackerMax: 4 } } })).toBe(false);
   });
 });

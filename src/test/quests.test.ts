@@ -488,7 +488,7 @@ describe('quests wired into Game (headless)', () => {
   });
 });
 
-// ---------- walking quest givers (QUEST.md §3) ----------
+// ---------- walking quest givers (QUEST.md) ----------
 
 describe('quest givers (pure patrol position)', () => {
   const triangle: QuestGiverDef = {

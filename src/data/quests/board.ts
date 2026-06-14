@@ -226,7 +226,7 @@ export const GLOBAL_BOUNTY_BOARD = 'Binder\u2019s Board';
 export const CHAPTER_BOARD = 'Mending the Moon';
 
 // ------------------------------------------------------------------
-// Timed contracts (QUEST.md follow-up): recurring bounties on a clock.
+// Timed contracts (QUEST.md): recurring bounties on a clock.
 // Once posted they must be cleared inside `windowSec` of playtime or the
 // progress resets and the contract re-posts — a race the steady board is not.
 // These also exercise the long-dormant per-tier objective filter.
@@ -419,7 +419,7 @@ const SIDE_CHAPTERS: QuestDef[] = [
 ];
 
 // ------------------------------------------------------------------
-// Second spine — "The Outworld Seal" (QUEST.md follow-up). A post-Mad-Moon
+// Second spine: "The Outworld Seal" (QUEST.md). A post-Mad-Moon
 // questline about the claimants who crossed worlds when the seal thinned
 // (README: the Renegade Marshal, the Forsaken Queen, the Lords of Hatred and
 // Destruction). It chains off the end of the main spine and pays out in raid
@@ -473,7 +473,7 @@ const OUTWORLD_CHAPTERS: QuestDef[] = [
 ];
 
 // ------------------------------------------------------------------
-// The fork — "Zet's Question" (QUEST.md follow-up: branching choice-quests).
+// The fork: "Zet's Question" (QUEST.md branching choice-quests).
 // At the Tower, the game poses Zet's own choice (README): reunite the Ancients
 // and end the war, keep the eternal game turning, or break the Loop and let the
 // world out. Claiming the quest takes exactly one branch — granting that

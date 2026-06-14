@@ -2109,35 +2109,6 @@
     },
     {
       "src": "tmp/asset_src/kaykit/Mage.glb",
-      "out": "heroes/winter-wyvern.glb",
-      "type": "model",
-      "source": "KayKit Adventurers (Kay Lousberg) base, tri-tone palette retexture by us — CC0",
-      "maxTex": 128,
-      "recolor": [
-        "#9fe8ff",
-        "#ffffff",
-        "#3d75b8"
-      ],
-      "recolorMode": "tritone",
-      "renameClips": {
-        "Idle": "idle",
-        "Running_A": "run",
-        "Spellcast_Shoot": "attack",
-        "Spellcasting": "cast",
-        "Death_A": "death",
-        "Spellcast_Long": "channel"
-      },
-      "keepClips": [
-        "idle",
-        "run",
-        "attack",
-        "cast",
-        "channel",
-        "death"
-      ]
-    },
-    {
-      "src": "tmp/asset_src/kaykit/Mage.glb",
       "out": "heroes/witch-doctor.glb",
       "type": "model",
       "source": "KayKit Adventurers (Kay Lousberg) base, tri-tone palette retexture by us — CC0",

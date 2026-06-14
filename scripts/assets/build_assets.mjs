@@ -118,9 +118,54 @@ function assetType(rel) {
   return ext || 'file';
 }
 
+function inferredSource(rel) {
+  if (rel.startsWith('heroes/')) {
+    if (rel === 'heroes/snapfire.glb') return 'Quaternius velociraptor via Poly Pizza — CC0';
+    return 'KayKit Adventurers base, tri-tone palette retexture by us — CC0';
+  }
+  if (rel === 'creeps/serpent.glb') return 'Quaternius snake via Poly Pizza — CC0';
+  if (['creeps/flier.glb', 'creeps/bear.glb', 'creeps/treant.glb'].includes(rel)) return 'generated in-repo: generate_creature_families.mjs';
+  if (rel.startsWith('creeps/')) return 'Quaternius creature pack — CC0';
+  if (rel.startsWith('holdouts/')) return 'generated in-repo: generate_holdout_signatures.mjs';
+  if (rel.startsWith('weapons/heroes/')) return 'generated in-repo: generate_hero_weapons.mjs';
+  if (rel.startsWith('weapons/items/')) return 'generated in-repo: generate_item_weapons.mjs';
+  if (rel.startsWith('ui/items/')) return 'game-icons.net curated item silhouettes — CC BY 3.0';
+  if (rel.startsWith('ui/frames/')) return 'generated in-repo: generate_ui_assets.mjs';
+  if (rel.startsWith('ui/fonts/')) return 'Cinzel font — OFL 1.1';
+  if (rel.startsWith('vfx/')) return 'generated in-repo: vfx asset generators';
+  if (rel.startsWith('audio/sfx/kenney/')) return 'Kenney audio packs — CC0';
+  if (rel.startsWith('audio/')) return 'generated in-repo: generate_audio.mjs';
+  if (rel.startsWith('textures/water/')) return 'generated in-repo: generate_water_normal.mjs';
+  if (rel.startsWith('textures/terrain/')) return 'ambientCG terrain textures — CC0';
+  if (rel.startsWith('env/')) return 'Poly Haven sky and environment maps — CC0';
+  if (rel.startsWith('props/')) return 'Quaternius/KayKit prop assets — CC0';
+  return null;
+}
+
+function manifestSource(rel, meta) {
+  const explicit = meta.source ?? meta.src ?? null;
+  if (explicit && !String(explicit).startsWith('tmp/asset_src/')) return explicit;
+  return inferredSource(rel) ?? explicit;
+}
+
+function isBodyModel(rel) {
+  return rel.endsWith('.glb') && (
+    rel.startsWith('heroes/') ||
+    rel.startsWith('creeps/') ||
+    rel.startsWith('holdouts/replacements/')
+  );
+}
+
 function formatBytes(bytes) {
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)}MB`;
   return `${(bytes / 1024).toFixed(0)}KB`;
+}
+
+function hasClip(names, patterns) {
+  return names.some((name) => {
+    const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    return patterns.some((pattern) => pattern.test(normalized));
+  });
 }
 
 function walkAssets(dir = PUBLIC_ASSETS, out = []) {
@@ -166,6 +211,24 @@ function complexityForRoot(root) {
 function stripClipName(name) {
   const i = name.lastIndexOf('|');
   return i >= 0 ? name.slice(i + 1) : name;
+}
+
+function gltfAnimationNames(absPath) {
+  const ext = path.extname(absPath).toLowerCase();
+  let json;
+  if (ext === '.gltf') {
+    json = JSON.parse(fs.readFileSync(absPath, 'utf8'));
+  } else {
+    const buf = fs.readFileSync(absPath);
+    if (buf.length < 20 || buf.readUInt32LE(0) !== 0x46546c67) {
+      throw new Error('not a GLB file');
+    }
+    const jsonLength = buf.readUInt32LE(12);
+    const chunkType = buf.readUInt32LE(16);
+    if (chunkType !== 0x4e4f534a) throw new Error('first GLB chunk is not JSON');
+    json = JSON.parse(buf.subarray(20, 20 + jsonLength).toString('utf8').trim());
+  }
+  return (json.animations ?? []).map((anim, i) => String(anim.name || `animation-${i}`));
 }
 
 // OVERWORLD_PLANNING §5.4: measure the model's authored bounding box from its
@@ -398,7 +461,17 @@ function processCopy(item) {
   return { rel: item.out, bytes, type: assetType(item.out), complexity: null };
 }
 
-function buildManifest(sourceByOut) {
+async function measureExistingDims(io, rel) {
+  try {
+    const doc = await io.read(path.join(PUBLIC_ASSETS, rel));
+    return authoredDims(doc.getRoot());
+  } catch (err) {
+    console.warn(`  WARN ${rel}: could not measure dims (${err instanceof Error ? err.message : err})`);
+    return null;
+  }
+}
+
+async function buildManifest(sourceByOut, io = null) {
   const previousByPath = new Map();
   if (fs.existsSync(MANIFEST_PATH)) {
     try {
@@ -408,15 +481,20 @@ function buildManifest(sourceByOut) {
       previousByPath.clear();
     }
   }
-  const files = walkAssets().map((rel) => {
+  const files = [];
+  for (const rel of walkAssets()) {
     const abs = path.join(PUBLIC_ASSETS, rel);
     const meta = sourceByOut.get(rel) ?? previousByPath.get(rel) ?? {};
     const bytes = fs.statSync(abs).size;
     const group = meta.group ?? meta.preloadGroup ?? assetGroup(rel);
-    const dims = meta.dims ?? null;
     // The declared WorldSize for this path, if any (heroes/props/critters/etc).
     const worldSize = meta.worldSize ?? WORLD_SIZES[rel] ?? null;
     const targetHeightM = meta.targetHeightM ?? worldSize?.heightM ?? null;
+    let dims = meta.dims ?? null;
+    if (!dims && targetHeightM && io && ['glb', 'gltf'].includes(path.extname(rel).slice(1).toLowerCase())) {
+      dims = await measureExistingDims(io, rel);
+    }
+    const animations = isBodyModel(rel) ? (meta.animations ?? gltfAnimationNames(abs)) : null;
     // Post-fit meters: scale the authored AABB to the declared fit target so lint
     // can compare against the entity's WorldSize.heightM (§5.4 / §9.5).
     let dimsM = meta.dimsM ?? null;
@@ -425,7 +503,7 @@ function buildManifest(sourceByOut) {
       const r3 = (v) => +(v * k).toFixed(4);
       dimsM = { h: targetHeightM, w: r3(dims.w), d: r3(dims.d) };
     }
-    return {
+    files.push({
       path: rel,
       url: assetUrl(rel),
       bytes,
@@ -433,12 +511,13 @@ function buildManifest(sourceByOut) {
       group,
       preloadGroup: meta.preloadGroup ?? group,
       sourceSpec: meta.sourceSpec ?? null,
-      source: meta.source ?? meta.src ?? null,
+      source: manifestSource(rel, meta),
+      ...(animations ? { animations } : {}),
       ...(worldSize ? { worldSize } : {}),
       ...(dims ? { dims } : {}),
       ...(dimsM ? { dimsM } : {})
-    };
-  });
+    });
+  }
   const totalBytes = files.reduce((sum, f) => sum + f.bytes, 0);
   const groups = {};
   for (const file of files) {
@@ -507,6 +586,21 @@ function checkBudgets(manifest, budgets = DEFAULT_BUDGETS) {
   for (const file of manifest.files) {
     const limit = budgets.maxFileBytesByGroup[file.group];
     if (limit && file.bytes > limit) failures.push(`${file.path} ${formatBytes(file.bytes)} > ${formatBytes(limit)}`);
+  }
+  return failures;
+}
+
+function checkBodyAnimations(manifest) {
+  const failures = [];
+  for (const file of manifest.files) {
+    if (!isBodyModel(file.path)) continue;
+    const names = file.animations ?? [];
+    const hasIdle = hasClip(names, [/idle/, /stand/]);
+    const hasLocomotion = hasClip(names, [/run/, /walk/, /fly/, /move/, /crawl/, /swim/, /locomotion/]);
+    if (!hasIdle || !hasLocomotion) {
+      const missing = !hasIdle && !hasLocomotion ? 'idle and locomotion' : !hasIdle ? 'idle' : 'locomotion';
+      failures.push(`${file.path} missing ${missing} clip (${names.join(', ') || 'no animations'})`);
+    }
   }
   return failures;
 }
@@ -593,17 +687,28 @@ async function main() {
   }
 
   if (wantsManifest || wantsReport || wantsBudgetCheck) {
-    const manifest = buildManifest(sourceByOut);
+    let manifestIo = null;
+    if (!specs.length && Object.keys(WORLD_SIZES).length > 0) {
+      const deps = await loadDeps();
+      await deps.meshopt.MeshoptDecoder.ready;
+      manifestIo = new deps.NodeIO()
+        .registerExtensions(deps.ALL_EXTENSIONS)
+        .registerDependencies({ 'meshopt.decoder': deps.meshopt.MeshoptDecoder });
+    }
+    const manifest = await buildManifest(sourceByOut, manifestIo);
     if (wantsManifest) writeManifest(manifest);
     if (wantsReport) printReport(manifest, built);
     if (wantsBudgetCheck) {
       const budgetFailures = checkBudgets(manifest);
-      if (budgetFailures.length) {
-        console.error('\nasset budget check failed:');
-        for (const fail of budgetFailures) console.error(`  - ${fail}`);
+      const animationFailures = checkBodyAnimations(manifest);
+      if (budgetFailures.length || animationFailures.length) {
+        console.error('\nasset check failed:');
+        for (const fail of budgetFailures) console.error(`  - budget: ${fail}`);
+        for (const fail of animationFailures) console.error(`  - animation: ${fail}`);
         process.exit(1);
       }
       console.log(`asset budget check passed (${formatBytes(manifest.totalBytes)} / ${formatBytes(DEFAULT_BUDGETS.maxTotalBytes)})`);
+      console.log('asset body animation check passed');
     }
   }
   console.log('done.');

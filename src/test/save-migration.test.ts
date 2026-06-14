@@ -28,7 +28,7 @@ describe('save round-trip and migration', () => {
     expect(save.solvedPuzzles).toEqual([]);
     expect(save.resin).toBeGreaterThan(0);
     expect(save.settings.resonance).toBe(true);
-    expect(save.settings.audio).toEqual({ master: 0.8, sfx: 0.8, voice: 0.7, stinger: 0.7, music: 0.6, muted: false });
+    expect(save.settings.audio).toEqual({ master: 0.8, sfx: 0.8, ui: 0.8, voice: 0.7, stinger: 0.7, music: 0.6, muted: false });
     expect(save.settings.graphics).toEqual({
       quality: 'auto',
       autoAdjustQuality: true,
@@ -48,6 +48,16 @@ describe('save round-trip and migration', () => {
       colorblind: false
     });
     expect(save.settings.cutscene).toEqual({ length: 'full', defaultSpeed: 1, alwaysSkip: false, photosensitive: false, tieIns: true });
+    expect(save.settings.interface).toEqual({
+      uiScale: 1,
+      textScale: 1,
+      hudOpacity: 1,
+      minimapSize: 160,
+      minimapOpacity: 1,
+      helpOverlay: true,
+      questTracker: true,
+      questTrackerMax: 3
+    });
     expect(Game.validateSave(save)).toBe(true);
   });
 
@@ -146,8 +156,10 @@ describe('save round-trip and migration', () => {
     save.shardsTurnedIn = { 'tranquil-vale': 3 };
     save.explorationPct = { 'tranquil-vale': 42 };
     save.resin = 77;
-    save.settings.audio = { master: 0.55, sfx: 0.4, voice: 0.9, stinger: 0.25, music: 0.5, muted: true };
+    save.settings.audio = { master: 0.55, sfx: 0.4, ui: 0.35, voice: 0.9, stinger: 0.25, music: 0.5, muted: true };
     save.settings.minimap = false;
+    save.settings.keyBindings = { bindings: { 'ability-1': 'u', journal: 'l' }, mouseMoveButton: 'right' };
+    save.settings.interface = { uiScale: 1.25, textScale: 1.1, hudOpacity: 0.8, minimapSize: 220, minimapOpacity: 0.65, helpOverlay: false, questTracker: false, questTrackerMax: 2 };
 
     const json = JSON.stringify(save);
     const reloaded = Game.migrateSave(JSON.parse(json) as unknown);
@@ -168,6 +180,8 @@ describe('save round-trip and migration', () => {
     expect(reloaded!.resin).toBe(77);
     expect(reloaded!.settings.audio).toEqual(save.settings.audio);
     expect(reloaded!.settings.minimap).toBe(false);
+    expect(reloaded!.settings.keyBindings).toEqual(save.settings.keyBindings);
+    expect(reloaded!.settings.interface).toEqual(save.settings.interface);
     expect(Game.validateSave(reloaded!)).toBe(true);
   });
 
@@ -204,10 +218,21 @@ describe('save round-trip and migration', () => {
     expect(migrated!.resin).toBeGreaterThan(0);
     expect(migrated!.settings.audio.master).toBeCloseTo(0.5);
     expect(migrated!.settings.audio.sfx).toBeCloseTo(0.6);
+    expect(migrated!.settings.audio.ui).toBeCloseTo(0.8);
     expect(migrated!.settings.audio.stinger).toBeCloseTo(0.3); // musicVolume -> stinger
     expect(migrated!.settings.audio.music).toBeCloseTo(0.3); // musicVolume -> music bed
     expect(migrated!.settings.audio.voice).toBeCloseTo(0.7); // no v3 analogue -> default
     expect(migrated!.settings.audio.muted).toBe(false);
+    expect(migrated!.settings.interface).toEqual({
+      uiScale: 1,
+      textScale: 1,
+      hudOpacity: 1,
+      minimapSize: 160,
+      minimapOpacity: 1,
+      helpOverlay: true,
+      questTracker: true,
+      questTrackerMax: 3
+    });
     expect(Game.validateSave(migrated!)).toBe(true);
   });
 
@@ -234,7 +259,7 @@ describe('save round-trip and migration', () => {
     expect(migrated!.settings.quickcast).toBe(false);
     expect(migrated!.settings.resonance).toBe(true);
     // v3 defaults musicVolume to 0.6 when absent, which folds into the stinger + music channels.
-    expect(migrated!.settings.audio).toEqual({ master: 0.8, sfx: 0.8, voice: 0.7, stinger: 0.6, music: 0.6, muted: false });
+    expect(migrated!.settings.audio).toEqual({ master: 0.8, sfx: 0.8, ui: 0.8, voice: 0.7, stinger: 0.6, music: 0.6, muted: false });
     expect(Game.validateSave(migrated!)).toBe(true);
   });
 

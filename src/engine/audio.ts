@@ -3,7 +3,8 @@ import { TUNING } from '../data/tuning';
 import { CAST_SFX_BY_SOUND, SampledAudioBank, type SfxKey } from './sampled-audio';
 
 type AudioSettings = GameSave['settings'];
-type Channel = 'sfx' | 'voice' | 'stinger' | 'music';
+type Channel = 'sfx' | 'ui' | 'voice' | 'stinger' | 'music';
+export type UiCueKind = 'hover' | 'click' | 'open' | 'close' | 'error' | 'ready' | 'heartbeat' | 'tab';
 export type CinematicMixMode = 'normal' | 'duck' | 'silence';
 
 // Positional audio (§2). A cue's world position is compared to the listener
@@ -245,6 +246,40 @@ export class ProceduralAudio {
     } finally {
       this.spatialPan = 0;
       this.spatialAtten = 1;
+    }
+  }
+
+  playUi(kind: UiCueKind): void {
+    if (!this.unlocked || this.settings.audio.muted) return;
+    switch (kind) {
+      case 'hover':
+        this.tone(920, 0.025, 'sine', 0.035, 'ui');
+        break;
+      case 'click':
+        this.tone(720, 0.035, 'triangle', 0.075, 'ui');
+        this.tone(1180, 0.025, 'sine', 0.035, 'ui');
+        break;
+      case 'open':
+        this.sweep(420, 760, 0.11, 'triangle', 0.075, 'ui');
+        break;
+      case 'close':
+        this.sweep(680, 300, 0.1, 'triangle', 0.06, 'ui');
+        break;
+      case 'error':
+        this.sweep(160, 92, 0.16, 'sawtooth', 0.08, 'ui');
+        break;
+      case 'ready':
+        this.tone(740, 0.045, 'sine', 0.06, 'ui');
+        setTimeout(() => this.tone(988, 0.045, 'sine', 0.055, 'ui'), 35);
+        setTimeout(() => this.tone(1480, 0.06, 'sine', 0.045, 'ui'), 70);
+        break;
+      case 'heartbeat':
+        this.sweep(90, 55, 0.09, 'sine', 0.06, 'ui');
+        break;
+      case 'tab':
+        this.tone(520, 0.04, 'square', 0.045, 'ui');
+        this.tone(780, 0.04, 'triangle', 0.035, 'ui');
+        break;
     }
   }
 
@@ -824,7 +859,15 @@ export class ProceduralAudio {
   private channelGain(chan: Channel): number {
     const a = this.settings.audio;
     if (a.muted) return 0;
-    const sub = chan === 'voice' ? a.voice : chan === 'stinger' ? a.stinger : chan === 'music' ? a.music : a.sfx;
+    const sub = chan === 'voice'
+      ? a.voice
+      : chan === 'stinger'
+        ? a.stinger
+        : chan === 'music'
+          ? a.music
+          : chan === 'ui'
+            ? (a.ui ?? a.sfx)
+            : a.sfx;
     return a.master * sub;
   }
 

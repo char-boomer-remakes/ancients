@@ -99,10 +99,10 @@ Every on-disk creature GLB is now consumed somewhere:
 The follow-up polish pass shipped downloaded bespoke GLBs for the four shared-base
 stand-ins called out by the audit:
 
-- `tusk.glb`: Poly Pizza Walrus by Poly by Google, CC BY 3.0.
-- `snapfire.glb`: Poly Pizza Lizard by madtrollstudio, CC BY 3.0.
-- `hoodwink.glb`: Poly Pizza Squirrel by Poly by Google, CC BY 3.0.
-- `gyrocopter.glb`: Poly Pizza Helicopter by kazuma, CC0.
+- `tusk.glb`: Poly Pizza Walrus by Poly by Google, CC BY 3.0 (static).
+- `snapfire.glb`: Poly Pizza Velociraptor by Quaternius, CC0 (animated `idle/run/attack/death`).
+- `hoodwink.glb`: Poly Pizza Squirrel by Poly by Google, CC BY 3.0 (static).
+- `gyrocopter.glb`: Poly Pizza Helicopter by kazuma, CC0 (static).
 
 Those four mount through `heroAssetEntry` before the shared creature-base fallback.
 The generated stand-ins are retired; credited downloads are the preferred asset

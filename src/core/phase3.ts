@@ -320,6 +320,7 @@ export interface LegacySettings {
   quickcast: boolean;
   resonance?: boolean;
   minimap?: boolean;
+  keyBindings?: GameSave['settings']['keyBindings'];
   masterVolume?: number;
   sfxVolume?: number;
   musicVolume?: number;

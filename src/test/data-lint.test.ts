@@ -16,11 +16,11 @@ import { ALL_TRAINERS } from '../data/trainers';
 import { ESPORTS_DENYLIST, denylistHit } from '../data/denylist';
 import { REG } from '../core/registry';
 import { ACTIVE_ELEMENTS, elementForAbility, elementForHero, elementForItemHit } from '../core/resonance';
-import { PHASE5_STARTER_ASSETS, ENABLED_HERO_COHORTS, heroBaseId } from '../engine/assets';
+import { PHASE5_STARTER_ASSETS, ENABLED_HERO_COHORTS, creepCreatureUrl, heroBaseId, heroBaseUrl } from '../engine/assets';
 import { HERO_LIKENESS_PROFILES } from '../engine/models';
 import { PERFORMANCE_BUDGET } from '../engine/performance';
 import { TUNING } from '../data/tuning';
-import { heroWorldSize, creepWorldSize, bossWorldSize, summonWorldSize, questGiverWorldSize, inBand, SIZE_BANDS, type ResolvedWorldSize } from '../engine/world-size';
+import { heroWorldSize, creepWorldSize, bossWorldSize, summonWorldSize, questGiverWorldSize, bossVisualScale, bossVisualScaleForRank, inBand, SIZE_BANDS, type ResolvedWorldSize } from '../engine/world-size';
 import { HERO_HEIGHT_M, footprintToRadius } from '../engine/scale';
 import { BUILT_WORLD_SIZES } from '../data/world/props';
 import { readFileSync } from 'node:fs';
@@ -462,8 +462,8 @@ describe('data lint: Phase 4/5 polish infrastructure', () => {
     for (const starter of ['crystal-maiden', 'earthshaker', 'juggernaut', 'lich', 'pudge', 'sniper']) {
       expect(ids.has(starter), `${starter} shipped`).toBe(true);
     }
-    // Knight + Mage + Barbarian + Rogue cohorts (no-budget policy: one file per hero).
-    expect(PHASE5_STARTER_ASSETS.length).toBe(80);
+    // Knight + Mage + Barbarian + Rogue cohorts after winter-wyvern moves to a dragon base.
+    expect(PHASE5_STARTER_ASSETS.length).toBe(79);
     for (const asset of PHASE5_STARTER_ASSETS) {
       // Every shipped model belongs to an enabled humanoid cohort.
       expect(ENABLED_HERO_COHORTS.has(heroBaseId(asset.heroId)), `${asset.heroId} cohort`).toBe(true);
@@ -473,6 +473,35 @@ describe('data lint: Phase 4/5 polish infrastructure', () => {
       expect(asset.sockets).toContain('weapon');
       expect(asset.fallback).toBe('procedural');
     }
+  });
+
+  it('keeps the asset remap plan wired to animated shared bases', () => {
+    const expectCreepFamily = (ids: string[], family: string) => {
+      for (const id of ids) {
+        const build = ALL_CREEPS.find((c) => c.id === id)?.silhouette.build;
+        expect(creepCreatureUrl(id, build), `${id} family`).toBe(`/assets/creeps/${family}.glb`);
+      }
+    };
+
+    expectCreepFamily(['satyr-banisher', 'satyr-mindstealer', 'prowler-shaman', 'prowler-acolyte', 'prowler-shaman-minion'], 'demon');
+    expectCreepFamily(['hill-troll', 'dark-troll', 'dark-troll-summoner', 'dark-troll-summoner-minion'], 'tribal');
+    expectCreepFamily(['granite-golem', 'rock-golem', 'mud-golem', 'frostbitten-golem'], 'golelingevolved');
+    expectCreepFamily(['hellbear', 'wildwing', 'wildwing-ripper', 'enraged-wildkin', 'polar-furbolg'], 'bear');
+    expect(creepCreatureUrl('elder-jungle-stalker', 'golem')).toBe('/assets/creeps/wolf.glb');
+    expect(creepCreatureUrl('future-bird', 'bird')).toBe('/assets/creeps/flier.glb');
+
+    expect(heroBaseUrl(heroBaseId('winter-wyvern'))).toBe('/assets/creeps/dragonevolved.glb');
+    expect(heroBaseUrl(heroBaseId('phoenix'))).toBe('/assets/creeps/flier.glb');
+    expect(heroBaseUrl(heroBaseId('batrider'))).toBe('/assets/creeps/flier.glb');
+    expect(heroBaseUrl(heroBaseId('naga-siren'))).toBe('/assets/creeps/serpent.glb');
+    expect(heroBaseUrl(heroBaseId('medusa'))).toBe('/assets/creeps/serpent.glb');
+    expect(heroBaseUrl(heroBaseId('lone-druid'))).toBe('/assets/creeps/bear.glb');
+    expect(heroBaseUrl(heroBaseId('bane'))).toBe('/assets/creeps/demon.glb');
+    expect(heroBaseUrl(heroBaseId('leshrac'))).toBe('/assets/creeps/demon.glb');
+    expect(heroBaseId('io')).toBe('procedural');
+    expect(heroBaseId('enigma')).toBe('procedural');
+    expect(heroBaseId('morphling')).toBe('procedural');
+    expect(heroBaseId('ancient-apparition')).toBe('procedural');
   });
 
   it('has recognizable procedural likeness profiles for the shipped starter roster', () => {
@@ -1120,7 +1149,7 @@ describe('data lint: lore + esports denylist (test 23)', () => {
     }
   });
 
-  // QUEST.md §3: walking quest givers must home to a real region and post a
+  // QUEST.md: walking quest givers must home to a real region and post a
   // board that at least one registered quest actually uses, or the NPC is empty.
   it('quest givers reference real regions and post a real board', () => {
     const givers = [...REG.questGivers.values()];
@@ -1264,20 +1293,42 @@ describe('data lint: world size (test 24)', () => {
     expect(scene.includes("height: 1.3, speed: 30")).toBe(false);
   });
 
-  it('shipped GLBs agree with declared height within ±10% where the manifest has dims (§9.5)', () => {
-    let manifest: { files?: { path: string; dimsM?: { h: number } }[] } | null = null;
+  it('a boss renders bigger than its source hero, into the §3 band (§5.1)', () => {
+    for (const boss of ALL_BOSSES) {
+      const hero = REG.hero(boss.heroId);
+      const lift = bossVisualScale(boss, hero);
+      const floor = boss.rank === 'boss' ? SIZE_BANDS.huge.min : SIZE_BANDS.large.min;
+      const bossH = bossWorldSize(boss, hero).heightM;
+      expect(lift, `${boss.id}: boss must not render smaller than its source hero`).toBeGreaterThanOrEqual(1);
+      expect(bossH, `${boss.id}: boss height ${bossH}m below ${boss.rank} floor ${floor}m`).toBeGreaterThanOrEqual(floor);
+      // Lifting the hero base by the render scale reproduces the boss height.
+      expect(heroWorldSize(hero).heightM * lift, `${boss.id}: lift must reproduce boss height`).toBeCloseTo(bossH, 2);
+    }
+    // The render fallback for arena bosses (no per-unit lift) lands a standard
+    // hero in the huge band.
+    expect(HERO_HEIGHT_M * TUNING.bossVisualScale).toBeGreaterThanOrEqual(SIZE_BANDS.huge.min);
+    expect(bossVisualScaleForRank('boss', { silhouette: { build: 'biped', scale: 1 } } as never) * HERO_HEIGHT_M)
+      .toBeCloseTo(SIZE_BANDS.huge.min, 2);
+  });
+
+  it('shipped world-sized GLBs agree with declared height within ±10% (§9.5)', () => {
+    let manifest: { files?: { path: string; type?: string; worldSize?: { heightM?: number }; dimsM?: { h: number; w?: number; d?: number } }[] } | null = null;
     try {
       manifest = JSON.parse(readFileSync('public/assets/manifest.json', 'utf8'));
     } catch {
       manifest = null;
     }
-    const withDims = (manifest?.files ?? []).filter((f) => f.dimsM?.h);
-    // Gate 5 lands once build_assets stamps dimsM (§10 phase 3); until then there
-    // is nothing measured to compare and the gate is a no-op rather than a failure.
-    for (const file of withDims) {
-      expect(file.dimsM!.h, `${file.path}: manifest dims present`).toBeGreaterThan(0);
-    }
     expect(Array.isArray(manifest?.files ?? [])).toBe(true);
+    const worldSized = (manifest?.files ?? []).filter((f) => f.type === 'model' && f.worldSize?.heightM);
+    expect(worldSized.length, 'world-sized GLBs should be stamped into the manifest').toBeGreaterThan(100);
+    for (const file of worldSized) {
+      expect(file.dimsM?.h, `${file.path}: manifest dimsM.h`).toBeGreaterThan(0);
+      expect(file.dimsM?.w, `${file.path}: manifest dimsM.w`).toBeGreaterThan(0);
+      expect(file.dimsM?.d, `${file.path}: manifest dimsM.d`).toBeGreaterThan(0);
+      const declared = file.worldSize!.heightM!;
+      const drift = Math.abs(file.dimsM!.h - declared) / declared;
+      expect(drift, `${file.path}: dimsM.h ${file.dimsM!.h} vs declared ${declared}`).toBeLessThanOrEqual(0.10);
+    }
   });
 
   it('renders the §7 coverage matrix with no red boxes (§9.9)', () => {

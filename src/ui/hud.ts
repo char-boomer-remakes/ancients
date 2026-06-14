@@ -6,17 +6,21 @@ import { GRADE_DEFS } from '../data/grade';
 import { gemDef } from '../data/gems';
 import { itemSetDef } from '../data/sets';
 import { xpProgress } from '../core/progression';
+import { armorMultiplier } from '../core/stats';
+import { STATUS_META, type StatusInstance } from '../core/status';
 import { itemReady, sellValue, computeBuyPlan } from '../core/items';
 import { buybackCost } from '../core/phase3';
+import { defaultInterfaceSettings } from '../core/phase4';
 import { abilityMaxLevel, abilityRankRequiredHeroLevel, levelArr } from '../core/values';
 import { buildDefaultGambit } from '../core/controllers';
 import { statLabel, fmtStatValue, statLines, buildAbilityCard, buildItemCard, buildNeutralItemCard, buildHeroCard, type TooltipCard } from '../core/describe';
 import { abilityIcon, itemIcon, neutralItemIcon, heroPortrait } from '../engine/icons';
 import { WORLD_SCALE } from '../engine/scale';
 import { Game } from '../systems/game';
+import { ACTION_META, INPUT_ACTIONS, canRebindAction, glyphForAction, keyEventToBinding, rebindAction, resetKeyBindings } from '../systems/keybindings';
 import type { InputController } from '../systems/input';
 import type { Unit } from '../core/unit';
-import type { DifficultyTier, GambitAction, GambitCondition, GambitRule, GambitTargetMode, GraphicsSettings, HeroDef, ItemDef, ItemRarity, ItemSave, SimEvent, StatModMap, TalentDef } from '../core/types';
+import type { DifficultyTier, GambitAction, GambitCondition, GambitRule, GambitTargetMode, GraphicsSettings, HeroDef, InputAction, ItemDef, ItemRarity, ItemSave, SimEvent, StatModMap, StatusId, TalentDef } from '../core/types';
 import * as THREE from 'three';
 
 // ------------------------------------------------------------------
@@ -24,10 +28,45 @@ import * as THREE from 'three';
 // call back into Game. No game logic lives here.
 // ------------------------------------------------------------------
 
-const ABILITY_KEYS = ['Q', 'W', 'E', 'R', 'D', 'F'];
-const ITEM_KEYS = ['Z', 'X', 'C', 'V', '·', '·'];
 const GOLD_STREAK_WINDOW_MS = 1500;
 const RARITY_ORDER: ItemRarity[] = ['common', 'uncommon', 'rare', 'mythical', 'legendary', 'immortal', 'arcana'];
+const STATUS_LABELS: Record<StatusId, string> = {
+  stun: 'Stun',
+  root: 'Root',
+  silence: 'Silence',
+  hex: 'Hex',
+  slow: 'Slow',
+  disarm: 'Disarm',
+  blind: 'Blind',
+  fear: 'Fear',
+  taunt: 'Taunt',
+  invis: 'Invisibility',
+  'magic-immune': 'Spell Immune',
+  break: 'Break',
+  cyclone: 'Cyclone',
+  sleep: 'Sleep',
+  frozen: 'Frozen',
+  buff: 'Buff'
+};
+const STATUS_GLYPHS: Record<StatusId, string> = {
+  stun: 'ST',
+  root: 'RT',
+  silence: 'SI',
+  hex: 'HX',
+  slow: 'SL',
+  disarm: 'DA',
+  blind: 'BL',
+  fear: 'FE',
+  taunt: 'TA',
+  invis: 'IN',
+  'magic-immune': 'MI',
+  break: 'BR',
+  cyclone: 'CY',
+  sleep: 'ZZ',
+  frozen: 'FR',
+  buff: 'UP'
+};
+const HARD_CC: StatusId[] = ['stun', 'hex', 'cyclone', 'sleep', 'frozen', 'fear', 'taunt'];
 const STAT_WEIGHTS: Partial<Record<keyof StatModMap, number>> = {
   damage: 1.5,
   damagePct: 3,
@@ -64,6 +103,10 @@ const STAT_WEIGHTS: Partial<Record<keyof StatModMap, number>> = {
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+function clampNum(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
 }
 
 function mergeMods(...parts: (StatModMap | undefined)[]): StatModMap {
@@ -242,14 +285,36 @@ interface CoinFx {
   arc: number;
 }
 
+interface StatusView {
+  instance: StatusInstance;
+  label: string;
+  glyph: string;
+  cls: 'buff' | 'debuff' | 'aura';
+  urgent: boolean;
+  remaining: number;
+  ringDeg: number;
+  source: string;
+}
+
+type QuestBoardEntry = ReturnType<Game['questBoard']>[number];
+
+interface KillfeedEntry {
+  text: string;
+  kind: 'hero' | 'boss' | 'elite';
+  at: number;
+}
+
 export class Hud {
   root: HTMLElement;
   private topBar: HTMLElement;
   private partyCol: HTMLElement;
   private heroPanel: HTMLElement;
+  private questTracker: HTMLElement;
   private toastCol: HTMLElement;
+  private killfeedLane: HTMLElement;
   private captureBar: HTMLElement;
   private floaterLayer: HTMLElement;
+  private statusLayer: HTMLElement;
   private minimap: HTMLCanvasElement;
   private minimapCtx: CanvasRenderingContext2D;
   private modal: HTMLElement;
@@ -291,7 +356,7 @@ export class Hud {
   private floaters: Floater[] = [];
   private coinFx: CoinFx[] = [];
   private shownToasts = 0;
-  private modalKind: 'none' | 'party' | 'shop' | 'menu' | 'talents' | 'journal' | 'codex' | 'gambit' | 'prefight' | 'dungeon-entry' | 'services' = 'none';
+  private modalKind: 'none' | 'party' | 'shop' | 'menu' | 'talents' | 'journal' | 'codex' | 'character' | 'help' | 'gambit' | 'prefight' | 'dungeon-entry' | 'services' = 'none';
   /** When the Journal is opened by talking to a giver, spotlight its board. */
   private questGiverFocus: string | null = null;
   private captureUntil = 0;
@@ -306,6 +371,12 @@ export class Hud {
   private goldStreak = 0;
   private goldStreakUntil = 0;
   private lastGoldEventAt = 0;
+  private pinnedQuestIds = new Set<string>();
+  private lastQuestTrackerKey = '';
+  private questTrackerFlashUntil = 0;
+  private killfeed: KillfeedEntry[] = [];
+  private abilityCooldowns = new Map<string, number>();
+  private abilityReadyUntil = new Map<string, number>();
 
   constructor(
     private game: Game,
@@ -316,9 +387,12 @@ export class Hud {
     this.root.innerHTML = `
       <div id="top-bar"></div>
       <div id="party-col"></div>
+      <div id="quest-tracker"></div>
       <canvas id="minimap" width="160" height="160"></canvas>
       <div id="toast-col"></div>
+      <div id="killfeed-lane"></div>
       <div id="floater-layer"></div>
+      <div id="status-layer"></div>
       <div id="capture-bar" class="hidden"><div class="fill"></div><span>Binding...</span></div>
       <div id="hero-panel"></div>
       <div id="hud-hint"></div>
@@ -332,9 +406,12 @@ export class Hud {
     this.topBar = this.root.querySelector('#top-bar')!;
     this.partyCol = this.root.querySelector('#party-col')!;
     this.heroPanel = this.root.querySelector('#hero-panel')!;
+    this.questTracker = this.root.querySelector('#quest-tracker')!;
     this.toastCol = this.root.querySelector('#toast-col')!;
+    this.killfeedLane = this.root.querySelector('#killfeed-lane')!;
     this.captureBar = this.root.querySelector('#capture-bar')!;
     this.floaterLayer = this.root.querySelector('#floater-layer')!;
+    this.statusLayer = this.root.querySelector('#status-layer')!;
     this.minimap = this.root.querySelector('#minimap')!;
     this.minimapCtx = this.minimap.getContext('2d')!;
     this.modal = this.root.querySelector('#modal-root')!;
@@ -388,13 +465,15 @@ export class Hud {
     input.onToggleMenu = () => this.toggleModal('menu');
     input.onToggleJournal = () => this.toggleModal('journal');
     input.onToggleCodex = () => this.toggleModal('codex');
+    input.onToggleCharacter = () => this.toggleModal('character');
+    input.onToggleHelp = () => this.toggleModal('help');
     input.onToggleServices = () => this.toggleModal('services');
     window.addEventListener('dragover', this.onItemDragOver);
     window.addEventListener('drop', this.onItemDrop);
     window.addEventListener('dragend', this.onItemDragEnd);
     this.topBar.addEventListener('click', (e) => {
       const open = (e.target as HTMLElement).closest('[data-open]') as HTMLElement | null;
-      const kind = open?.dataset.open as 'journal' | 'codex' | undefined;
+      const kind = open?.dataset.open as 'journal' | 'codex' | 'help' | undefined;
       if (kind) this.toggleModal(kind);
     });
     this.hoverCard = this.root.querySelector('#hover-card')!;
@@ -530,7 +609,8 @@ export class Hud {
       s.hexed ? 1 : 0,
       s.magicImmune ? 1 : 0,
       s.invisible ? 1 : 0,
-      s.invulnerable ? 1 : 0
+      s.invulnerable ? 1 : 0,
+      u.statuses.map((st) => `${st.status}:${Math.ceil(st.until)}`).join(',')
     ].join(':');
   }
 
@@ -598,17 +678,7 @@ export class Hud {
   }
 
   private worldStatusLabels(u: Unit): string[] {
-    const s = u.summary;
-    return [
-      s.stunned ? 'Stunned' : '',
-      s.rooted ? 'Rooted' : '',
-      s.silenced ? 'Silenced' : '',
-      s.disarmed ? 'Disarmed' : '',
-      s.hexed ? 'Hexed' : '',
-      s.magicImmune ? 'Magic Immune' : '',
-      s.invisible ? 'Invisible' : '',
-      s.invulnerable ? 'Invulnerable' : ''
-    ].filter(Boolean);
+    return this.statusViews(u, 6).map((s) => s.label);
   }
 
   private worldUnitAccent(u: Unit): string {
@@ -617,17 +687,132 @@ export class Hud {
     return 'var(--bad)';
   }
 
+  private statusViews(u: Unit, limit = 6): StatusView[] {
+    const inputSim = this.game.inputSim();
+    const now = inputSim.unit(u.uid) === u ? inputSim.time : this.game.sim.time;
+    return u.statuses
+      .filter((st) => Number.isFinite(st.until) ? st.until > now : true)
+      .map((st) => {
+        const meta = STATUS_META[st.status];
+        const isDebuff = st.isDebuff || meta.debuff;
+        const remaining = Number.isFinite(st.until) ? Math.max(0, st.until - now) : Infinity;
+        const ringDeg = Number.isFinite(remaining) ? Math.max(12, Math.min(360, (remaining / 8) * 360)) : 360;
+        const cls: StatusView['cls'] = Number.isFinite(st.until) ? (isDebuff ? 'debuff' : 'buff') : 'aura';
+        return {
+          instance: st,
+          label: this.statusLabel(st),
+          glyph: this.statusGlyph(st),
+          cls,
+          urgent: isDebuff && HARD_CC.includes(st.status),
+          remaining,
+          ringDeg,
+          source: this.statusSource(st)
+        };
+      })
+      .sort((a, b) =>
+        Number(b.urgent) - Number(a.urgent) ||
+        Number(b.cls === 'debuff') - Number(a.cls === 'debuff') ||
+        a.remaining - b.remaining ||
+        a.label.localeCompare(b.label)
+      )
+      .slice(0, limit);
+  }
+
+  private statusLabel(st: StatusInstance): string {
+    if (st.status !== 'buff') return STATUS_LABELS[st.status];
+    if (st.dotDps) return st.isDebuff ? 'Damage Over Time' : 'Burning Aura';
+    const mods = st.mods ?? {};
+    if ((mods.damageTakenReductionPct ?? 0) > 0 || (mods.attackDamageTakenReductionPct ?? 0) > 0 || (mods.maxHp ?? 0) > 0) return 'Shield';
+    if ((mods.hpRegen ?? 0) > 0 || (mods.hpRegenPctMax ?? 0) > 0 || (mods.manaRegen ?? 0) > 0) return 'Regen';
+    if ((mods.damage ?? 0) > 0 || (mods.damagePct ?? 0) > 0 || (mods.attackSpeed ?? 0) > 0 || (mods.spellAmpPct ?? 0) > 0) return 'Power';
+    if ((mods.moveSpeed ?? 0) > 0 || (mods.moveSpeedPct ?? 0) > 0) return 'Haste';
+    return st.isDebuff ? 'Debuff' : 'Buff';
+  }
+
+  private statusGlyph(st: StatusInstance): string {
+    const label = this.statusLabel(st);
+    if (st.status !== 'buff') return STATUS_GLYPHS[st.status];
+    return label.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || STATUS_GLYPHS.buff;
+  }
+
+  private statusSource(st: StatusInstance): string {
+    return this.game.inputSim().unit(st.sourceUid)?.name ?? `Unit ${st.sourceUid}`;
+  }
+
+  private statusTooltip(view: StatusView): TooltipCard {
+    const st = view.instance;
+    const mods = st.mods ? statLines(st.mods as StatModMap, 8) : [];
+    const effect = [
+      st.dotDps ? `${Math.round(st.dotDps)} ${st.dotType ?? 'magical'} damage per second.` : '',
+      st.moveSlowPct ? `${Math.round(st.moveSlowPct)}% move slow.` : '',
+      st.attackSlowPct ? `${Math.round(st.attackSlowPct)} attack speed slow.` : '',
+      st.breakOnDamage ? 'Breaks when the unit takes damage.' : '',
+      st.periodic ? `Pulses every ${st.periodic.interval}s.` : ''
+    ].filter(Boolean);
+    const remaining = Number.isFinite(view.remaining) ? `${view.remaining.toFixed(view.remaining > 5 ? 0 : 1)}s remaining` : 'Persistent aura/toggle';
+    return {
+      name: view.label,
+      kind: view.cls === 'debuff' ? 'Debuff' : view.cls === 'aura' ? 'Aura' : 'Buff',
+      effect: effect.length > 0 ? effect : ['Active modifier affecting this unit.'],
+      stats: mods,
+      meta: [remaining, `Source: ${view.source}`, STATUS_META[st.status].purgeable ? 'Purgeable' : 'Unpurgeable']
+    };
+  }
+
+  private statusPipsHtml(u: Unit, scope: 'hero' | 'party' | 'world' | 'sheet', limit = 6): string {
+    const views = this.statusViews(u, limit);
+    if (views.length === 0) return scope === 'hero' ? '<div class="status-strip hero empty"><span>No active effects</span></div>' : '';
+    const pips = views.map((view, i) => {
+      const tip = this.registerTip(`status-${scope}-${u.uid}-${i}`, this.statusTooltip(view), {
+        accent: view.cls === 'debuff' ? 'var(--bad)' : view.cls === 'aura' ? 'var(--brass-lite)' : 'var(--good)'
+      });
+      const time = Number.isFinite(view.remaining) ? `<em>${Math.ceil(view.remaining)}</em>` : '';
+      return `<span class="status-pip ${view.cls} ${view.urgent ? 'urgent' : ''}" style="--status-deg:${view.ringDeg.toFixed(0)}deg"${tip}><b>${esc(view.glyph)}</b>${time}</span>`;
+    }).join('');
+    return `<div class="status-strip ${scope}">${pips}</div>`;
+  }
+
+  private renderWorldStatusPips(): void {
+    const g = this.game;
+    if (this.modalKind !== 'none' || g.cinematic.active) {
+      this.statusLayer.innerHTML = '';
+      return;
+    }
+    const sim = g.inputSim();
+    const selected = g.scene.selectedUid;
+    const hover = this.input.hoverUid;
+    const active = g.activeUnit()?.uid ?? -1;
+    const html = sim.unitsArr
+      .filter((u) => u.alive && u.statuses.length > 0)
+      .filter((u) => {
+        const s = u.summary;
+        const critical = s.stunned || s.hexed || s.frozen || s.sleeping || s.cycloned || s.silenced || s.rooted;
+        return u.uid === selected || u.uid === hover || u.uid === active || critical;
+      })
+      .map((u) => {
+        const screen = this.screenFromWorld(u.pos.x, u.pos.y, 2.9);
+        if (!screen) return '';
+        return `<div class="world-status" style="transform:translate(${screen.x.toFixed(0)}px, ${screen.y.toFixed(0)}px) translate(-50%, -100%)">${this.statusPipsHtml(u, 'world', 3)}</div>`;
+      })
+      .join('');
+    if (this.statusLayer.innerHTML !== html) this.statusLayer.innerHTML = html;
+  }
+
   // ---------- per frame ----------
 
   update(): void {
+    this.applyInterfaceSettings();
     this.updateGoldTween();
     this.renderTopBar();
     this.renderParty();
     this.renderHeroPanel();
     this.renderMinimap();
+    this.renderQuestTracker();
     this.renderToasts();
+    this.renderKillfeed();
     this.handleEvents(this.game.frameEvents);
     this.updateFloaters();
+    this.renderWorldStatusPips();
     this.updateCoinFx();
     this.updateCaptureBar();
     this.renderHint();
@@ -637,6 +822,26 @@ export class Hud {
     this.renderCombatReadout();
     this.renderCinematic();
     if (this.modalKind === 'shop' || this.modalKind === 'party') this.refreshModalDynamic();
+  }
+
+  private interfaceSettings(): ReturnType<typeof defaultInterfaceSettings> {
+    const ui = { ...defaultInterfaceSettings(), ...this.game.settings.interface };
+    this.game.settings.interface = ui;
+    return ui;
+  }
+
+  private applyInterfaceSettings(): void {
+    const ui = this.interfaceSettings();
+    this.root.style.setProperty('zoom', String(ui.uiScale));
+    this.root.style.setProperty('--text-scale', ui.textScale.toFixed(2));
+    this.root.style.setProperty('--hud-opacity', ui.hudOpacity.toFixed(2));
+    this.root.style.setProperty('--minimap-size', `${Math.round(ui.minimapSize)}px`);
+    this.root.style.setProperty('--minimap-opacity', ui.minimapOpacity.toFixed(2));
+    this.root.classList.toggle('reduced-motion', this.reducedMotion());
+  }
+
+  private reducedMotion(): boolean {
+    return !!this.game.settings.graphics?.reducedMotion || !!this.game.settings.cutscene?.photosensitive;
   }
 
   // ---------- top bar ----------
@@ -653,8 +858,14 @@ export class Hud {
     const staminaPct = Math.round((g.stamina / staminaMax) * 100);
     const resin = Math.floor(g.resin);
     const exploration = g.explorationFor();
+    const key = (action: InputAction) => glyphForAction(g.settings, action);
+    const crest = g.region.name.split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+    const badges = [...g.badges].slice(0, 8).map((badge) => `<span class="badge-chip" title="${esc(badge.replace(/-/g, ' '))}">${esc(badge.split('-')[0]?.[0]?.toUpperCase() ?? 'B')}</span>`).join('');
+    const showHelp = this.interfaceSettings().helpOverlay;
     this.topBar.innerHTML = `
+      <span class="region-crest" title="${esc(g.region.name)}">${crest}</span>
       <span class="region">${g.region.name}</span>
+      ${badges ? `<span class="badge-row">${badges}</span>` : ''}
       <span class="daynight" title="${isNight ? 'Night' : 'Day'} ${clockPct}%">
         <span class="dn-dial"><span class="dn-marker ${isNight ? 'moon' : 'sun'}" style="transform:rotate(${(t * 360 - 90).toFixed(1)}deg)"></span></span>
         <span class="clock ${isNight ? 'night' : 'day'}">${isNight ? 'Night' : 'Day'} ${clockPct}%</span>
@@ -678,12 +889,14 @@ export class Hud {
       <span class="resin-chip" title="Soft pacing resource">${resin}/${TUNING.resin.max} moonflow</span>
       <button class="top-btn" data-open="journal">Journal</button>
       <button class="top-btn" data-open="codex">Codex</button>
-      <span class="keys-hint">RMB move/attack · Alt sprint · Space dash · A-click attack-move · Shift queues · S stop · QWER cast · ZXCV items · 1-5 swap · T capture · G interact · B shop · Tab party · M map</span>
+      ${showHelp ? `<button class="top-btn help-btn" data-open="help" title="Controls help (${esc(key('help'))})">?</button>` : ''}
     `;
   }
 
   private renderMinimap(): void {
     const g = this.game;
+    this.minimap.classList.toggle('hidden', g.settings.minimap === false);
+    if (g.settings.minimap === false) return;
     const ctx = this.minimapCtx;
     const s = this.minimap.width;
     const scale = s / g.region.size;
@@ -725,11 +938,151 @@ export class Hud {
     for (const giver of g.questGiverViews()) {
       dot(giver.x, giver.y, 2.6, giver.hasClaimable ? '#ffd24a' : giver.hasActive ? '#73d9ff' : '#8aa0b8', true);
     }
+    const reducedMotion = this.reducedMotion();
+    const qNow = reducedMotion ? 0 : performance.now();
+    for (const marker of this.questMinimapMarkers(this.trackedQuests())) {
+      const x = marker.x * scale;
+      const y = marker.y * scale;
+      const pulse = reducedMotion ? 1 : 1 + Math.sin(qNow / 240) * 0.16;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = marker.claimable ? '#ffd24a' : '#73d9ff';
+      ctx.strokeStyle = '#0b1018';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.rect(-3.8 * pulse, -3.8 * pulse, 7.6 * pulse, 7.6 * pulse);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = '#071018';
+      ctx.font = 'bold 7px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Q', x, y + 0.3);
+    }
     const u = g.activeUnit();
     if (u) {
       dot(u.pos.x, u.pos.y, 3.3, '#ffffff');
       dot(u.pos.x, u.pos.y, 5.2, '#ffd86a', true);
     }
+  }
+
+  private trackedQuests(): QuestBoardEntry[] {
+    const max = this.interfaceSettings().questTrackerMax;
+    const board = this.game.questBoard();
+    const picked: QuestBoardEntry[] = [];
+    const add = (q: QuestBoardEntry | undefined): void => {
+      if (q && !picked.some((p) => p.id === q.id)) picked.push(q);
+    };
+    for (const id of this.pinnedQuestIds) add(board.find((q) => q.id === id));
+    for (const q of board) if (q.claimable) add(q);
+    for (const q of board) if (q.regionId === this.game.region.id && q.status === 'active') add(q);
+    for (const q of board) if (q.status === 'active') add(q);
+    return picked.slice(0, max);
+  }
+
+  private questMarkerFor(q: QuestBoardEntry): { x: number; y: number; label: string; claimable: boolean } | null {
+    const def = REG.questDefs.get(q.id);
+    if (!def) return null;
+    const objIdx = q.objectives.findIndex((obj) => obj.have < obj.need);
+    const obj = def.objectives[objIdx >= 0 ? objIdx : 0];
+    const label = q.claimable ? 'Claim reward' : q.name;
+    const targetRegion = obj?.kind === 'reach-region' ? obj.targetId : obj?.regionId ?? def.regionId;
+    if (targetRegion && targetRegion !== this.game.region.id) {
+      const gate = this.game.region.gates?.find((g) => g.toRegionId === targetRegion);
+      return gate ? { ...gate.pos, label, claimable: q.claimable } : null;
+    }
+    if (obj?.kind === 'reach-region') return { ...this.game.region.town.pos, label, claimable: q.claimable };
+    if (obj?.kind === 'earn-badge') {
+      const gym = this.game.region.gyms?.find((g) => REG.gym(g.gymId).badgeId === obj.targetId) ?? this.game.region.gyms?.[0];
+      return gym ? { ...gym.pos, label, claimable: q.claimable } : null;
+    }
+    if (obj?.kind === 'clear-dungeon') {
+      const dungeon = this.game.region.dungeons?.find((d) => d.dungeonId === obj.targetId) ?? this.game.region.dungeons?.[0];
+      return dungeon ? { ...dungeon.pos, label, claimable: q.claimable } : null;
+    }
+    if (obj?.kind === 'kill-echoes') {
+      const echo = this.game.region.echoSpawns?.[0];
+      return echo ? { ...echo.pos, label, claimable: q.claimable } : null;
+    }
+    if (obj?.kind === 'recruit-heroes') {
+      const spawn = this.game.region.heroSpawns[0];
+      return spawn ? { ...spawn.pos, label, claimable: q.claimable } : null;
+    }
+    if (obj?.kind === 'clear-raid') return { ...this.game.region.town.pos, label, claimable: q.claimable };
+    if (obj?.kind === 'clear-boss') return { ...this.game.region.shrine.pos, label, claimable: q.claimable };
+    const camp = this.game.region.camps[0];
+    return camp ? { ...camp.pos, label, claimable: q.claimable } : null;
+  }
+
+  private questMinimapMarkers(quests: QuestBoardEntry[]): { x: number; y: number; label: string; claimable: boolean }[] {
+    const seen = new Set<string>();
+    const out: { x: number; y: number; label: string; claimable: boolean }[] = [];
+    for (const q of quests) {
+      const marker = this.questMarkerFor(q);
+      if (!marker) continue;
+      const key = `${Math.round(marker.x)}:${Math.round(marker.y)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(marker);
+    }
+    return out;
+  }
+
+  private renderQuestTracker(): void {
+    if (!this.interfaceSettings().questTracker) {
+      this.questTracker.classList.add('hidden');
+      this.questTracker.innerHTML = '';
+      return;
+    }
+    const quests = this.trackedQuests();
+    if (quests.length === 0) {
+      this.questTracker.classList.add('hidden');
+      this.questTracker.innerHTML = '';
+      return;
+    }
+    const key = quests
+      .map((q) => `${q.id}:${q.status}:${q.objectives.map((o) => `${o.have}/${o.need}`).join(',')}`)
+      .join('|');
+    const now = performance.now();
+    if (!this.reducedMotion() && this.lastQuestTrackerKey && this.lastQuestTrackerKey !== key) this.questTrackerFlashUntil = now + 1400;
+    this.lastQuestTrackerKey = key;
+    const flash = now < this.questTrackerFlashUntil;
+    const rows = quests.map((q) => {
+      const objectives = q.objectives.map((obj) => {
+        const pct = obj.need > 0 ? Math.min(100, (obj.have / obj.need) * 100) : 100;
+        return `<div class="qt-obj"><span>${esc(obj.text)}</span><b>${obj.have}/${obj.need}</b><i><em style="width:${pct}%"></em></i></div>`;
+      }).join('');
+      const pinned = this.pinnedQuestIds.has(q.id);
+      const meta = q.claimable ? 'Ready to claim' : q.expiresIn ? `${q.expiresIn}s left` : q.region ?? q.kind;
+      return `<article class="qt-row ${q.claimable ? 'claimable' : ''}">
+        <button class="qt-pin ${pinned ? 'on' : ''}" data-pin-quest="${q.id}" title="${pinned ? 'Unpin quest' : 'Pin quest'}">${pinned ? '◆' : '◇'}</button>
+        <button class="qt-open" data-open-quest="${q.id}">
+          <strong>${esc(q.name)}</strong><em>${esc(meta)}</em>${objectives}
+        </button>
+      </article>`;
+    }).join('');
+    const html = `<div class="qt-card ${flash ? 'flash' : ''}">
+      <div class="qt-head"><span>Tracked Quests</span><button class="qt-journal" data-open-journal>Journal</button></div>
+      ${rows}
+    </div>`;
+    if (this.questTracker.innerHTML !== html) {
+      this.questTracker.innerHTML = html;
+      this.questTracker.querySelectorAll<HTMLElement>('[data-pin-quest]').forEach((el) => {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = el.dataset.pinQuest!;
+          if (this.pinnedQuestIds.has(id)) this.pinnedQuestIds.delete(id);
+          else this.pinnedQuestIds.add(id);
+          this.renderQuestTracker();
+        });
+      });
+      this.questTracker.querySelectorAll<HTMLElement>('[data-open-quest], [data-open-journal]').forEach((el) => {
+        el.addEventListener('click', () => this.toggleModal('journal'));
+      });
+    }
+    this.questTracker.classList.remove('hidden');
   }
 
   // ---------- party frames ----------
@@ -745,15 +1098,24 @@ export class Hud {
       const manaPct = u ? (u.stats.maxMana > 0 ? (u.mana / u.stats.maxMana) * 100 : 0) : rec.manaPct * 100;
       const dead = rec.respawnAt > g.sim.time;
       const deadIn = dead ? Math.ceil(rec.respawnAt - g.sim.time) : 0;
-      const partyTip = this.registerTip(`party-${i}`, buildHeroCard(def, { level: u ? u.level : rec.level }), { accent: def.palette[2] ?? 'var(--brass)' });
+      const respawnTotal = 15 + rec.level * 3;
+      const respawnPct = dead ? Math.max(0, Math.min(1, deadIn / respawnTotal)) : 0;
+      const swapKey = glyphForAction(g.settings, `swap-${i + 1}` as InputAction);
+      const partyTip = this.registerTip(`party-${i}`, buildHeroCard(def, { level: u ? u.level : rec.level }), {
+        accent: def.palette[2] ?? 'var(--brass)',
+        extra: [
+          `HP ${Math.ceil(u ? u.hp : hpPct)} / ${Math.ceil(u ? u.stats.maxHp : 100)} · Mana ${Math.ceil(u ? u.mana : manaPct)} / ${Math.ceil(u ? u.stats.maxMana : 100)}`,
+          dead ? `Respawns in ${deadIn}s` : `Swap: ${swapKey}`
+        ]
+      });
       html += `
-        <div class="party-frame ${active ? 'active' : ''} ${dead ? 'dead' : ''}" data-swap="${i}"${partyTip}>
-          <img src="${heroPortrait(def.palette, def.name[0], 72, def.silhouette)}" alt="">
+        <div class="party-frame ${active ? 'active' : ''} ${dead ? 'dead' : ''}" data-swap="${i}" style="--pf-accent:${def.palette[2] ?? 'var(--brass)'}; --respawn-deg:${(respawnPct * 360).toFixed(1)}deg"${partyTip}>
+          <span class="pf-portrait"><img src="${heroPortrait(def.palette, def.name[0], 72, def.silhouette)}" alt="">${dead ? `<b>${deadIn}</b>` : ''}</span>
           <div class="pf-info">
-            <div class="pf-name">${i + 1} ${def.name} <em>L${u ? u.level : rec.level}</em></div>
+            <div class="pf-name"><kbd>${esc(swapKey)}</kbd> ${def.name} <em>L${u ? u.level : rec.level}</em></div>
             <div class="bar hp"><div style="width:${hpPct}%"></div></div>
             <div class="bar mana"><div style="width:${manaPct}%"></div></div>
-            ${dead ? `<div class="pf-dead">${deadIn}s</div>` : ''}
+            ${u ? this.statusPipsHtml(u, 'party', 4) : ''}
           </div>
         </div>`;
     });
@@ -766,11 +1128,12 @@ export class Hud {
       const u = simUid !== undefined ? g.sim.unit(simUid) : undefined;
       const hpPct = u && u.alive ? (u.hp / u.stats.maxHp) * 100 : 0;
       html += `
-        <div class="party-frame creep">
-          <img src="${heroPortrait(def.palette, def.name[0], 48, def.silhouette)}" alt="">
+        <div class="party-frame creep" style="--pf-accent:${def.palette[2] ?? 'var(--brass)'}">
+          <span class="pf-portrait"><img src="${heroPortrait(def.palette, def.name[0], 48, def.silhouette)}" alt=""></span>
           <div class="pf-info">
             <div class="pf-name">${def.name} <em>${'★'.repeat(inst.star)}</em></div>
             <div class="bar hp"><div style="width:${hpPct}%"></div></div>
+            ${u ? this.statusPipsHtml(u, 'party', 3) : ''}
           </div>
         </div>`;
     }
@@ -783,6 +1146,17 @@ export class Hud {
   }
 
   // ---------- hero panel ----------
+
+  private abilityReadyFlash(key: string, cdLeft: number): boolean {
+    const prev = this.abilityCooldowns.get(key);
+    const now = performance.now();
+    if (prev !== undefined && prev > 0.05 && cdLeft <= 0.05) {
+      if (!this.reducedMotion()) this.abilityReadyUntil.set(key, now + 700);
+      this.game.audio.playUi?.('ready');
+    }
+    this.abilityCooldowns.set(key, cdLeft);
+    return now < (this.abilityReadyUntil.get(key) ?? 0);
+  }
 
   private renderHeroPanel(): void {
     const g = this.game;
@@ -812,17 +1186,20 @@ export class Hud {
       const noMana = mana > 0 && u.mana < mana;
       const passive = ['passive', 'aura', 'attack-modifier'].includes(a.def.targeting);
       const toggledOn = a.toggled;
+      const hotkey = glyphForAction(g.settings, `ability-${i + 1}` as InputAction);
+      const readyFlash = this.abilityReadyFlash(`${u.uid}:${i}`, cdLeft);
       const abTip = this.registerTip(`ab-${i}`, buildAbilityCard(a.def, a.level), {
         extra: [
           `Rank ${a.level}/${maxLevel}`,
-          a.level < maxLevel ? `Next rank: hero level ${nextReq}` : 'Max rank'
+          a.level < maxLevel ? `Next rank: hero level ${nextReq}` : 'Max rank',
+          noMana ? `Need ${Math.ceil(mana - u.mana)} more mana` : ''
         ]
       });
       abilitiesHtml += `
-        <div class="ab-slot ${a.level <= 0 ? 'unlearned' : ''} ${noMana ? 'nomana' : ''} ${passive ? 'passive' : ''} ${toggledOn ? 'toggled' : ''} ${canUpgrade ? 'upgradeable' : ''}"${abTip}>
+        <div class="ab-slot ${a.level <= 0 ? 'unlearned' : ''} ${noMana ? 'nomana' : ''} ${passive ? 'passive' : ''} ${toggledOn ? 'toggled' : ''} ${canUpgrade ? 'upgradeable' : ''} ${readyFlash ? 'ready-flash' : ''}"${abTip}>
           <img src="${abilityIcon(a.def)}" alt="">
-          ${cdLeft > 0 ? `<div class="cd" style="height:${cdPct}%"></div><span class="cd-num">${cdLeft.toFixed(cdLeft > 5 ? 0 : 1)}</span>` : ''}
-          <span class="hotkey">${passive ? '' : ABILITY_KEYS[i]}</span>
+          ${cdLeft > 0 ? `<div class="cd" style="--cd-deg:${(cdPct * 3.6).toFixed(1)}deg"></div><span class="cd-num">${cdLeft.toFixed(cdLeft > 5 ? 0 : 1)}</span>` : ''}
+          <span class="hotkey">${passive ? '' : esc(hotkey)}</span>
           <span class="ab-level">${a.level}/${maxLevel}</span>
           ${pendingSkillPoints > 0 && a.level < maxLevel ? `<button class="ab-plus" data-skill="${i}" ${canUpgrade ? '' : 'disabled'} title="${canUpgrade ? 'Spend a skill point' : `Requires hero level ${nextReq}`}">+</button>` : ''}
           ${mana > 0 ? `<span class="ab-mana">${Math.round(mana)}</span>` : ''}
@@ -833,8 +1210,9 @@ export class Hud {
     const equippedSaves = u.items.map((slot) => (slot ? ({ ...slot, id: slot.defId } as ItemSave) : null));
     u.items.forEach((it, i) => {
       const keyed = i < TUNING.activeItemSlots;
+      const hotkey = keyed ? glyphForAction(g.settings, `item-${i + 1}` as InputAction) : '·';
       if (!it) {
-        itemsHtml += `<div class="item-slot empty ${keyed ? '' : 'passive-slot'}"><span class="hotkey">${ITEM_KEYS[i]}</span></div>`;
+        itemsHtml += `<div class="item-slot empty ${keyed ? '' : 'passive-slot'}"><span class="hotkey">${esc(hotkey)}</span></div>`;
         return;
       }
       const idef = REG.item(it.defId);
@@ -856,9 +1234,10 @@ export class Hud {
       itemsHtml += `
         <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}" draggable="true" data-item-slot="${i}"${itemTip} style="border-color:${rarityColor(idef.rarity)};${gradeFrame}${qBorder}">
           <img src="${itemIcon(idef)}" alt="">
+          ${cdLeft > 0 ? `<div class="cd" style="--cd-deg:${Math.min(360, Math.max(0, cdLeft / Math.max(1, levelArr(idef.active?.cooldown, 1, cdLeft)) * 360)).toFixed(1)}deg"></div>` : ''}
           ${cdLeft > 0 ? `<span class="cd-num">${cdLeft.toFixed(cdLeft > 5 ? 0 : 1)}</span>` : ''}
           ${it.charges >= 0 ? `<span class="charges">${it.charges}</span>` : ''}
-          <span class="hotkey">${keyed && idef.active ? ITEM_KEYS[i] : ''}</span>
+          <span class="hotkey">${keyed && idef.active ? esc(hotkey) : ''}</span>
         </div>`;
     });
 
@@ -890,6 +1269,11 @@ export class Hud {
     const facetBadge = facet
       ? `<span class="facet-badge ${rec.echo.facetSwapUnlocked ? '' : 'locked'}" title="${esc(facet.description)}">Facet: ${esc(facet.name)}</span>`
       : '';
+    const xpText = xp.needed > 0
+      ? `${Math.floor(xp.current)} / ${xp.needed} XP · ${Math.max(0, Math.ceil(xp.needed - xp.current))} to L${u.level + 1}`
+      : 'Level cap';
+    const hpRegenTitle = `HP regen: base + flat ${fmtRegen(u.stats.hpRegen)}/s, max-HP ${fmtRegen((u.stats.maxHp * u.stats.hpRegenPctMax) / 100)}/s, total +${fmtRegen(regen.hp)}/s`;
+    const manaRegenTitle = `Mana regen: base + flat ${fmtRegen(u.stats.manaRegen)}/s, max-mana ${fmtRegen((u.stats.maxMana * u.stats.manaRegenPctMax) / 100)}/s, total +${fmtRegen(regen.mana)}/s`;
     const skillSpendHtml = pendingSkillPoints > 0
       ? `<div class="skill-points"><b>${pendingSkillPoints}</b> skill point${pendingSkillPoints === 1 ? '' : 's'} available
           ${talentPending ? '<button class="talent-btn inline" id="talent-open">Talent</button>' : ''}
@@ -902,13 +1286,17 @@ export class Hud {
     const heroTip = this.registerTip(`hero-active`, buildHeroCard(def, { level: u.level }), { accent: def.palette[2] ?? 'var(--brass)', extra: heroExtra });
     this.heroPanel.innerHTML = `
       <div class="hp-left">
-        <img class="portrait" src="${heroPortrait(def.palette, def.name[0], 72, def.silhouette)}" alt=""${heroTip}>
+        <button class="portrait-btn" id="character-open" title="Open character sheet">
+          <img class="portrait" src="${heroPortrait(def.palette, def.name[0], 72, def.silhouette)}" alt=""${heroTip}>
+          <span>Sheet</span>
+        </button>
         <div class="hp-id">
           <div class="hp-name">${def.name} <em>Lv ${u.level}</em></div>
           <div class="build-row">${facetBadge}<span class="talent-pips">${talentPips}</span></div>
-          <div class="bar hp big"><div style="width:${(u.hp / u.stats.maxHp) * 100}%"></div><span>${Math.ceil(u.hp)} / ${Math.ceil(u.stats.maxHp)}</span></div>
-          <div class="bar mana big"><div style="width:${u.stats.maxMana > 0 ? (u.mana / u.stats.maxMana) * 100 : 0}%"></div><span>${Math.ceil(u.mana)} / ${Math.ceil(u.stats.maxMana)}</span></div>
-          <div class="bar xp"><div style="width:${xp.pct * 100}%"></div></div>
+          <div class="bar hp big" title="${esc(hpRegenTitle)}"><div style="width:${(u.hp / u.stats.maxHp) * 100}%"></div><span>${Math.ceil(u.hp)} / ${Math.ceil(u.stats.maxHp)} · +${fmtRegen(regen.hp)}/s</span></div>
+          <div class="bar mana big" title="${esc(manaRegenTitle)}"><div style="width:${u.stats.maxMana > 0 ? (u.mana / u.stats.maxMana) * 100 : 0}%"></div><span>${Math.ceil(u.mana)} / ${Math.ceil(u.stats.maxMana)} · +${fmtRegen(regen.mana)}/s</span></div>
+          <div class="bar xp"><div style="width:${xp.pct * 100}%"></div><span>${xpText}</span></div>
+          ${this.statusPipsHtml(u, 'hero', 6)}
           ${skillSpendHtml}
           <div class="hp-stats">DMG ${Math.round(u.stats.damage)} · ARM ${u.stats.armor.toFixed(1)} · MS ${Math.round(u.stats.moveSpeed)} · HP +${fmtRegen(regen.hp)}/s · MP +${fmtRegen(regen.mana)}/s</div>
         </div>
@@ -916,6 +1304,7 @@ export class Hud {
       <div class="ab-row">${abilitiesHtml}</div>
       <div class="item-grid">${itemsHtml}</div>
     `;
+    this.heroPanel.querySelector('#character-open')?.addEventListener('click', () => this.toggleModal('character'));
     this.heroPanel.querySelector('#talent-open')?.addEventListener('click', () => this.toggleModal('talents'));
     this.heroPanel.querySelector('#attr-up')?.addEventListener('click', () => g.applyAttributePoint(g.activeIdx));
     this.heroPanel.querySelectorAll('[data-skill]').forEach((el) => {
@@ -955,7 +1344,8 @@ export class Hud {
       const t = g.toasts[this.shownToasts++];
       const el = document.createElement('div');
       el.className = `toast ${t.kind}`;
-      el.textContent = t.text;
+      const icon = t.kind === 'good' ? '◆' : t.kind === 'bad' ? '!' : t.kind === 'bark' ? '“' : 'i';
+      el.innerHTML = `<span class="toast-icon">${icon}</span><span>${esc(t.text)}</span>`;
       if (t.color) {
         el.style.borderLeft = `3px solid ${t.color}`;
         el.style.color = t.color;
@@ -968,6 +1358,38 @@ export class Hud {
       }, t.kind === 'bark' ? 6000 : 3500);
       while (this.toastCol.children.length > 6) this.toastCol.children[0].remove();
     }
+  }
+
+  private addKillfeed(ev: Extract<SimEvent, { t: 'death' }>): void {
+    const victim = this.game.sim.unit(ev.uid);
+    if (!victim) return;
+    const kind: KillfeedEntry['kind'] | null = victim.heroId || victim.renderHeroId
+      ? 'hero'
+      : (victim.visualScale ?? 1) > 1.25
+        ? 'boss'
+        : victim.elite
+          ? 'elite'
+          : null;
+    if (!kind) return;
+    const killer = this.game.sim.unit(ev.killer);
+    const text = killer ? `${killer.name} defeated ${victim.name}` : `${victim.name} fell`;
+    this.killfeed.unshift({ text, kind, at: performance.now() });
+    this.killfeed = this.killfeed.slice(0, 5);
+  }
+
+  private renderKillfeed(): void {
+    const now = performance.now();
+    this.killfeed = this.killfeed.filter((entry) => now - entry.at < 6500);
+    if (this.killfeed.length === 0) {
+      this.killfeedLane.classList.add('hidden');
+      this.killfeedLane.innerHTML = '';
+      return;
+    }
+    this.killfeedLane.classList.remove('hidden');
+    this.killfeedLane.innerHTML = this.killfeed.map((entry) => {
+      const age = (now - entry.at) / 6500;
+      return `<div class="kf-row ${entry.kind}" style="opacity:${Math.max(0.2, 1 - age).toFixed(2)}"><b>${entry.kind === 'boss' ? 'BOSS' : entry.kind === 'hero' ? 'HERO' : 'ELITE'}</b><span>${esc(entry.text)}</span></div>`;
+    }).join('');
   }
 
   // ---------- floaters (damage numbers etc.) ----------
@@ -1023,6 +1445,10 @@ export class Hud {
         case 'miss': {
           const u = g.sim.unit(ev.target);
           if (u) this.addFloater(u.pos.x, u.pos.y, 'MISS', 'missf');
+          break;
+        }
+        case 'death': {
+          this.addKillfeed(ev);
           break;
         }
         case 'bark': {
@@ -1269,7 +1695,7 @@ export class Hud {
 
   // ---------- modals ----------
 
-  toggleModal(kind: 'party' | 'shop' | 'menu' | 'talents' | 'journal' | 'codex' | 'services'): void {
+  toggleModal(kind: 'party' | 'shop' | 'menu' | 'talents' | 'journal' | 'codex' | 'character' | 'help' | 'services'): void {
     if (this.modalKind === kind) {
       this.closeModal();
       return;
@@ -1282,11 +1708,13 @@ export class Hud {
     if (kind === 'shop') this.renderShopModal();
     if (kind === 'menu') this.renderMenuModal();
     if (kind === 'talents') this.renderTalentModal();
+    if (kind === 'character') this.renderCharacterModal();
     if (kind === 'journal') {
       this.questGiverFocus = null;
       this.renderJournalModal();
     }
     if (kind === 'codex') this.renderCodexModal();
+    if (kind === 'help') this.renderHelpModal();
     if (kind === 'services') this.renderServicesModal();
   }
 
@@ -1307,6 +1735,111 @@ export class Hud {
         <div class="modal-body">${body}</div>
       </div>`;
     this.modal.querySelector('#modal-close')!.addEventListener('click', () => this.closeModal());
+  }
+
+  private renderHelpModal(): void {
+    const groups = new Map<string, string[]>();
+    for (const action of INPUT_ACTIONS) {
+      const meta = ACTION_META[action];
+      const rows = groups.get(meta.group) ?? [];
+      rows.push(`<div class="help-row"><kbd>${esc(glyphForAction(this.game.settings, action))}</kbd><span>${esc(meta.label)}</span></div>`);
+      groups.set(meta.group, rows);
+    }
+    const sections = [...groups.entries()]
+      .map(([group, rows]) => `<section class="help-section"><h3>${esc(group)}</h3>${rows.join('')}</section>`)
+      .join('');
+    this.modalShell(
+      'Controls Help',
+      `<div class="help-grid">
+        ${sections}
+        <section class="help-section help-notes">
+          <h3>Mouse</h3>
+          <div class="help-row"><kbd>RMB</kbd><span>Move, attack, or interact with hovered targets</span></div>
+          <div class="help-row"><kbd>Shift</kbd><span>Queue move, attack, ability, and item orders</span></div>
+          <div class="help-row"><kbd>Alt+Map</kbd><span>Ping a minimap point when map pings are available</span></div>
+        </section>
+      </div>`
+    );
+  }
+
+  private renderCharacterModal(): void {
+    const g = this.game;
+    const rec = g.party[g.activeIdx];
+    const u = rec?.unit;
+    if (!rec || !u) {
+      this.closeModal();
+      return;
+    }
+    const def = REG.hero(rec.heroId);
+    const s = u.stats;
+    const regen = liveRegen(s);
+    const physReduction = (1 - armorMultiplier(s.armor)) * 100;
+    const attacksPerSec = 1 / Math.max(0.1, s.attackInterval);
+    const pct = (value: number) => `${Math.round(value * 10) / 10}%`;
+    const signed = (value: number, suffix = '') => `${value >= 0 ? '+' : ''}${Math.round(value * 10) / 10}${suffix}`;
+    const row = (label: string, value: string, note = '') => `<div class="cs-row"><span>${label}</span><b>${value}</b>${note ? `<em>${note}</em>` : ''}</div>`;
+    const section = (title: string, rows: string) => `<section class="cs-section"><h3>${title}</h3>${rows}</section>`;
+    const attrName = { str: 'Strength', agi: 'Agility', int: 'Intelligence', uni: 'Universal' }[def.attribute];
+    const attrCards = (['str', 'agi', 'int'] as const).map((a) => {
+      const primary = def.attribute === a || def.attribute === 'uni';
+      const note = a === 'str' ? 'HP + regen' : a === 'agi' ? 'armor + attack speed' : 'mana + regen';
+      return `<div class="cs-attr ${a} ${primary ? 'primary' : ''}"><b>${a.toUpperCase()}</b><span>${Math.round(s[a])}</span><em>${note}</em></div>`;
+    }).join('');
+    const pickedTalents = def.talents.map((tier, idx) => {
+      const pick = rec.talentPicks[idx];
+      const unlocked = rec.echo.talentTierUnlocks[idx];
+      if (pick === null) return `<li><span>Lv ${tier.level}</span><em>Unpicked</em></li>`;
+      const talent = tier.options[pick];
+      const details = talentDetailLines(talent, def).join(' · ');
+      return `<li><span>Lv ${tier.level}</span><b>${esc(talent.name)}${unlocked ? ' + echo' : ''}</b>${details ? `<em>${esc(details)}</em>` : ''}</li>`;
+    }).join('');
+    const facet = def.facets[rec.facetIdx];
+    this.modalShell(
+      `${def.name} — Character Sheet`,
+      `
+      <div class="char-sheet">
+        <section class="cs-hero">
+          <img src="${heroPortrait(def.palette, def.name[0], 96, def.silhouette)}" alt="">
+          <div>
+            <h3>${esc(def.title)}</h3>
+            <p>${esc(attrName)} · ${def.roles.map(esc).join(' / ')} · Level ${u.level}</p>
+            <p>${facet ? `<b>Facet:</b> ${esc(facet.name)} — ${esc(facet.description)}` : 'No facet selected.'}</p>
+            ${this.statusPipsHtml(u, 'sheet', 8)}
+          </div>
+        </section>
+        <section class="cs-attrs">${attrCards}</section>
+        <div class="cs-grid">
+          ${section('Offense', [
+            row('Attack damage', Math.round(s.damage).toString(), 'base + primary + gear'),
+            row('Attack speed', `${attacksPerSec.toFixed(2)}/s`, `${s.attackInterval.toFixed(2)}s interval`),
+            row('Attack range', Math.round(s.attackRange).toString()),
+            row('Cast range', signed(s.castRangeBonus)),
+            row('Spell amp', pct(s.spellAmpPct)),
+            row('Lifesteal', pct(s.lifestealPct))
+          ].join(''))}
+          ${section('Defense', [
+            row('Armor', s.armor.toFixed(1), `${pct(physReduction)} phys reduction`),
+            row('Magic resist', pct(s.magicResistPct)),
+            row('Status resist', pct(s.statusResistPct)),
+            row('Evasion', pct(s.evasionPct)),
+            row('Max HP', Math.round(s.maxHp).toString()),
+            row('HP regen', `+${fmtRegen(regen.hp)}/s`, `${fmtRegen(s.hpRegen)} flat + ${fmtRegen((s.maxHp * s.hpRegenPctMax) / 100)} max%`)
+          ].join(''))}
+          ${section('Resources & Utility', [
+            row('Max mana', Math.round(s.maxMana).toString()),
+            row('Mana regen', `+${fmtRegen(regen.mana)}/s`, `${fmtRegen(s.manaRegen)} flat + ${fmtRegen((s.maxMana * s.manaRegenPctMax) / 100)} max%`),
+            row('Move speed', Math.round(s.moveSpeed).toString()),
+            row('Vision bonus', signed(u.summary.mods.visionPct ?? 0, '%')),
+            row('Swap cooldown', signed(s.swapCdReductionPct, '%')),
+            row('Stamina bonus', signed(s.staminaBonus))
+          ].join(''))}
+          ${section('Talents & Echo', `
+            <ul class="cs-talents">${pickedTalents}</ul>
+            <div class="cs-row"><span>Echo kills</span><b>${rec.echo.kills}</b><em>${rec.echo.talentTierUnlocks.filter(Boolean).length}/4 echo branches</em></div>
+          `)}
+        </div>
+      </div>`
+    );
   }
 
   // --- party / creeps ---
@@ -2721,11 +3254,12 @@ export class Hud {
           : '';
         const source = [q.giver ?? tag, q.region].filter(Boolean).join(' · ');
         const flavor = q.dialogue?.[0] ? `<p class="jr-flavor dim">&ldquo;${q.dialogue[0]}&rdquo;</p>` : '';
+        const pinned = this.pinnedQuestIds.has(q.id);
         return `
           <div class="journal-row">
             <div class="jr-stage">${stateLabel}</div>
             <div class="jr-main">
-              <b>${q.name}</b> <em>${source}</em>
+              <b>${q.name}</b> <em>${source}</em> <button class="btn tiny ${pinned ? 'on' : ''}" data-pin-quest="${q.id}">${pinned ? 'Pinned' : 'Track'}</button>
               <p>${q.summary}</p>
               ${flavor}
               <span>${objs}</span>
@@ -2767,6 +3301,14 @@ export class Hud {
     this.modal.querySelectorAll<HTMLElement>('[data-claim-quest]').forEach((el) => {
       el.addEventListener('click', () => {
         if (this.game.claimQuest(el.dataset.claimQuest!, el.dataset.claimChoice)) this.renderJournalModal();
+      });
+    });
+    this.modal.querySelectorAll<HTMLElement>('[data-pin-quest]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.pinQuest!;
+        if (this.pinnedQuestIds.has(id)) this.pinnedQuestIds.delete(id);
+        else this.pinnedQuestIds.add(id);
+        this.renderJournalModal();
       });
     });
   }
@@ -3001,6 +3543,60 @@ export class Hud {
 
   // --- menu (save/load/settings) ---
 
+  private controlsSettingsHtml(): string {
+    const groups = ['Movement', 'Abilities', 'Items', 'Party', 'Interface'] as const;
+    return groups.map((group) => {
+      const rows = INPUT_ACTIONS
+        .filter((action) => ACTION_META[action].group === group)
+        .map((action) => {
+          const meta = ACTION_META[action];
+          const locked = !canRebindAction(action);
+          return `
+            <div class="keybind-row ${locked ? 'locked' : ''}">
+              <span>${esc(meta.label)}</span>
+              <button class="btn tiny keybind-key" data-rebind="${action}" ${locked ? 'disabled' : ''}>${esc(glyphForAction(this.game.settings, action))}</button>
+            </div>`;
+        })
+        .join('');
+      return `<section class="keybind-group"><h4>${group}</h4>${rows}</section>`;
+    }).join('');
+  }
+
+  private bindControlsSettings(): void {
+    const g = this.game;
+    this.modal.querySelectorAll<HTMLElement>('[data-rebind]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const action = el.dataset.rebind as InputAction | undefined;
+        if (!action || !canRebindAction(action)) return;
+        const oldText = el.textContent ?? '';
+        el.textContent = 'Press a key...';
+        el.classList.add('listening');
+        const capture = (e: KeyboardEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          window.removeEventListener('keydown', capture, true);
+          const key = keyEventToBinding(e);
+          if (key === 'escape') {
+            el.textContent = oldText;
+            el.classList.remove('listening');
+            return;
+          }
+          const result = rebindAction(g.settings, action, key);
+          if (!result.ok) {
+            const conflict = result.conflict ? ACTION_META[result.conflict].label : result.reason ?? 'Invalid key';
+            g.msg(`Key conflict: ${conflict}`, 'bad');
+          }
+          this.renderMenuModal();
+        };
+        window.addEventListener('keydown', capture, true);
+      });
+    });
+    this.modal.querySelector('#reset-keybinds')?.addEventListener('click', () => {
+      resetKeyBindings(g.settings);
+      this.renderMenuModal();
+    });
+  }
+
   private renderMenuModal(): void {
     const g = this.game;
     const slots = [0, 1, 2]
@@ -3015,6 +3611,7 @@ export class Hud {
       })
       .join('');
     const auto = Game_slotInfo('auto');
+    const ui = this.interfaceSettings();
 
     this.modalShell(
       'Menu',
@@ -3028,12 +3625,30 @@ export class Hud {
           </div>
         </section>
         <section>
-          <h3>Options</h3>
+          <h3>Controls</h3>
           <label class="opt-row"><input type="checkbox" id="opt-quickcast" ${g.settings.quickcast ? 'checked' : ''}> Quick-cast at cursor</label>
+          <div class="keybind-panel">${this.controlsSettingsHtml()}</div>
+          <button class="btn small" id="reset-keybinds">Reset controls to defaults</button>
+          <h3>Interface</h3>
+          <label class="opt-row">UI scale <input type="range" id="opt-ui-scale" min="0.75" max="1.5" step="0.05" value="${ui.uiScale}"></label>
+          <label class="opt-row">Text size <input type="range" id="opt-text-scale" min="1" max="1.3" step="0.05" value="${ui.textScale}"></label>
+          <label class="opt-row">HUD opacity <input type="range" id="opt-hud-opacity" min="0.55" max="1" step="0.05" value="${ui.hudOpacity}"></label>
+          <label class="opt-row"><input type="checkbox" id="opt-minimap" ${g.settings.minimap !== false ? 'checked' : ''}> Show minimap</label>
+          <label class="opt-row">Minimap size <input type="range" id="opt-minimap-size" min="120" max="240" step="10" value="${ui.minimapSize}"></label>
+          <label class="opt-row">Minimap opacity <input type="range" id="opt-minimap-opacity" min="0.35" max="1" step="0.05" value="${ui.minimapOpacity}"></label>
+          <label class="opt-row"><input type="checkbox" id="opt-help-overlay" ${ui.helpOverlay ? 'checked' : ''}> Show help button</label>
+          <label class="opt-row"><input type="checkbox" id="opt-quest-tracker" ${ui.questTracker ? 'checked' : ''}> Show quest tracker</label>
+          <label class="opt-row">Tracked quests
+            <select id="opt-quest-tracker-max">
+              ${([1, 2, 3] as const).map((v) => `<option value="${v}"${ui.questTrackerMax === v ? ' selected' : ''}>${v}</option>`).join('')}
+            </select>
+          </label>
+          <h3>Options</h3>
           <label class="opt-row"><input type="checkbox" id="opt-resonance" ${g.settings.resonance ? 'checked' : ''}> Resonance mode (micro/raids)</label>
           <label class="opt-row"><input type="checkbox" id="opt-mute" ${g.settings.audio.muted ? 'checked' : ''}> Mute all audio</label>
           <label class="opt-row">Master volume <input type="range" id="opt-master-volume" min="0" max="1" step="0.05" value="${g.settings.audio.master}"></label>
           <label class="opt-row">SFX volume <input type="range" id="opt-sfx-volume" min="0" max="1" step="0.05" value="${g.settings.audio.sfx}"></label>
+          <label class="opt-row">UI volume <input type="range" id="opt-ui-volume" min="0" max="1" step="0.05" value="${g.settings.audio.ui ?? g.settings.audio.sfx}"></label>
           <label class="opt-row">Voice volume <input type="range" id="opt-voice-volume" min="0" max="1" step="0.05" value="${g.settings.audio.voice}"></label>
           <label class="opt-row">Stinger volume <input type="range" id="opt-stinger-volume" min="0" max="1" step="0.05" value="${g.settings.audio.stinger}"></label>
           <label class="opt-row">Music volume <input type="range" id="opt-music-volume" min="0" max="1" step="0.05" value="${g.settings.audio.music}"></label>
@@ -3133,8 +3748,41 @@ export class Hud {
         }
       });
     });
+    this.bindControlsSettings();
     this.modal.querySelector('#opt-quickcast')?.addEventListener('change', (e) => {
       g.settings.quickcast = (e.target as HTMLInputElement).checked;
+    });
+    this.modal.querySelector('#opt-ui-scale')?.addEventListener('input', (e) => {
+      this.interfaceSettings().uiScale = clampNum(Number((e.target as HTMLInputElement).value), 0.75, 1.5);
+      this.applyInterfaceSettings();
+    });
+    this.modal.querySelector('#opt-text-scale')?.addEventListener('input', (e) => {
+      this.interfaceSettings().textScale = clampNum(Number((e.target as HTMLInputElement).value), 1, 1.3);
+      this.applyInterfaceSettings();
+    });
+    this.modal.querySelector('#opt-hud-opacity')?.addEventListener('input', (e) => {
+      this.interfaceSettings().hudOpacity = clampNum(Number((e.target as HTMLInputElement).value), 0.55, 1);
+      this.applyInterfaceSettings();
+    });
+    this.modal.querySelector('#opt-minimap')?.addEventListener('change', (e) => {
+      g.settings.minimap = (e.target as HTMLInputElement).checked;
+    });
+    this.modal.querySelector('#opt-minimap-size')?.addEventListener('input', (e) => {
+      this.interfaceSettings().minimapSize = clampNum(Number((e.target as HTMLInputElement).value), 120, 240);
+      this.applyInterfaceSettings();
+    });
+    this.modal.querySelector('#opt-minimap-opacity')?.addEventListener('input', (e) => {
+      this.interfaceSettings().minimapOpacity = clampNum(Number((e.target as HTMLInputElement).value), 0.35, 1);
+      this.applyInterfaceSettings();
+    });
+    this.modal.querySelector('#opt-help-overlay')?.addEventListener('change', (e) => {
+      this.interfaceSettings().helpOverlay = (e.target as HTMLInputElement).checked;
+    });
+    this.modal.querySelector('#opt-quest-tracker')?.addEventListener('change', (e) => {
+      this.interfaceSettings().questTracker = (e.target as HTMLInputElement).checked;
+    });
+    this.modal.querySelector('#opt-quest-tracker-max')?.addEventListener('change', (e) => {
+      this.interfaceSettings().questTrackerMax = Math.round(clampNum(Number((e.target as HTMLSelectElement).value), 1, 3));
     });
     this.modal.querySelector('#opt-resonance')?.addEventListener('change', (e) => {
       g.setResonanceEnabled((e.target as HTMLInputElement).checked);
@@ -3149,6 +3797,10 @@ export class Hud {
     });
     this.modal.querySelector('#opt-sfx-volume')?.addEventListener('input', (e) => {
       g.settings.audio.sfx = Number((e.target as HTMLInputElement).value);
+      g.audio.setSettings(g.settings);
+    });
+    this.modal.querySelector('#opt-ui-volume')?.addEventListener('input', (e) => {
+      g.settings.audio.ui = Number((e.target as HTMLInputElement).value);
       g.audio.setSettings(g.settings);
     });
     this.modal.querySelector('#opt-voice-volume')?.addEventListener('input', (e) => {

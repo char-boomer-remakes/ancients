@@ -173,6 +173,13 @@ export class Unit {
    * sim never reads this; only the renderer's hero-model path does.
    */
   renderHeroId?: string;
+  /**
+   * Render-only silhouette multiplier (OVERWORLD_PLANNING §5.1). Lets a boss
+   * render at its resolved world-size height while the sim keeps the source
+   * hero's stats and collision. The sim never reads this; only the renderer's
+   * `unitVisualSpec` scales the rig by it.
+   */
+  visualScale?: number;
   elementalShield?: { element: ActiveElement; hp: number; maxHp: number; weakTo: ActiveElement[]; weakMult: number; vulnerableUntil: number };
 
   attribute: Attribute;

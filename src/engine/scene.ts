@@ -5,7 +5,7 @@ import type { Unit } from '../core/unit';
 import { REG } from '../core/registry';
 import { buildTerrain, type TerrainInfo } from './terrain';
 import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, attachSignatureItemWeapon, buildUnitRig, buildSelectionRing, mountHeroModel, recolorToPalette, type UnitRig } from './models';
-import { HeroAssetLoader, heroAssetEntry, creepCreatureUrl, ENABLED_HOLDOUT_MODELS, heroBaseId, holdoutSignatureUrl, itemWeaponGlbUrl } from './assets';
+import { HeroAssetLoader, heroAssetEntry, creepCreatureUrl, BESPOKE_HERO_MODELS, ENABLED_HOLDOUT_MODELS, heroBaseId, holdoutSignatureUrl, itemWeaponGlbUrl } from './assets';
 import { animateRig, applyCinematicGesture, newAnimState, type AnimState } from './animator';
 import { loadVfxBeamRamp, loadVfxTextureAtlas, VfxManager } from './vfx';
 import type { CinematicView } from './cinematic';
@@ -1679,6 +1679,15 @@ export class GameScene {
     }
     if (!sil) sil = { build: 'biped', scale: 1 };
     if (!palette) palette = ['#888899', '#666677', '#aaaabb'];
+    // §5.1: a boss renders at its resolved world height. `visualScale` is render-
+    // only, so clone the (shared REG) silhouette before lifting its scale. Boss
+    // units without a precise per-unit lift (raid arena) fall back to the tuning
+    // default; everything else renders at 1.0×.
+    const visualScale = u.visualScale ?? (u.ctrl.kind === 'boss' ? TUNING.bossVisualScale : 1);
+    if (visualScale !== 1) {
+      sil = { ...sil, scale: (sil.scale ?? 1) * visualScale };
+      id = `${id}@${visualScale}`;
+    }
     return { sil, palette, key: `${u.kind}:${id}:${sil.build}:${palette.join('/')}` };
   }
 
@@ -1743,6 +1752,7 @@ export class GameScene {
     };
     const assetEntry = heroLike ? heroAssetEntry(renderHeroId) : null;
     const isHoldoutReplacement = !!(heroLike && renderHeroId && ENABLED_HOLDOUT_MODELS.has(renderHeroId));
+    const isBespokeHeroModel = !!(heroLike && renderHeroId && BESPOKE_HERO_MODELS.has(renderHeroId));
     if (assetEntry) {
       void this.heroAssets.loadHero(assetEntry).then((asset) => {
         if (asset && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
@@ -1750,7 +1760,7 @@ export class GameScene {
           // WS-A within-cohort variation: stretch the shared base to this hero's
           // proportions and layer its innate identity gear over the authored body,
           // before items so the weapon counter-scale reads the final model scale.
-          if (!isHoldoutReplacement) applyAuthoredSilhouette(rig, renderHeroId!, palette);
+          if (!isHoldoutReplacement && !isBespokeHeroModel) applyAuthoredSilhouette(rig, renderHeroId!, palette);
           // WS-B: re-apply worn items now that sockets resolved, so the weapon hangs
           // off the authored hand bone instead of the hidden procedural one.
           applyItemAppearances(rig, this.itemAppearancesFor(u));
