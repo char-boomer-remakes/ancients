@@ -88,6 +88,30 @@ export function planUnitCombo(sim: Sim, u: Unit, focus: Unit): ComboPlan | null 
     }
   }
 
+  // §4 depth: deeper AI commits to the full enabler→amplifier→payoff chain,
+  // budgeting mana and reach across all three before spending the enabler.
+  if (comboChainLen(u) >= 3) {
+    const enablers = setupSteps.filter((c) => c.role === 'enabler');
+    const amplifiers = setupSteps.filter((c) => c.role === 'amplifier');
+    for (const enabler of enablers) {
+      const reachBonus = enabler.initiationReach;
+      if (!canReachStep(u, focus, enabler, 0)) continue;
+      for (const amp of amplifiers) {
+        if (sameAction(enabler, amp)) continue;
+        if (!canReachStep(u, focus, amp, reachBonus)) continue;
+        for (const payoff of payoffs) {
+          if (sameAction(enabler, payoff) || sameAction(amp, payoff)) continue;
+          if (!canReachStep(u, focus, payoff, reachBonus)) continue;
+          if (!canPayPlan(u, [enabler, amp, payoff])) continue;
+          const discounted = payoff.score * TUNING.ai.comboWeight * Math.pow(TUNING.ai.combo.stepDiscount, 2);
+          const setupValue = amp.score * 0.28 + enabler.score * 0.18;
+          const plan = buildPlan([enabler, amp, payoff], focus.uid, discounted + setupValue);
+          if (plan) consider(plan);
+        }
+      }
+    }
+  }
+
   plans.sort((a, b) => b.score - a.score || planTieKey(a).localeCompare(planTieKey(b)));
   const best = plans[0];
   return best && best.score >= TUNING.ai.combo.minScore ? best : null;
@@ -296,6 +320,11 @@ function itemComboScore(u: Unit, focus: Unit, def: ItemDef, role: ComboStep['rol
   const field = arch.has('field') ? 0.15 : 0;
   const depth = Math.max(0, (u.ctrl.aiDepth ?? TUNING.ai.bossAiDepth) - TUNING.ai.depthRefAiDepth) * 0.1;
   return base + roleBonus + initiation + lockdown + field + depth;
+}
+
+function comboChainLen(u: Unit): number {
+  const depth = u.ctrl.aiDepth ?? TUNING.ai.bossAiDepth;
+  return depth >= TUNING.ai.combo.tripleChainMinDepth ? 3 : 2;
 }
 
 function canPayPlan(u: Unit, steps: ComboCandidate[]): boolean {

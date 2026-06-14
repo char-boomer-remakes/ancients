@@ -86,10 +86,28 @@ export const TUNING = {
       planManaMargin: 0.05,     // plan-level budget may dip this far below the per-cast floor
       nextStepBonus: 1.35,      // raise the order that advances the active single-unit plan
       holdPayoffPenalty: 0.42,  // suppress payoff while its setup/amplifier is ready first
-      minScore: 1.05
+      minScore: 1.05,
+      // §4 depth: shallow AI plays two-step combos; at/above this ai-depth the
+      // planner assembles the full enabler→amplifier→payoff chain (nightmare+ tiers).
+      tripleChainMinDepth: 0.7
     },
     ultHoldDiscount: 0.45,      // AoE-ult discount slope below holdClusterMin (scaled by depth)
     ultHoldFloor: 0.4,          // ult-hold never discounts an ult below this multiplier
+    // AUTOBATTLER_OVERHAUL §6.3: archetype-aware casting discipline, generalized
+    // from the boss's cluster-holding to every unit. All gentle, additive nudges.
+    abilityArchetype: {
+      // teamfight-ult / cluster-nuke held below the cluster threshold, at ALL depths
+      // (not just nightmare+). Discount = max(floor, 1 - slope * effectiveDepth).
+      holdSlope: 0.4,            // discount slope below holdClusterMin
+      teamfightUltFloor: 0.45,   // a teamfight ult is never discounted below this
+      clusterNukeFloor: 0.6,     // a cluster nuke holds more softly than an arena ult
+      // single-lockdown / interrupt: redirect a hard disable onto an enemy that is
+      // mid-channel (a `channel` archetype paying out), and reward the interrupt.
+      channelInterruptBonus: 0.9,
+      channelInterruptRange: 1100,
+      // a friendly channeler is a higher-priority save target (protect the channel).
+      friendlyChannelSaveBonus: 0.5
+    },
     depthRefAiDepth: 0.45,      // baseline (normal-tier) depth for depth-scaled behaviors
     // §5.7: how strongly extra ai-depth past the baseline sharpens mana discipline and combos.
     depthDisciplineGain: 0.6,

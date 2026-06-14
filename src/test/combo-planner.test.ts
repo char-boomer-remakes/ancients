@@ -3,6 +3,7 @@ import { registerAllContent } from '../data';
 import { setupMacroSim } from '../core/macro';
 import { planTeamCombos, planUnitCombo } from '../core/combo-planner';
 import { chooseUtilityOrder } from '../core/utility';
+import { TUNING } from '../data/tuning';
 import type { AbilityDef, MacroHeroSetup } from '../core/types';
 import type { Unit } from '../core/unit';
 
@@ -88,6 +89,23 @@ describe('single-unit combo planner', () => {
     sim.rebuildSpatial();
 
     expect(planUnitCombo(sim, hero, focus)).toBeNull();
+  });
+
+  it('assembles the full enabler-amplifier-payoff chain only at high ai depth', () => {
+    const { sim, hero, focus } = simWith([{ heroId: 'zeus', level: 18, items: ['rod-of-atos', 'veil-of-discord', 'dagon'] }]);
+    installAbilities(hero, []);
+    hero.pos = { x: 2000, y: 2000 };
+    focus.pos = { x: 2300, y: 2000 };
+    hero.mana = hero.stats.maxMana;
+    sim.rebuildSpatial();
+
+    hero.ctrl.aiDepth = TUNING.bossTierAiDepth.normal;
+    expect(planUnitCombo(sim, hero, focus)?.steps).toHaveLength(2);
+
+    hero.ctrl.aiDepth = TUNING.bossTierAiDepth.hell;
+    const deep = planUnitCombo(sim, hero, focus);
+    expect(deep?.steps.map((s) => s.role)).toEqual(['enabler', 'amplifier', 'payoff']);
+    expect(deep?.nextStep).toMatchObject({ role: 'enabler', slot: 0 });
   });
 
   it('replays identical plans for identical seeds and state', () => {
