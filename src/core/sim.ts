@@ -214,7 +214,7 @@ export class Sim {
 
   // ---------- spawning ----------
 
-  spawnHero(def: HeroDef, opts: { team: Team; pos: Vec2; level?: number; ctrl: Unit['ctrl']; skillOrder?: number[] }): Unit {
+  spawnHero(def: HeroDef, opts: { team: Team; pos: Vec2; level?: number; ctrl: Unit['ctrl']; skillOrder?: number[]; abilityLevels?: number[] }): Unit {
     const u = new Unit({
       kind: 'hero',
       team: opts.team,
@@ -229,7 +229,8 @@ export class Sim {
     u.animProfile = def.animProfile;
     u.barks = def.barks;
     u.setupHeroAbilities(def);
-    u.autoLevelAbilities(opts.skillOrder ?? def.skillOrder);
+    if (opts.abilityLevels) u.setAbilityLevels(opts.abilityLevels);
+    else u.autoLevelAbilities(opts.skillOrder ?? def.skillOrder);
     u.ctrl = opts.ctrl;
     u.bounty = { xp: 100 + (opts.level ?? 1) * 40, gold: 80 + (opts.level ?? 1) * 25 };
     u.refresh(this.time);
@@ -254,12 +255,27 @@ export class Sim {
 
   spawnSummon(spec: SummonSpec, owner: Unit, pos: Vec2, ctx: EffectCtx): Unit {
     const lifetime = typeof spec.lifetime === 'number' ? spec.lifetime : levelArr(ctx.values?.[spec.lifetime], ctx.level, 30);
+    this.enforceOwnerSummonCeiling(owner, spec);
     const u = makeSummonUnit(spec, { owner, pos, now: this.time });
     u.lifetimeUntil = this.time + lifetime;
     u.ctrl = spec.cannotAttack ? { kind: 'ward' } : { kind: 'creep', followOwner: true };
     this.addUnit(u);
     this.events.emit({ t: 'summon', uid: u.uid, pos: { ...pos } });
     return u;
+  }
+
+  private enforceOwnerSummonCeiling(owner: Unit, spec: SummonSpec): void {
+    const isIllusion = /illusion|image|clone|double|replicate/i.test(`${spec.id} ${spec.name}`);
+    const cap = isIllusion ? TUNING.scaleCeilings.illusions : TUNING.scaleCeilings.summons;
+    const owned = this.unitsArr
+      .filter((u) => u.alive && u.ownerUid === owner.uid && /illusion|image|clone|double|replicate/i.test(`${u.creepId ?? ''} ${u.name}`) === isIllusion)
+      .sort((a, b) => a.uid - b.uid);
+    while (owned.length >= cap) {
+      const retire = owned.shift();
+      if (!retire) break;
+      this.killUnit(retire, null, true);
+      this.removeUnit(retire.uid);
+    }
   }
 
   // ---------- orders ----------
@@ -316,8 +332,9 @@ export class Sim {
     if (!ready.ok) return;
 
     const active = def.active;
+    const values = it.activeOverride?.values ?? active.values;
     if (active.manaCost) u.mana -= active.manaCost[0];
-    it.cooldownUntil = this.time + (active.cooldown ? active.cooldown[0] : 0);
+    it.cooldownUntil = this.time + (it.activeOverride?.cooldown ?? (active.cooldown ? active.cooldown[0] : 0));
     let chargesConsumed = 0;
     if (def.consumesAllCharges) {
       chargesConsumed = Math.max(0, it.charges);
@@ -328,12 +345,13 @@ export class Sim {
       if (it.charges === 0 && def.tier === 'consumable') {
         u.items[invSlot] = null;
         u.markStatsDirty();
+        u.markVisualDirty();
       }
     }
 
     const ctx: EffectCtx = {
       defId: `item:${def.id}`,
-      values: active.values,
+      values,
       level: 1,
       piercesImmunity: active.piercesImmunity,
       vfx: active.vfx,
@@ -341,6 +359,21 @@ export class Sim {
     };
     this.events.emit({ t: 'item-used', uid: u.uid, itemId: def.id });
     this.events.emit({ t: 'cast', uid: u.uid, abilityId: `item:${def.id}`, vfx: active.vfx, target: target?.uid, point, sound: soundForAbility(active), timbre: u.animProfile?.voiceTimbre });
+    if (active.channel) {
+      const durationRef = active.channel.duration;
+      const duration = typeof durationRef === 'number' ? durationRef : levelArr(values?.[durationRef], 1, 3);
+      const interval = active.channel.tick?.interval ?? 0.5;
+      u.channel = {
+        source: 'item',
+        slot: invSlot,
+        until: this.time + duration,
+        nextTickAt: this.time + interval,
+        interval,
+        targetUid: target?.uid,
+        point: point ? { ...point } : undefined
+      };
+      this.events.emit({ t: 'status-apply', uid: u.uid, status: 'buff', duration });
+    }
     if (active.effects) execEffects(this, u, ctx, active.effects, { target, point });
     breakInvis(this, u);
   }

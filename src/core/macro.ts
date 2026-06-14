@@ -190,9 +190,10 @@ function spawnConfiguredHero(
   }
   for (const itemId of h.items ?? []) {
     const slot = u.items.findIndex((s) => s === null);
-    if (slot >= 0) u.items[slot] = makeItemState(REG.item(itemId));
+    if (slot >= 0) u.items[slot] = makeItemState(REG.item(itemId), h.itemOverrides?.[itemId]);
   }
   u.markStatsDirty();
+  u.markVisualDirty();
   u.refresh(0);
   u.hp = u.stats.maxHp;
   u.mana = u.stats.maxMana;
@@ -257,6 +258,7 @@ function runBattleToResult(sim: Sim, maxSec: number, hooks: BattleHooks = {}): M
       const item = u.items[slot]!;
       u.items[slot] = null;
       u.markStatsDirty();
+      u.markVisualDirty();
       u.refresh(sim.time);
       const taker = nearestLivingEnemyHero(sim, u);
       if (taker) {
@@ -264,6 +266,7 @@ function runBattleToResult(sim: Sim, maxSec: number, hooks: BattleHooks = {}): M
         if (free >= 0) {
           taker.items[free] = item;
           taker.markStatsDirty();
+          taker.markVisualDirty();
           taker.refresh(sim.time);
         }
       }

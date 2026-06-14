@@ -47,13 +47,14 @@ import { higherDungeonTier, migratePhase6Save } from '../core/phase6';
 import { dungeonDailySeed, dungeonWeeklySeed } from '../core/dungeon';
 import { type QualityTier } from '../engine/performance';
 import { mergeCreeps, newCreepInstanceId, validateEntourage } from '../core/capture';
-import { computeBuyPlan, executeBuy, itemSaveOf, itemStateFromSave, sellValue, sortInventory } from '../core/items';
+import { computeBuyPlan, executeBuy, itemReady, itemSaveOf, itemStateFromSave, sellValue, sortInventory } from '../core/items';
 import { runRaidBattle, runRaidEncounter, runMacroBattle, type RaidEncounterResult } from '../core/macro';
 import { ELITE_DRAFT } from '../data/drafts';
 import { resonanceMods } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
+import { abilityMaxLevel, abilityRankRequiredHeroLevel, autoAbilityLevels, canLearnAbilityRank, normalizeAbilityLevels } from '../core/values';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, NeutralStashEntry, Order, QuestProgress, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, Vec2 } from '../core/types';
+import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, EchoSpawnDef, GambitRule, GameSave, GraphicsSettings, GroundItemDrop, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, NeutralStashEntry, Order, QuestProgress, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, Vec2 } from '../core/types';
 import { ProceduralAudio, type CinematicMixMode } from '../engine/audio';
 import { CinematicDirector, type CinematicView, type CutsceneContext } from '../engine/cinematic';
 import { StoryDetector, type StoryObserveCtx, type StoryTrigger } from '../engine/story-detectors';
@@ -75,13 +76,17 @@ const OUTWORLD_CLAIMANT_RAIDS = new Set([
 ]);
 const CINEMATIC_STINGERS: ReadonlySet<StingerId> = new Set(['capture', 'merge', 'levelup', 'badge', 'raid-clear']);
 
-/** Top-tier power that only drops from bosses/raids — never vended by any shop or gold sink (§6). */
+/** Top-tier power that only drops from bosses/raids/dungeons — never vended by any shop or gold sink (§6). */
 export const GATED_TOP_TIER: ReadonlySet<string> = new Set([
-  'divine-rapier', 'butterfly', 'scythe-of-vyse', 'heart-of-tarrasque', 'eye-of-skadi',
-  'refresher-orb', 'aghanims-scepter', 'abyssal-blade', 'bloodthorn', 'radiance', 'satanic',
-  'octarine-core', 'aghanims-blessing', 'aghanims-shard', 'aegis-of-the-immortal',
-  'refresher-shard', 'cheese'
+  'assault-cuirass', 'divine-rapier', 'butterfly', 'scythe-of-vyse', 'heart-of-tarrasque',
+  'eye-of-skadi', 'refresher-orb', 'aghanims-scepter', 'lotus-orb', 'linkens-sphere',
+  'manta-style', 'daedalus', 'monkey-king-bar', 'abyssal-blade', 'mjollnir',
+  'bloodthorn', 'nullifier', 'radiance', 'satanic', 'helm-of-the-overlord',
+  'gleipnir', 'wind-waker', 'octarine-core', 'aghanims-blessing', 'aghanims-shard',
+  'aegis-of-the-immortal', 'refresher-shard', 'cheese'
 ]);
+
+const RECRUIT_INTERACT_RANGE = 350;
 
 const RARITY_RANK: Record<ItemRarity, number> = {
   common: 0,
@@ -130,6 +135,8 @@ export interface RosterEntry {
   heroId: string;
   level: number;
   xp: number;
+  abilityLevels: number[];
+  attributePoints: number;
   talentPicks: (0 | 1 | null)[];
   gambits: GambitRule[];
   echo: EchoProgress;
@@ -161,6 +168,14 @@ function cloneItemSave(item: ItemSave | null | undefined): ItemSave | null {
     : null;
 }
 
+function cloneGroundItemDrop(drop: GroundItemDrop): GroundItemDrop {
+  return {
+    ...drop,
+    item: cloneItemSave(drop.item)!,
+    pos: { ...drop.pos }
+  };
+}
+
 function normalizeSavedItems(items: (ItemSave | null)[] | undefined): (ItemSave | null)[] {
   const out: (ItemSave | null)[] = [null, null, null, null, null, null];
   (items ?? []).slice(0, TUNING.itemSlots).forEach((item, i) => {
@@ -169,7 +184,29 @@ function normalizeSavedItems(items: (ItemSave | null)[] | undefined): (ItemSave 
   return out;
 }
 
+function pickedTalentCount(picks: (0 | 1 | null)[]): number {
+  return picks.filter((p) => p !== null).length;
+}
+
+function defaultAbilityLevels(heroId: string, level: number): number[] {
+  const def = REG.hero(heroId);
+  return autoAbilityLevels(def, level, def.skillOrder);
+}
+
+function defaultAttributePoints(heroId: string, level: number, abilityLevels: number[], talentPicks: (0 | 1 | null)[]): number {
+  return Math.max(0, level - abilityLevels.reduce((sum, n) => sum + n, 0) - pickedTalentCount(talentPicks));
+}
+
+function normalizeAttributePoints(heroId: string, level: number, abilityLevels: number[], talentPicks: (0 | 1 | null)[], points: number | undefined): number {
+  const max = Math.max(0, TUNING.levelCap - REG.hero(heroId).abilities.reduce((sum, a) => sum + abilityMaxLevel(a), 0) - 4);
+  const budget = Math.max(0, level - abilityLevels.reduce((sum, n) => sum + n, 0) - pickedTalentCount(talentPicks));
+  return Math.min(max, budget, Math.max(0, Math.floor(points ?? defaultAttributePoints(heroId, level, abilityLevels, talentPicks))));
+}
+
 function cloneHeroSave(save: HeroSave): HeroSave {
+  const talentPicks = [...save.talentPicks];
+  const fallbackAbilityLevels = defaultAbilityLevels(save.heroId, save.level);
+  const abilityLevels = normalizeAbilityLevels(REG.hero(save.heroId), save.abilityLevels ?? fallbackAbilityLevels, save.level);
   return {
     heroId: save.heroId,
     level: save.level,
@@ -178,7 +215,9 @@ function cloneHeroSave(save: HeroSave): HeroSave {
     neutralSlot: cloneItemSave(save.neutralSlot),
     augments: { ...(save.augments ?? {}) },
     gambits: structuredClone(save.gambits ?? []),
-    talentPicks: [...save.talentPicks],
+    abilityLevels,
+    attributePoints: normalizeAttributePoints(save.heroId, save.level, abilityLevels, talentPicks, save.attributePoints),
+    talentPicks,
     echo: normalizeEchoProgress(save.echo),
     facetIdx: save.facetIdx,
     hpPct: save.hpPct,
@@ -197,6 +236,8 @@ function heroSaveFromRosterEntry(rec: RosterEntry): HeroSave {
     neutralSlot: cloneItemSave(rec.neutralSlot),
     augments: { ...rec.augments },
     gambits: structuredClone(rec.gambits),
+    abilityLevels: [...rec.abilityLevels],
+    attributePoints: rec.attributePoints,
     talentPicks: [...rec.talentPicks],
     echo: {
       kills: rec.echo.kills,
@@ -212,6 +253,8 @@ function heroSaveFromRosterEntry(rec: RosterEntry): HeroSave {
 }
 
 function freshHeroSave(heroId: string, level = 1): HeroSave {
+  const talentPicks: (0 | 1 | null)[] = [null, null, null, null];
+  const abilityLevels = defaultAbilityLevels(heroId, level);
   return {
     heroId,
     level,
@@ -220,7 +263,9 @@ function freshHeroSave(heroId: string, level = 1): HeroSave {
     neutralSlot: null,
     augments: {},
     gambits: [],
-    talentPicks: [null, null, null, null],
+    abilityLevels,
+    attributePoints: defaultAttributePoints(heroId, level, abilityLevels, talentPicks),
+    talentPicks,
     echo: freshEchoProgress(),
     facetIdx: 0,
     hpPct: 1,
@@ -336,6 +381,8 @@ export function newGameSave(starterHeroId: string): GameSave {
         items: [null, null, null, null, null, null],
         neutralSlot: null,
         augments: {},
+        abilityLevels: defaultAbilityLevels(starterHeroId, 1),
+        attributePoints: 0,
         talentPicks: [null, null, null, null],
         gambits: [],
         echo: freshEchoProgress(),
@@ -382,13 +429,14 @@ export interface SceneLike {
   selectedUid: number;
   terrain: { obstacles: { pos: Vec2; radius: number }[] };
   pushEvent(ev: SimEvent, sim: Sim): void;
-  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView?: CinematicView | null): void;
+  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView?: CinematicView | null, groundItems?: readonly GroundItemDrop[]): void;
+  pick?(clientX: number, clientY: number, sim: Sim, groundItems?: readonly GroundItemDrop[]): { uid?: number; itemUid?: number; ground?: Vec2 };
   resetUnitViews?(): void;
   setDungeonRoom?(template: RoomTemplate | null, room?: DungeonRoom | null): void;
   showOrderFeedback?(point: Vec2, kind: 'move' | 'attack-move' | 'attack-unit', queued?: boolean): void;
   /** Optional (real GameScene only): live graphics-settings hooks (§6). */
   setQuality?(tier: QualityTier): void;
-  setGraphics?(g: { exposure?: number; grade?: number; reducedMotion?: boolean; autoAdjustQuality?: boolean; frameTarget?: 30 | 60 }): void;
+  setGraphics?(g: Partial<GraphicsSettings>): void;
   /** Optional (real GameScene only): pre-compile shaders behind a loading screen. */
   prewarm?(): void;
   dispose?(): void;
@@ -413,6 +461,7 @@ export class HeadlessScene implements SceneLike {
   terrain = { obstacles: [] as { pos: Vec2; radius: number }[] };
   pushEvent(): void {}
   update(): void {}
+  pick(): { uid?: number; itemUid?: number; ground?: Vec2 } { return {}; }
   resetUnitViews(): void {}
   setDungeonRoom(): void {}
 }
@@ -467,6 +516,8 @@ export class Game {
   defeatedGyms = new Set<string>();
   difficulty: GameSave['difficulty'] = {};
   inventoryStash: ItemSave[] = [];
+  groundItemDrops: GroundItemDrop[] = [];
+  private nextGroundItemUid = 1;
   raidProgress: GameSave['raidProgress'] = {};
   dungeonProgress: GameSave['dungeonProgress'] = {};
   eliteFive: GameSave['eliteFive'] = { defeated: 0, championDown: false };
@@ -502,6 +553,7 @@ export class Game {
   activeTrial: TrialRunner | null = null;
   private activeTrialHeroId: string | null = null;
   private activeTrialNpcUid: number | null = null;
+  private pendingRecruitNpcUid: number | null = null;
   /** heroId -> how many times its trial has relocated (cycles relocateSpots) */
   private trialRelocations = new Map<string, number>();
 
@@ -547,8 +599,20 @@ export class Game {
   paused = false;
 
   /** Headless game for tests/CI: no WebGL scene, no audio. */
-  static headless(save: GameSave): Game {
-    return new Game(null, save, { scene: new HeadlessScene(), audio: new HeadlessAudio() });
+  static headless(save: GameSave, opts: { cinematics?: boolean } = {}): Game {
+    const headlessSave = opts.cinematics ? save : structuredClone(save);
+    if (!opts.cinematics) {
+      headlessSave.settings = {
+        ...headlessSave.settings,
+        cutscene: {
+          ...defaultCutsceneSettings(),
+          ...headlessSave.settings.cutscene,
+          length: 'off',
+          alwaysSkip: true
+        }
+      };
+    }
+    return new Game(null, headlessSave, { scene: new HeadlessScene(), audio: new HeadlessAudio() });
   }
 
   constructor(canvas: HTMLCanvasElement | null, save: GameSave, deps?: GameDeps) {
@@ -574,6 +638,8 @@ export class Game {
     this.defeatedGyms = new Set(save.defeatedGyms);
     this.difficulty = structuredClone(save.difficulty);
     this.inventoryStash = save.inventoryStash.map((i) => cloneItemSave(i)!);
+    this.groundItemDrops = (save.groundItemDrops ?? []).map(cloneGroundItemDrop);
+    this.nextGroundItemUid = this.groundItemDrops.reduce((max, drop) => Math.max(max, drop.uid + 1), 1);
     this.raidProgress = structuredClone(save.raidProgress);
     this.dungeonProgress = structuredClone(save.dungeonProgress ?? {});
     this.eliteFive = { ...save.eliteFive };
@@ -622,11 +688,16 @@ export class Game {
 
     this.party = save.party.map((heroId) => {
       const hs = save.roster.find((r) => r.heroId === heroId)!;
+      const talentPicks = [...hs.talentPicks];
+      const fallbackAbilityLevels = defaultAbilityLevels(heroId, hs.level);
+      const abilityLevels = normalizeAbilityLevels(REG.hero(heroId), hs.abilityLevels ?? fallbackAbilityLevels, hs.level);
       return {
         heroId,
         level: hs.level,
         xp: hs.xp,
-        talentPicks: [...hs.talentPicks],
+        abilityLevels,
+        attributePoints: normalizeAttributePoints(heroId, hs.level, abilityLevels, talentPicks, hs.attributePoints),
+        talentPicks,
         gambits: [...(hs.gambits ?? [])],
         echo: normalizeEchoProgress(hs.echo),
         facetIdx: hs.facetIdx,
@@ -744,6 +815,7 @@ export class Game {
       if (rec.unit) {
         rec.unit.items = sorted;
         rec.unit.markStatsDirty();
+        rec.unit.markVisualDirty();
         rec.unit.refresh(this.sim.time);
         rec.items = rec.unit.items.map((it) => itemSaveOf(it, this.sim.time));
       } else {
@@ -757,6 +829,134 @@ export class Game {
     const states = next.map((it) => (it ? itemStateFromSave(it, this.sim.time) : null));
     saved.items = sortInventory(states).map((it) => itemSaveOf(it, this.sim.time));
     this.benchRoster.set(heroId, cloneHeroSave(saved));
+    return true;
+  }
+
+  private clampDropPos(pos: Vec2): Vec2 {
+    const sim = this.inputSim();
+    return {
+      x: Math.max(0, Math.min(sim.bounds.w, pos.x)),
+      y: Math.max(0, Math.min(sim.bounds.h, pos.y))
+    };
+  }
+
+  private scatterDropPos(origin: Vec2, ordinal: number): Vec2 {
+    if (ordinal === 0) return this.clampDropPos(origin);
+    const angle = (this.nextGroundItemUid + ordinal) * 2.399963229728653;
+    const radius = 55 + (ordinal % 3) * 28;
+    const offset = fromAngle(angle, radius);
+    return this.clampDropPos({ x: origin.x + offset.x, y: origin.y + offset.y });
+  }
+
+  visibleGroundItemDrops(): readonly GroundItemDrop[] {
+    const context: GroundItemDrop['context'] = this.liveDungeon ? 'dungeon' : 'overworld';
+    return this.groundItemDrops.filter((drop) => (drop.context ?? 'overworld') === context);
+  }
+
+  spawnGroundItems(items: ItemSave[], pos: Vec2, opts: { source?: GroundItemDrop['source']; context?: GroundItemDrop['context']; visual?: boolean } = {}): GroundItemDrop[] {
+    const context = opts.context ?? (this.liveDungeon ? 'dungeon' : 'overworld');
+    const drops = items.map((item, i): GroundItemDrop => ({
+      uid: this.nextGroundItemUid++,
+      item: bindIfNeeded(cloneItemSave(item)!),
+      pos: this.scatterDropPos(pos, i),
+      source: opts.source,
+      context,
+      createdAt: Math.round(this.playtime)
+    }));
+    this.groundItemDrops.push(...drops);
+    if (opts.visual !== false && drops.length > 0) {
+      this.emitPresentationEvent({
+        t: 'loot-drop',
+        pos: { ...drops[0].pos },
+        color: this.dropAccent(drops.map((drop) => drop.item)) ?? rarityColor(this.itemRarity(drops[0].item.id)),
+        grade: drops[0].item.grade,
+        signature: drops.some((drop) => hasSignatureAffix(drop.item))
+      });
+    }
+    return drops.map(cloneGroundItemDrop);
+  }
+
+  private recordItemAcquired(item: ItemSave): void {
+    this.codexUnlock('item:' + item.id);
+    if (GATED_TOP_TIER.has(item.id) && !this.heldUniques.includes(item.id)) this.heldUniques.push(item.id);
+    this.playItemFirstHold(item.id);
+  }
+
+  private addItemToActiveHero(item: ItemSave): boolean {
+    const u = this.activeUnit();
+    if (!u) return false;
+    const free = u.items.findIndex((slot) => slot === null);
+    if (free < 0) {
+      this.msg('Inventory full', 'bad');
+      return false;
+    }
+    u.items[free] = itemStateFromSave(item, this.sim.time);
+    u.items = sortInventory(u.items);
+    u.markStatsDirty();
+    u.markVisualDirty();
+    u.refresh(this.sim.time);
+    const rec = this.party[this.activeIdx];
+    if (rec) rec.items = u.items.map((slot) => itemSaveOf(slot, this.sim.time));
+    this.recordItemAcquired(item);
+    return true;
+  }
+
+  pickupGroundItem(uid: number): boolean {
+    const idx = this.groundItemDrops.findIndex((drop) => drop.uid === uid);
+    if (idx < 0) return false;
+    const drop = this.groundItemDrops[idx];
+    const u = this.activeUnit();
+    if (!u) return false;
+
+    const filtered = drop.source === 'inventory'
+      ? { kept: [cloneItemSave(drop.item)!], suppressed: [] as ItemSave[], disenchanted: [] as { item: ItemSave; essence: number }[] }
+      : applyLootFilter([bindIfNeeded(cloneItemSave(drop.item)!)], (item) => this.itemRarity(item.id), this.lootFilter);
+    const acquired = [...filtered.kept, ...filtered.suppressed];
+    const freeSlots = u.items.filter((slot) => slot === null).length;
+    if (acquired.length > freeSlots) {
+      this.msg('Inventory full', 'bad');
+      return false;
+    }
+
+    this.groundItemDrops.splice(idx, 1);
+    for (const junk of filtered.disenchanted) {
+      this.essence += junk.essence;
+      this.goldSinks.salvages += 1;
+    }
+    if (filtered.disenchanted.length > 0) {
+      const essence = filtered.disenchanted.reduce((sum, junk) => sum + junk.essence, 0);
+      this.msg(`Loot filter disenchanted ${filtered.disenchanted.length} item${filtered.disenchanted.length === 1 ? '' : 's'} (+${essence} essence)`, 'info');
+    }
+
+    for (const item of acquired) this.addItemToActiveHero(item);
+    if (filtered.kept.length > 0) {
+      this.awardLootMarksForItems(filtered.kept);
+      this.lootMoment(filtered.kept);
+    }
+    if (acquired.length > 0) {
+      const names = acquired.map((item) => REG.item(item.id).name).join(', ');
+      this.msg(`Picked up ${names}`, 'good', this.dropAccent(acquired));
+    }
+    return acquired.length > 0 || filtered.disenchanted.length > 0;
+  }
+
+  dropHeroItemToGround(invSlot: number, pos?: Vec2): boolean {
+    const u = this.activeUnit();
+    if (!u) return false;
+    const it = u.items[invSlot];
+    if (!it) return false;
+    const saved = itemSaveOf(it, this.sim.time);
+    if (!saved) return false;
+    u.items[invSlot] = null;
+    u.items = sortInventory(u.items);
+    u.markStatsDirty();
+    u.markVisualDirty();
+    u.refresh(this.sim.time);
+    const rec = this.party[this.activeIdx];
+    if (rec) rec.items = u.items.map((slot) => itemSaveOf(slot, this.sim.time));
+    const dropPos = pos ? this.clampDropPos(pos) : this.scatterDropPos(u.pos, 1);
+    this.spawnGroundItems([saved], dropPos, { source: 'inventory', visual: false });
+    this.msg(`Dropped ${REG.item(saved.id).name}`, 'info', this.dropAccent([saved]));
     return true;
   }
 
@@ -1464,7 +1664,15 @@ export class Game {
       grade: g.grade,
       reducedMotion: g.reducedMotion,
       autoAdjustQuality: g.autoAdjustQuality,
-      frameTarget: g.frameTarget
+      frameTarget: g.frameTarget,
+      bloom: g.bloom,
+      ambientOcclusion: g.ambientOcclusion,
+      antiAliasing: g.antiAliasing,
+      shadows: g.shadows,
+      drawDistance: g.drawDistance,
+      crowdDetail: g.crowdDetail,
+      vfxDensity: g.vfxDensity,
+      screenShake: g.screenShake
     });
   }
 
@@ -1480,6 +1688,11 @@ export class Game {
   private emitPresentationEvent(ev: SimEvent, routeNow = false): void {
     if (routeNow) this.frameEvents.push(ev);
     else this.queuedPresentationEvents.push(ev);
+  }
+
+  private playPresentationEventNow(ev: SimEvent, sim: Sim = this.sim): void {
+    this.scene.pushEvent(ev, sim);
+    this.audio.handleEvent(ev);
   }
 
   private awardGold(amount: number, reason: string, pos?: Vec2, routeNow = false): void {
@@ -1567,6 +1780,16 @@ export class Game {
     return (this.region.gates ?? []).find((g) => dist(u.pos, g.pos) <= g.radius) ?? null;
   }
 
+  gateTravelBlockReason(gate: NonNullable<RegionDef['gates']>[number]): string | null {
+    if (gate.requiredBadge && !this.badges.has(gate.requiredBadge)) {
+      return `requires ${gate.requiredBadge.replace('-', ' ')}`;
+    }
+    if (gate.requiresRecruits && this.recruitedCount() < gate.requiresRecruits) {
+      return `requires recruiting ${gate.requiresRecruits} hero${gate.requiresRecruits > 1 ? 'es' : ''} first`;
+    }
+    return null;
+  }
+
   nearbyGym(): NonNullable<RegionDef['gyms']>[number] | null {
     const u = this.activeUnit();
     if (!u) return null;
@@ -1616,10 +1839,10 @@ export class Game {
         this.region.id
       );
     });
-    const drops = chestItems.length > 0 ? this.addDroppedItems(chestItems) : [];
+    const drops = chestItems.length > 0 ? this.spawnGroundItems(chestItems, chest.pos, { source: 'chest' }).map((drop) => drop.item) : [];
     if (drops.length > 0) {
       const names = drops.map((it) => REG.item(it.id).name).join(', ');
-      this.msg(`Cache found: ${names} (→ Armory)`, 'good', this.dropAccent(drops));
+      this.msg(`Cache found: ${names} (on the ground)`, 'good', this.dropAccent(drops));
     }
     for (let i = 0; i < (chest.loot.shardCount ?? 0); i++) this.collectedShards.add(`${chest.id}:shard:${i}`);
     this.msg(`${chest.tier[0].toUpperCase()}${chest.tier.slice(1)} chest opened`, 'good');
@@ -1670,12 +1893,9 @@ export class Game {
       this.msg('No route gate nearby', 'bad');
       return false;
     }
-    if (gate.requiredBadge && !this.badges.has(gate.requiredBadge)) {
-      this.msg(`${gate.name} requires ${gate.requiredBadge.replace('-', ' ')}`, 'bad');
-      return false;
-    }
-    if (gate.requiresRecruits && this.recruitedCount() < gate.requiresRecruits) {
-      this.msg(`${gate.name} requires recruiting ${gate.requiresRecruits} hero${gate.requiresRecruits > 1 ? 'es' : ''} first`, 'bad');
+    const blockReason = this.gateTravelBlockReason(gate);
+    if (blockReason) {
+      this.msg(`${gate.name} ${blockReason}`, 'bad');
       return false;
     }
     const target = REG.region(gate.toRegionId);
@@ -1685,6 +1905,7 @@ export class Game {
     save.playerPos = { ...gate.toPos };
     save.campRespawn = {};
     save.echoRespawn = {};
+    save.groundItemDrops = [];
     save.regionVisits = { ...(save.regionVisits ?? {}), [target.id]: (save.regionVisits?.[target.id] ?? 0) + 1 };
     save.savedAt = Date.now();
     this.msg(`Traveling to ${target.name}...`, 'info');
@@ -1788,7 +2009,7 @@ export class Game {
     }
     this.observeStory(this.frameEvents, { sim: fight.sim });
     this.audio.update?.({ biome: this.region.biome, dayTime: 0.5, inCombat: true, dt });
-    this.scene.update(fight.sim, fight.cameraFollow(), dt, 0.5, this.cinematicPresentationView());
+    this.scene.update(fight.sim, fight.cameraFollow(), dt, 0.5, this.cinematicPresentationView(), []);
     if (fight.done && fight.result) {
       const id = this.liveGymId!;
       const result = fight.result;
@@ -1926,17 +2147,8 @@ export class Game {
   }
 
   private deliverLoot(loot: LootRoll): void {
-    for (const it of loot.guaranteed) {
-      this.inventoryStash.push(bindIfNeeded(it));
-      this.playItemFirstHold(it.id);
-    }
-    this.awardLootMarksForItems(loot.guaranteed);
-    if (loot.assembled) {
-      this.inventoryStash.push(bindIfNeeded(loot.assembled));
-      this.awardLootMarksForItems([loot.assembled]);
-      if (!this.heldUniques.includes(loot.assembled.id)) this.heldUniques.push(loot.assembled.id);
-      this.playItemFirstHold(loot.assembled.id);
-    }
+    const items = [...loot.guaranteed, ...(loot.assembled ? [loot.assembled] : [])];
+    this.spawnGroundItems(items, this.activeUnit()?.pos ?? this.region.town.pos, { source: 'boss' });
   }
 
   // ---------- raids, executed (§3.9): mechanics fire in the sim ----------
@@ -2066,7 +2278,7 @@ export class Game {
         bossPhaseHpPct: this.raidPhaseThresholds(this.liveRaidId)
       });
     }
-    this.scene.update(raid.sim, raid.cameraFollow(), dt, 0.5, this.cinematicPresentationView());
+    this.scene.update(raid.sim, raid.cameraFollow(), dt, 0.5, this.cinematicPresentationView(), []);
     if (raid.done && raid.result) {
       const id = this.liveRaidId!;
       const tier = this.liveRaidTier;
@@ -2194,7 +2406,7 @@ export class Game {
       this.audio.handleEvent(ev);
       if (ev.t === 'kill-credit') {
         const victim = dungeon.sim.unit(ev.victimUid);
-        if (victim?.kind === 'creep' && victim.tier) this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid, dungeon.tier);
+        if (victim?.kind === 'creep' && victim.tier) this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid, dungeon.tier, victim.pos);
       }
     }
     const guardian = REG.bosses.get(dungeon.def.guardian);
@@ -2206,7 +2418,7 @@ export class Game {
     for (const room of dungeon.drainCompletedRooms()) {
       this.grantDungeonRoomReward(dungeon.def, dungeon.tier, room, dungeon.selectedModifiers());
     }
-    this.scene.update(dungeon.sim, dungeon.cameraFollow(), dt, 0.5, this.cinematicPresentationView());
+    this.scene.update(dungeon.sim, dungeon.cameraFollow(), dt, 0.5, this.cinematicPresentationView(), this.visibleGroundItemDrops());
     if (dungeon.done && dungeon.result) {
       const id = this.liveDungeonId!;
       const tier = this.liveDungeonTier;
@@ -2237,6 +2449,11 @@ export class Game {
   }
 
   private endLiveDungeon(): void {
+    const stranded = this.groundItemDrops.filter((drop) => drop.context === 'dungeon').map((drop) => cloneItemSave(drop.item)!);
+    if (stranded.length > 0) {
+      this.groundItemDrops = this.groundItemDrops.filter((drop) => drop.context !== 'dungeon');
+      this.spawnGroundItems(stranded, this.activeUnit()?.pos ?? this.region.town.pos, { source: 'dungeon', context: 'overworld' });
+    }
     this.liveDungeon = null;
     this.liveDungeonId = null;
     this.liveDungeonModifiers = [];
@@ -2305,10 +2522,11 @@ export class Game {
       this.msg(`Moonflow dry: guardian loot converted to ${gold}g`, 'info');
       return;
     }
-    const drops = this.addDroppedItems(roll.items);
+    const rewardPos = this.controlledUnit()?.pos ?? this.activeUnit()?.pos ?? this.region.town.pos;
+    const drops = this.spawnGroundItems(roll.items, rewardPos, { source: 'dungeon' }).map((drop) => drop.item);
     const names = drops.map((it) => REG.item(it.id).name).join(', ');
     const label = reward.kind === 'guardian' ? 'Guardian drop' : reward.kind === 'chest' ? 'Chest reward' : 'Dungeon reward';
-    this.msg(`${label}: ${names} (→ Armory)`, reward.kind === 'guardian' ? 'good' : 'info', this.dropAccent(drops));
+    this.msg(`${label}: ${names} (on the ground)`, reward.kind === 'guardian' ? 'good' : 'info', this.dropAccent(drops));
   }
 
   private recordDungeonProgress(dungeonId: string, tier: DifficultyTier, cleared: boolean, clearedRooms: number, depth: number, modifiers: string[], endlessLevel?: number): void {
@@ -2372,23 +2590,20 @@ export class Game {
       const gold = this.grantDryLootGold(dryItems, 'resin-dry', this.activeUnit()?.pos);
       this.msg(`Moonflow dry: raid loot converted to ${gold}g`, 'info');
     } else {
+      const groundLoot: ItemSave[] = [];
       for (const it of loot.guaranteed) {
         if (it.id === 'aegis-of-the-immortal') {
           next.aegisHeld = true; // the held one-use charge
           this.playItemFirstHold(it.id);
         } else {
-          this.inventoryStash.push(bindIfNeeded(it));
-          this.playItemFirstHold(it.id);
+          groundLoot.push(it);
         }
       }
-      this.awardLootMarksForItems(loot.guaranteed);
       if (loot.assembled) {
-        this.inventoryStash.push(bindIfNeeded(loot.assembled));
-        this.awardLootMarksForItems([loot.assembled]);
-        if (!this.heldUniques.includes(loot.assembled.id)) this.heldUniques.push(loot.assembled.id);
-        this.playItemFirstHold(loot.assembled.id);
+        groundLoot.push(loot.assembled);
         this.msg(`Raid drop: ${REG.item(loot.assembled.id).name}${loot.pityUsed ? ' (pity!)' : ''}`, 'good', this.dropAccent([loot.assembled]));
       }
+      if (groundLoot.length > 0) this.spawnGroundItems(groundLoot, this.activeUnit()?.pos ?? this.region.town.pos, { source: 'raid' });
     }
     if (def.id === ROSHAN_RAID_ID) {
       next.roshanRespawnAt = this.playtime + TUNING.roshanRespawnSec;
@@ -2397,8 +2612,7 @@ export class Game {
         this.msg('Roshan falls — the Aegis of the Immortal is yours.', 'good');
         this.playItemFirstHold('aegis-of-the-immortal');
         if (next.clears >= TUNING.roshanRepeatDropFromClear) {
-          this.inventoryStash.push(bindIfNeeded({ id: 'refresher-shard' }));
-          this.inventoryStash.push(bindIfNeeded({ id: 'cheese', charges: 1 }));
+          this.spawnGroundItems([{ id: 'refresher-shard' }, { id: 'cheese', charges: 1 }], this.activeUnit()?.pos ?? this.region.town.pos, { source: 'raid' });
           this.msg('A repeat kill spills a Refresher Shard and a Cheese.', 'good');
         }
       }
@@ -2862,7 +3076,7 @@ export class Game {
     this.msg(`Neutral drop: ${drop.name} (${copy.grade ?? 'standard'}, → stash)`, 'good');
   }
 
-  private rollItemDropsForCreep(creepId: string | undefined, tier: CreepTier, salt: number, difficulty: DifficultyTier = 'normal'): void {
+  private rollItemDropsForCreep(creepId: string | undefined, tier: CreepTier, salt: number, difficulty: DifficultyTier = 'normal', pos?: Vec2): void {
     const table = (creepId ? REG.creep(creepId).drops : undefined) ?? DEFAULT_CREEP_DROP_TABLES[tier];
     const seed = stableContentSeed(`${this.region.id}:creep-drops:${tier}:${difficulty}`, Math.round(this.sim.time * 1000) + salt);
     const roll = rollItemDrops(table, difficulty, {}, new Rng(seed), this.currentLootBand(), {
@@ -2872,12 +3086,12 @@ export class Game {
       endgameUnlocked: this.endgameAffixUnlocked(difficulty)
     });
     if (roll.items.length === 0) return;
-    this.addDroppedItems(roll.items);
+    this.spawnGroundItems(roll.items, pos ?? this.activeUnit()?.pos ?? this.region.town.pos, { source: 'creep' });
     const names = roll.items.map((it) => REG.item(it.id).name).join(', ');
-    this.msg(`Creep drop: ${names} (→ stash)`, 'good', this.dropAccent(roll.items));
+    this.msg(`Creep drop: ${names} (on the ground)`, 'good', this.dropAccent(roll.items));
   }
 
-  private rollEliteCreepDrop(tier: CreepTier, salt: number): void {
+  private rollEliteCreepDrop(tier: CreepTier, salt: number, pos?: Vec2): void {
     const difficulty = creepCombatTier(this.region.id);
     const minRank = tier === 'small' ? RARITY_RANK.uncommon : tier === 'medium' ? RARITY_RANK.rare : RARITY_RANK.mythical;
     const candidates = [...REG.items.values()]
@@ -2901,8 +3115,8 @@ export class Game {
       const secondId = this.rollMarketItem(candidates.filter((candidate) => candidate !== id), `elite-creep-second:${tier}:${salt}`) ?? id;
       items.push(instantiateDroppedItem(secondId, difficulty, new Rng(stableContentSeed(`elite-creep-second-copy:${secondId}`, salt)), undefined, 'elite', this.regionalGradeFloorBump(), this.endgameAffixUnlocked(difficulty), floorMin, this.region.id));
     }
-    const drops = this.addDroppedItems(items);
-    if (drops.length > 0) this.msg(`Elite drop: ${REG.item(id).name} (→ Armory)`, 'good', this.dropAccent(drops));
+    const drops = this.spawnGroundItems(items, pos ?? this.activeUnit()?.pos ?? this.region.town.pos, { source: 'creep' }).map((drop) => drop.item);
+    if (drops.length > 0) this.msg(`Elite drop: ${REG.item(id).name} (on the ground)`, 'good', this.dropAccent(drops));
   }
 
   private addDroppedItems(items: ItemSave[], opts: { awardMarks?: boolean } = {}): ItemSave[] {
@@ -2944,8 +3158,8 @@ export class Game {
     const gradeIdx = ITEM_GRADES.indexOf(picked.grade ?? 'standard');
     const grade = ITEM_GRADES[Math.max(0, gradeIdx - 1)];
     const item = refreshResolvedMods({ ...picked, grade, bound: true }, REG.item(picked.id));
-    const drops = this.addDroppedItems([item]);
-    if (drops.length > 0) this.msg(`Hero drop: ${REG.item(item.id).name} (${grade}, → Armory)`, 'good', this.dropAccent(drops));
+    const drops = this.spawnGroundItems([item], victim.pos, { source: 'special-battle' }).map((drop) => drop.item);
+    if (drops.length > 0) this.msg(`Hero drop: ${REG.item(item.id).name} (${grade}, on the ground)`, 'good', this.dropAccent(drops));
   }
 
   /** The component pool an owned-hero echo can drop, by the hero's attribute. Single source of truth for the live table and the Atlas inversion. */
@@ -4350,7 +4564,8 @@ export class Game {
     if (rec.unit) {
       const gained = rec.unit.addXp(res.xp, cap);
       if (gained > 0) {
-        rec.unit.autoLevelAbilities(REG.hero(rec.heroId).skillOrder);
+        rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.unit.level);
+        rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.unit.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
         rec.unit.refresh(this.sim.time);
       }
       rec.level = rec.unit.level;
@@ -4358,6 +4573,8 @@ export class Game {
     } else {
       rec.xp = Math.min(rec.xp + res.xp, xpForLevel(TUNING.levelCap));
       rec.level = Math.min(levelFromXp(rec.xp), cap);
+      rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.level);
+      rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
     }
     this.msg(`Tome of Knowledge → ${REG.hero(rec.heroId).name} (+${res.xp} XP, -${res.tomesUsed} used)`, 'good');
     return true;
@@ -4382,10 +4599,12 @@ export class Game {
     }
     this.gold -= cost;
     this.goldSinks.respecs += 1;
-    rec.talentPicks = [null, null, null, null];
     if (rec.unit) {
       const pos = { ...rec.unit.pos };
       this.serializeHero(rec);
+      rec.abilityLevels = REG.hero(rec.heroId).abilities.map(() => 0);
+      rec.attributePoints = 0;
+      rec.talentPicks = [null, null, null, null];
       this.sim.removeUnit(rec.unit.uid);
       const u = this.spawnHeroFromRecord(rec, pos);
       rec.unit = u;
@@ -4393,8 +4612,12 @@ export class Game {
         this.sim.playerActiveUid = u.uid;
         this.scene.selectedUid = u.uid;
       }
+    } else {
+      rec.abilityLevels = REG.hero(rec.heroId).abilities.map(() => 0);
+      rec.attributePoints = 0;
+      rec.talentPicks = [null, null, null, null];
     }
-    this.msg(`${REG.hero(rec.heroId).name} respecced talents (-${cost}g)`, 'good');
+    this.msg(`${REG.hero(rec.heroId).name} respecced skills and talents (-${cost}g)`, 'good');
     return true;
   }
 
@@ -4469,10 +4692,20 @@ export class Game {
       const remaining = savedRespawn[spawn.id];
       if (remaining !== undefined && remaining > 0) {
         this.echoes.set(spawn.id, { uid: null, respawnAt: this.sim.time + remaining });
+      } else if (!this.echoSpawnReady(spawn)) {
+        this.echoes.set(spawn.id, { uid: null, respawnAt: this.sim.time + 10 });
       } else {
         this.echoes.set(spawn.id, { uid: this.spawnHeroEcho(spawn.id), respawnAt: 0 });
       }
     }
+  }
+
+  private echoSpawnReady(spawn: EchoSpawnDef): boolean {
+    const minLevel = spawn.minPlayerLevel ?? 0;
+    if (minLevel <= 0) return true;
+    const active = this.activeUnit();
+    const leadLevel = active?.level ?? this.party[this.activeIdx]?.unit?.level ?? this.party[this.activeIdx]?.level ?? 0;
+    return leadLevel >= minLevel;
   }
 
   private spawnHeroEcho(spawnId: string): number {
@@ -4523,11 +4756,14 @@ export class Game {
 
   private spawnHeroFromRecord(rec: RosterEntry, pos: Vec2): Unit {
     const build = buildHero(REG.hero(rec.heroId), rec.talentPicks, rec.facetIdx, rec.echo, rec.augments);
+    rec.abilityLevels = normalizeAbilityLevels(build.def, rec.abilityLevels, rec.level);
+    rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
     const u = this.sim.spawnHero(build.def, {
       team: 0,
       pos: { ...pos },
       level: rec.level,
-      ctrl: { kind: 'player' }
+      ctrl: { kind: 'player' },
+      abilityLevels: rec.abilityLevels
     });
     for (const k in build.externalMods) {
       u.externalMods[k] = (u.externalMods[k] ?? 0) + build.externalMods[k];
@@ -4541,6 +4777,9 @@ export class Game {
     }
     for (const [k, v] of Object.entries(augmentMods(rec.augments))) {
       u.externalMods[k] = (u.externalMods[k] ?? 0) + v;
+    }
+    for (const key of ['str', 'agi', 'int']) {
+      u.externalMods[key] = (u.externalMods[key] ?? 0) + rec.attributePoints * 2;
     }
     rec.neutralMods = neutralPassiveMods(rec.neutralSlot);
     for (const [k, v] of Object.entries(rec.neutralMods)) {
@@ -4561,6 +4800,7 @@ export class Game {
       for (const k in rec.fleshStacks) u.triggerStacks.set(k, rec.fleshStacks[k]);
     }
     u.markStatsDirty();
+    u.markVisualDirty();
     u.refresh(this.sim.time);
     u.hp = u.stats.maxHp * Math.max(0.05, rec.hpPct);
     u.mana = u.stats.maxMana * rec.manaPct;
@@ -4580,6 +4820,7 @@ export class Game {
     if (!u) return;
     rec.level = u.level;
     rec.xp = u.xp;
+    rec.abilityLevels = u.abilities.map((a) => a.level);
     rec.hpPct = u.alive ? u.hp / u.stats.maxHp : 0.5;
     rec.manaPct = u.stats.maxMana > 0 ? u.mana / u.stats.maxMana : 0;
     rec.items = u.items.map((it) => itemSaveOf(it, this.sim.time));
@@ -4672,6 +4913,7 @@ export class Game {
     let u = this.controlledUnit();
     if (this.liveRaid) u = this.liveRaid.claimDriver();
     if (!u || !u.alive) return;
+    this.pendingRecruitNpcUid = null;
     const safeOrder = this.sanitizeOrderPoint(sim, u, order);
     if (feedback) this.showOrderFeedback(sim, safeOrder, queued);
     if (queued) {
@@ -4778,8 +5020,7 @@ export class Game {
       speed: TUNING.locomotion.dashSpeed,
       until: this.sim.time + TUNING.locomotion.dashDurationSec
     });
-    u.castingUntil = this.sim.time + TUNING.locomotion.dashDurationSec;
-    u.castGesture = 'dash';
+    u.setCastGesture('dash', this.sim.time + TUNING.locomotion.dashDurationSec, { now: this.sim.time });
     return true;
   }
 
@@ -4801,8 +5042,24 @@ export class Game {
   }
 
   useItem(invSlot: number, opts: { uid?: number; point?: Vec2; queued?: boolean }): void {
+    const sim = this.inputSim();
     const u = this.controlledUnit();
     if (!u || !u.alive) return;
+    const it = u.items[invSlot];
+    const def = it ? REG.items.get(it.defId) : undefined;
+    if (!it || !def || !def.active) return;
+    const ready = itemReady(it, def, u, sim.time);
+    if (!ready.ok) {
+      this.msg(
+        ready.reason === 'mana' ? 'Not enough mana' :
+          ready.reason === 'cooldown' ? 'On cooldown' :
+            ready.reason === 'no-charges' ? 'No charges' :
+              ready.reason === 'damage-lockout' ? 'Item locked by damage' :
+                `Cannot use item (${ready.reason})`,
+        'bad'
+      );
+      return;
+    }
     this.issueOrder({ kind: 'item', invSlot, uid: opts.uid, point: opts.point }, opts.queued);
   }
 
@@ -4836,11 +5093,16 @@ export class Game {
     const heroId = this.npcHeroes.get(uid);
     const u = this.activeUnit();
     const npc = this.sim.unit(uid);
-    if (!heroId || !u || !npc) return;
-    if (dist(u.pos, npc.pos) > 350) {
-      this.orderMove({ ...npc.pos });
+    if (!heroId || !u || !npc) {
+      if (this.pendingRecruitNpcUid === uid) this.pendingRecruitNpcUid = null;
       return;
     }
+    if (dist(u.pos, npc.pos) > RECRUIT_INTERACT_RANGE) {
+      this.orderMove({ ...npc.pos });
+      this.pendingRecruitNpcUid = uid;
+      return;
+    }
+    if (this.pendingRecruitNpcUid === uid) this.pendingRecruitNpcUid = null;
     const def = REG.hero(heroId);
     if (this.factionLockedHero(heroId)) {
       this.msg(`You sided against ${def.name} at Shadeshore — they will not follow you now.`, 'bad');
@@ -4858,12 +5120,8 @@ export class Game {
     const quest = REG.quest(questId);
     const qp = this.questProgress[questId] ?? defaultQuestProgress();
     this.questProgress[questId] = qp;
-    const needed = quest.findShardsNeeded ?? TUNING.findShardsNeeded;
-    // Find is shard-gated (§3.1): the hero is a rumor until enough echo shards reveal the marker.
-    if (qp.stage === 'unfound' && qp.attunement < needed) {
-      this.msg(`${def.name} is only a rumor — defeat their echoes (${qp.attunement}/${needed}).`, 'info');
-      return;
-    }
+    // If the overworld NPC is visible and clickable, the player has found them.
+    // Echo shards can still reveal rumors, but they should not block a live prompt.
     if (qp.stage === 'unfound') qp.stage = 'found';
     if (qp.stage === 'found') {
       this.startTrial(heroId, uid);
@@ -4871,6 +5129,20 @@ export class Game {
     }
     if (qp.stage === 'trial-complete') {
       this.startBindDuel(heroId, uid);
+    }
+  }
+
+  private updatePendingRecruit(): void {
+    const uid = this.pendingRecruitNpcUid;
+    if (uid === null || this.activeTrial) return;
+    const u = this.activeUnit();
+    const npc = this.sim.unit(uid);
+    if (!u || !u.alive || !npc || !this.npcHeroes.has(uid)) {
+      this.pendingRecruitNpcUid = null;
+      return;
+    }
+    if (dist(u.pos, npc.pos) <= RECRUIT_INTERACT_RANGE) {
+      this.tryRecruit(uid);
     }
   }
 
@@ -4907,11 +5179,15 @@ export class Game {
       const lvl = Math.min(natural, cap);
       if (rec.unit && rec.unit.level !== lvl) {
         rec.unit.level = lvl;
-        rec.unit.autoLevelAbilities(REG.hero(rec.heroId).skillOrder);
+        rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, lvl);
+        rec.attributePoints = normalizeAttributePoints(rec.heroId, lvl, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
+        rec.unit.setAbilityLevels(rec.abilityLevels);
         rec.unit.markStatsDirty();
         rec.unit.refresh(this.sim.time);
       }
       rec.level = lvl;
+      rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, lvl);
+      rec.attributePoints = normalizeAttributePoints(rec.heroId, lvl, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
     }
   }
 
@@ -5043,6 +5319,8 @@ export class Game {
         heroId,
         level: 1,
         xp: 0,
+        abilityLevels: defaultAbilityLevels(heroId, 1),
+        attributePoints: 0,
         talentPicks: [null, null, null, null],
         gambits: [],
         echo: freshEchoProgress(),
@@ -5207,6 +5485,7 @@ export class Game {
       u.items[invSlot] = null;
       u.items = sortInventory(u.items);
       u.markStatsDirty();
+      u.markVisualDirty();
       u.refresh(this.sim.time);
       const rec = this.party[this.activeIdx];
       if (rec) rec.items = u.items.map((slot) => itemSaveOf(slot, this.sim.time));
@@ -5217,12 +5496,77 @@ export class Game {
     u.items[invSlot] = null;
     u.items = sortInventory(u.items);
     u.markStatsDirty();
+    u.markVisualDirty();
     const value = sellValue(def);
     this.awardGold(value, 'sell', u.pos);
     this.msg(`Sold ${def.name} (+${value}g)`, 'info');
   }
 
   // ---------- talents ----------
+
+  pendingSkillPoints(rec: RosterEntry): number {
+    const abilitySpend = rec.abilityLevels.reduce((sum, n) => sum + n, 0);
+    return Math.max(0, rec.level - abilitySpend - rec.attributePoints - pickedTalentCount(rec.talentPicks));
+  }
+
+  canLevelAbility(recIdx: number, slot: number): boolean {
+    const rec = this.party[recIdx];
+    if (!rec || this.pendingSkillPoints(rec) <= 0) return false;
+    const def = rec.unit?.abilities[slot]?.def ?? REG.hero(rec.heroId).abilities[slot];
+    if (!def) return false;
+    const current = rec.unit?.abilities[slot]?.level ?? rec.abilityLevels[slot] ?? 0;
+    return canLearnAbilityRank(def, current, rec.level);
+  }
+
+  levelAbility(recIdx: number, slot: number): boolean {
+    const rec = this.party[recIdx];
+    if (!rec) return false;
+    const def = rec.unit?.abilities[slot]?.def ?? REG.hero(rec.heroId).abilities[slot];
+    if (!def) return false;
+    if (!this.canLevelAbility(recIdx, slot)) {
+      const current = rec.unit?.abilities[slot]?.level ?? rec.abilityLevels[slot] ?? 0;
+      const nextReq = abilityRankRequiredHeroLevel(def, current + 1);
+      this.msg(rec.level < nextReq ? `${def.name} rank ${current + 1} unlocks at hero level ${nextReq}` : 'No skill point available', 'bad');
+      return false;
+    }
+    rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.level);
+    rec.abilityLevels[slot] = (rec.abilityLevels[slot] ?? 0) + 1;
+    if (rec.unit) {
+      rec.unit.setAbilityLevels(rec.abilityLevels);
+      rec.unit.refresh(this.sim.time);
+      rec.abilityLevels = rec.unit.abilities.map((a) => a.level);
+      this.playPresentationEventNow({ t: 'skill-spend', uid: rec.unit.uid, kind: 'ability' });
+    }
+    this.msg(`${REG.hero(rec.heroId).name}: ${def.name} rank ${rec.abilityLevels[slot]}`, 'good');
+    this.autosave('skill');
+    return true;
+  }
+
+  maxAttributePoints(rec: RosterEntry): number {
+    return Math.max(0, TUNING.levelCap - REG.hero(rec.heroId).abilities.reduce((sum, a) => sum + abilityMaxLevel(a), 0) - 4);
+  }
+
+  canSpendAttributePoint(recIdx: number): boolean {
+    const rec = this.party[recIdx];
+    return !!rec && this.pendingSkillPoints(rec) > 0 && rec.attributePoints < this.maxAttributePoints(rec);
+  }
+
+  applyAttributePoint(recIdx: number): boolean {
+    const rec = this.party[recIdx];
+    if (!rec || !this.canSpendAttributePoint(recIdx)) return false;
+    rec.attributePoints++;
+    if (rec.unit) {
+      for (const key of ['str', 'agi', 'int']) {
+        rec.unit.externalMods[key] = (rec.unit.externalMods[key] ?? 0) + 2;
+      }
+      rec.unit.markStatsDirty();
+      rec.unit.refresh(this.sim.time);
+      this.playPresentationEventNow({ t: 'skill-spend', uid: rec.unit.uid, kind: 'attribute' });
+    }
+    this.msg(`${REG.hero(rec.heroId).name}: +2 all attributes`, 'good');
+    this.autosave('attributes');
+    return true;
+  }
 
   pendingTalentTier(rec: RosterEntry): number {
     const levels = [10, 15, 20, 25];
@@ -5234,11 +5578,15 @@ export class Game {
 
   applyTalent(recIdx: number, tier: number, pick: 0 | 1): void {
     const rec = this.party[recIdx];
-    if (!rec || rec.talentPicks[tier] !== null) return;
+    if (!rec || rec.talentPicks[tier] !== null || this.pendingSkillPoints(rec) <= 0) return;
+    const talent = REG.hero(rec.heroId).talents[tier];
+    if (!talent || rec.level < talent.level) return;
     rec.talentPicks[tier] = pick;
     const def = REG.hero(rec.heroId);
     this.msg(`${def.name}: ${def.talents[tier].options[pick].name}`, 'good');
     this.rebuildHeroUnit(recIdx);
+    const unit = this.party[recIdx]?.unit;
+    if (unit) this.playPresentationEventNow({ t: 'skill-spend', uid: unit.uid, kind: 'talent' });
     this.autosave('talent');
   }
 
@@ -5390,6 +5738,7 @@ export class Game {
       roster: [...partySaves, ...benchSaves],
       stash: [],
       inventoryStash: this.inventoryStash.map((i) => cloneItemSave(i)!),
+      groundItemDrops: this.groundItemDrops.map(cloneGroundItemDrop),
       caught: this.caught.map((c) => ({ ...c })),
       fielded: [...this.fielded],
       recruited: [...this.recruited],
@@ -5528,6 +5877,19 @@ export class Game {
       if (!['normal', 'nightmare', 'hell'].includes(d.tier) || typeof d.dryClears !== 'number') return false;
     }
     if (!Array.isArray(v.inventoryStash)) return false;
+    if (!Array.isArray(v.groundItemDrops) || !v.groundItemDrops.every((drop) =>
+      drop &&
+      typeof drop.uid === 'number' &&
+      drop.uid > 0 &&
+      drop.item &&
+      typeof drop.item.id === 'string' &&
+      REG.items.has(drop.item.id) &&
+      drop.pos &&
+      typeof drop.pos.x === 'number' &&
+      typeof drop.pos.y === 'number' &&
+      (drop.context === undefined || drop.context === 'overworld' || drop.context === 'dungeon') &&
+      (drop.createdAt === undefined || typeof drop.createdAt === 'number')
+    )) return false;
     if (!v.raidProgress || typeof v.raidProgress !== 'object') return false;
     for (const [raidId, r] of Object.entries(v.raidProgress)) {
       if (!REG.raids.has(raidId)) return false;
@@ -5599,6 +5961,23 @@ export class Game {
     const audio = v.settings.audio;
     if (!audio || typeof audio.master !== 'number' || typeof audio.sfx !== 'number') return false;
     if (typeof audio.voice !== 'number' || typeof audio.stinger !== 'number' || typeof audio.muted !== 'boolean') return false;
+    const graphics = v.settings.graphics;
+    if (graphics !== undefined) {
+      if (!['auto', 'low', 'medium', 'high', 'ultra'].includes(graphics.quality)) return false;
+      if (typeof graphics.autoAdjustQuality !== 'boolean') return false;
+      if (graphics.frameTarget !== 30 && graphics.frameTarget !== 60) return false;
+      if (!['tier', 'off', 'low', 'high'].includes(graphics.bloom)) return false;
+      if (!['tier', 'off', 'on'].includes(graphics.ambientOcclusion)) return false;
+      if (!['tier', 'off', 'on'].includes(graphics.antiAliasing)) return false;
+      if (!['tier', 'off', 'low', 'high'].includes(graphics.shadows)) return false;
+      if (!['low', 'medium', 'high'].includes(graphics.drawDistance)) return false;
+      if (!['auto', 'full', 'balanced', 'reduced'].includes(graphics.crowdDetail)) return false;
+      if (typeof graphics.vfxDensity !== 'number' || graphics.vfxDensity < 0.5 || graphics.vfxDensity > 1.5) return false;
+      if (typeof graphics.screenShake !== 'number' || graphics.screenShake < 0 || graphics.screenShake > 1) return false;
+      if (typeof graphics.exposure !== 'number' || graphics.exposure < 0.5 || graphics.exposure > 1.5) return false;
+      if (typeof graphics.grade !== 'number' || graphics.grade < 0 || graphics.grade > 1.5) return false;
+      if (typeof graphics.reducedMotion !== 'boolean') return false;
+    }
     for (const heroId of v.party) {
       if (typeof heroId !== 'string' || !REG.heroes.has(heroId)) return false;
       if (!v.roster.some((r) => r.heroId === heroId)) return false;
@@ -5608,6 +5987,8 @@ export class Game {
       if (!Array.isArray(r.items) || r.items.length !== TUNING.itemSlots) return false;
       if (r.neutralSlot !== null && r.neutralSlot !== undefined && !REG.neutralItems.has(r.neutralSlot.id)) return false;
       if (r.gambits !== undefined && (!Array.isArray(r.gambits) || r.gambits.length > 8)) return false;
+      if (r.abilityLevels !== undefined && (!Array.isArray(r.abilityLevels) || !r.abilityLevels.every((n) => typeof n === 'number' && n >= 0))) return false;
+      if (r.attributePoints !== undefined && (typeof r.attributePoints !== 'number' || r.attributePoints < 0)) return false;
       if (!Array.isArray(r.talentPicks) || r.talentPicks.length !== 4) return false;
       if (r.echo !== undefined) {
         if (typeof r.echo.kills !== 'number' || r.echo.kills < 0) return false;
@@ -5712,12 +6093,13 @@ export class Game {
         // recruit ceiling (§3.4): XP banks past the cap, the level stays clamped
         const gained = rec.unit.addXp(r.xp, cap);
         if (gained > 0) {
-          rec.unit.autoLevelAbilities(REG.hero(rec.heroId).skillOrder);
+          rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.unit.level);
+          rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.unit.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
           rec.unit.refresh(this.sim.time);
           // level-up heals the gained stats portion
           rec.unit.hp = Math.min(rec.unit.stats.maxHp, rec.unit.hp + gained * 80);
-          this.scene.pushEvent({ t: 'levelup', uid: rec.unit.uid, level: rec.unit.level }, this.sim);
-          this.msg(`${REG.hero(rec.heroId).name} reached level ${rec.unit.level}!`, 'good');
+          this.playPresentationEventNow({ t: 'levelup', uid: rec.unit.uid, level: rec.unit.level });
+          this.msg(`${REG.hero(rec.heroId).name} reached level ${rec.unit.level}! Skill point available.`, 'good');
         }
         rec.level = rec.unit.level;
         rec.xp = rec.unit.xp;
@@ -5726,7 +6108,9 @@ export class Game {
         const newLevel = Math.min(levelFromXp(rec.xp), cap);
         if (newLevel > rec.level) {
           rec.level = newLevel;
-          this.msg(`${REG.hero(rec.heroId).name} reached level ${newLevel}!`, 'good');
+          rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.level);
+          rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
+          this.msg(`${REG.hero(rec.heroId).name} reached level ${newLevel}! Skill point available.`, 'good');
         }
       }
     }
@@ -5735,8 +6119,8 @@ export class Game {
     // Overworld kills roll their loot at the region's combat tier so the nightmare/hell
     // drop columns are live in deep regions, matching the creep-combat scaling (GAMEPLAY_2.0 §0.2).
     if (victim && victim.kind === 'creep' && victim.tier) {
-      this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid, creepCombatTier(this.region.id));
-      if (this.eliteCreepUids.delete(ev.victimUid)) this.rollEliteCreepDrop(victim.tier, ev.victimUid);
+      this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid, creepCombatTier(this.region.id), victim.pos);
+      if (this.eliteCreepUids.delete(ev.victimUid)) this.rollEliteCreepDrop(victim.tier, ev.victimUid, victim.pos);
       this.rollNeutralFor(victim.tier, ev.victimUid);
     }
     if (victim && victim.kind === 'hero' && victim.team !== 0) this.rollHeroLoadoutDrop(victim);
@@ -5822,8 +6206,13 @@ export class Game {
       if (st.uid !== null) continue;
       if (st.respawnAt <= 0 || this.sim.time < st.respawnAt) continue;
       const spawn = this.region.echoSpawns?.find((e) => e.id === id);
+      if (!spawn) continue;
+      if (!this.echoSpawnReady(spawn)) {
+        st.respawnAt = this.sim.time + 10;
+        continue;
+      }
       const u = this.activeUnit();
-      if (spawn && u && dist(u.pos, spawn.pos) < 700) {
+      if (u && dist(u.pos, spawn.pos) < 700) {
         st.respawnAt = this.sim.time + 10;
         continue;
       }
@@ -5980,8 +6369,12 @@ export class Game {
       this.updateLiveDungeon(realDt);
       return;
     }
+    if (this.cinematic.active) {
+      this.scene.update(this.sim, this.activeUnit(), 0, this.dayTime, this.cinematicPresentationView(), this.visibleGroundItemDrops());
+      return;
+    }
     if (this.paused) {
-      this.scene.update(this.sim, this.activeUnit(), 0, this.dayTime, this.cinematicPresentationView());
+      this.scene.update(this.sim, this.activeUnit(), 0, this.dayTime, this.cinematicPresentationView(), this.visibleGroundItemDrops());
       return;
     }
     const slowmo = this.realClock < this.lootSlowmoUntil ? TUNING.loot.signatureSlowmoScale : 1;
@@ -6004,6 +6397,8 @@ export class Game {
     if (simTicks >= TUNING.maxSimTicksPerFrame && this.accumulator >= this.sim.dt) {
       this.accumulator = 0;
     }
+
+    this.updatePendingRecruit();
 
     // participation tracking for the active hero
     const activeRec = this.party[this.activeIdx];
@@ -6111,6 +6506,6 @@ export class Game {
     }
 
     this.audio.update?.({ biome: this.region.biome, dayTime: this.dayTime, inCombat: this.inCombat(), dt });
-    this.scene.update(this.sim, this.activeUnit(), dt, this.dayTime, this.cinematicPresentationView());
+    this.scene.update(this.sim, this.activeUnit(), dt, this.dayTime, this.cinematicPresentationView(), this.visibleGroundItemDrops());
   }
 }

@@ -391,6 +391,11 @@ export interface AbilityDef {
   glyph?: string;   // optional icon hint (WS-F); falls back to the archetype glyph
 }
 
+export interface ItemActiveOverride {
+  cooldown?: number;
+  values?: Record<string, number[]>;
+}
+
 // ---------- Talents / Facets / Aghs ----------
 export interface TalentDef {
   id: string;
@@ -1001,6 +1006,8 @@ export interface EchoSpawnDef {
   pos: Vec2;
   level: number;
   respawnSec: number;
+  /** Optional player lead level before this Echo may appear. */
+  minPlayerLevel?: number;
 }
 export interface GateDef {
   id: string;
@@ -1225,6 +1232,7 @@ export interface MacroHeroSetup {
   heroId: string;
   level?: number;
   items?: string[];
+  itemOverrides?: Record<string, ItemActiveOverride>;
   gambits?: GambitRule[];
 }
 
@@ -1272,6 +1280,7 @@ export type SimEvent =
   | { t: 'miss'; uid: number; target: number }
   | { t: 'blink'; uid: number; from: Vec2; to: Vec2 }
   | { t: 'levelup'; uid: number; level: number }
+  | { t: 'skill-spend'; uid: number; kind: 'ability' | 'talent' | 'attribute' }
   | { t: 'capture-start'; uid: number; target: number; duration: number }
   | { t: 'capture-progress'; target: number; pct: number }
   | { t: 'capture-complete'; target: number; creepId: string }
@@ -1303,6 +1312,14 @@ export interface ItemSave {
 }
 export type HeroLoadoutSlots = (string | null)[];
 export type ArmoryLoadouts = Record<string, Record<string, HeroLoadoutSlots>>;
+export interface GroundItemDrop {
+  uid: number;
+  item: ItemSave;
+  pos: Vec2;
+  source?: DropSource | 'chest' | 'inventory' | 'dungeon';
+  context?: 'overworld' | 'dungeon';
+  createdAt?: number;
+}
 export interface NeutralStashEntry {
   id: string;
   count: number;
@@ -1329,6 +1346,8 @@ export interface HeroSave {
   neutralSlot: ItemSave | null;
   augments?: HeroAugments;
   gambits?: GambitRule[];
+  abilityLevels?: number[];       // learned ability ranks by slot; absent legacy saves auto-fill
+  attributePoints?: number;       // Dota-style +2 all attributes picks
   talentPicks: (0 | 1 | null)[]; // 4 tiers
   echo?: EchoProgress;
   facetIdx: number;
@@ -1359,6 +1378,7 @@ export interface GameSave {
   roster: HeroSave[];
   stash: ItemSave[];
   inventoryStash: ItemSave[];
+  groundItemDrops: GroundItemDrop[];
   caught: CreepInstanceSave[];
   fielded: string[];            // creep instance uids, ≤3
   recruited: string[];

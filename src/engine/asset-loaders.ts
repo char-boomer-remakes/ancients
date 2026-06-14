@@ -135,6 +135,7 @@ export interface ModelAsset {
 }
 
 const modelCache = new Map<string, Promise<ModelAsset | null>>();
+const loadedModels = new Map<string, ModelAsset>();
 const texCache = new Map<string, Promise<THREE.Texture | null>>();
 const hdrCache = new Map<string, Promise<THREE.DataTexture | null>>();
 
@@ -153,7 +154,9 @@ export function loadModelAsset(url: string): Promise<ModelAsset | null> {
     .loadAsync(url)
     .then((g) => {
       recordLoaded(url);
-      return { scene: g.scene, animations: g.animations ?? [] };
+      const asset = { scene: g.scene, animations: g.animations ?? [] };
+      loadedModels.set(url, asset);
+      return asset;
     })
     .catch(() => {
       kindStats.model.failures++;
@@ -299,6 +302,40 @@ export function getAssetCacheStats(): AssetCacheStats {
     texture: { ...kindStats.texture },
     hdr: { ...kindStats.hdr }
   };
+}
+
+function disposeObjectTree(root: THREE.Object3D): void {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    const line = obj as THREE.Line;
+    const points = obj as THREE.Points;
+    const geometry = mesh.geometry ?? line.geometry ?? points.geometry;
+    if (geometry) geometry.dispose();
+    const material = mesh.material ?? line.material ?? points.material;
+    const disposeMaterial = (m: unknown): void => {
+      if (m instanceof THREE.Material) m.dispose();
+    };
+    if (Array.isArray(material)) material.forEach(disposeMaterial);
+    else disposeMaterial(material);
+  });
+}
+
+/**
+ * Evict loaded GLB source scenes. Call only after live scene clones have been
+ * disposed; SkeletonUtils clones share source geometry/material references.
+ */
+export function evictModelAssets(predicate: (url: string) => boolean = () => true): number {
+  let count = 0;
+  for (const [url, asset] of loadedModels) {
+    if (!predicate(url)) continue;
+    disposeObjectTree(asset.scene);
+    loadedModels.delete(url);
+    modelCache.delete(url);
+    loadedUrls.delete(normalizeUrl(url));
+    count++;
+  }
+  if (count) evictions += count;
+  return count;
 }
 
 export function evictTextureAssets(predicate: (url: string) => boolean = () => true): number {

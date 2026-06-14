@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { clampedPixelRatio, higherQualityTier, lowerQualityTier, qualityPreset } from '../engine/performance';
+import { shouldUseCrowdImpostor } from '../engine/lod';
 
 describe('performance quality presets', () => {
   it('clamps device pixel ratio by quality tier', () => {
@@ -27,5 +28,15 @@ describe('performance quality presets', () => {
     expect(lowerQualityTier('low')).toBeNull();
     expect(higherQualityTier('medium', 'ultra')).toBe('high');
     expect(higherQualityTier('high', 'high')).toBeNull();
+  });
+
+  it('uses crowd impostors only for cheap non-hero overflow/far units', () => {
+    const base = { selected: false, alive: true, isHero: false, isNpc: false };
+    expect(shouldUseCrowdImpostor({ ...base, tier: 'reduced', crowdDetail: 'auto', fullAnimationBudget: 20 })).toBe(true);
+    expect(shouldUseCrowdImpostor({ ...base, tier: 'full', crowdDetail: 'auto', fullAnimationBudget: 0 })).toBe(true);
+    expect(shouldUseCrowdImpostor({ ...base, tier: 'full', crowdDetail: 'balanced', fullAnimationBudget: 12 })).toBe(true);
+    expect(shouldUseCrowdImpostor({ ...base, tier: 'full', crowdDetail: 'full', fullAnimationBudget: 0 })).toBe(false);
+    expect(shouldUseCrowdImpostor({ ...base, tier: 'culled', crowdDetail: 'auto', fullAnimationBudget: 20, isHero: true })).toBe(false);
+    expect(shouldUseCrowdImpostor({ ...base, tier: 'culled', crowdDetail: 'auto', fullAnimationBudget: 20, selected: true })).toBe(false);
   });
 });

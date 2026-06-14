@@ -9,6 +9,7 @@
 // ------------------------------------------------------------------
 
 export type LodTier = 'full' | 'reduced' | 'culled';
+export type CrowdDetail = 'auto' | 'full' | 'balanced' | 'reduced';
 
 export const LOD = {
   /** Within this radius of the camera focus: full animation every frame. */
@@ -32,4 +33,21 @@ export function shouldAnimateAtLod(tier: LodTier, frameParity: number): boolean 
   if (tier === 'culled') return false;
   if (tier === 'reduced') return frameParity === 0;
   return true;
+}
+
+export function shouldUseCrowdImpostor(opts: {
+  tier: LodTier;
+  crowdDetail: CrowdDetail;
+  fullAnimationBudget: number;
+  selected: boolean;
+  alive: boolean;
+  isHero: boolean;
+  isNpc: boolean;
+}): boolean {
+  if (!opts.alive || opts.selected || opts.isHero || opts.isNpc) return false;
+  if (opts.crowdDetail === 'full') return false;
+  if (opts.crowdDetail === 'reduced') return true;
+  if (opts.tier !== 'full') return true;
+  const overflowBudget = opts.crowdDetail === 'balanced' ? 24 : 20;
+  return opts.fullAnimationBudget <= overflowBudget;
 }

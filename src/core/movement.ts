@@ -5,6 +5,12 @@ import type { Unit } from './unit';
 import type { Vec2 } from './types';
 import type { Sim } from './sim';
 
+interface MovementBlocker {
+  pos: Vec2;
+  radius: number;
+  nearSurface: number;
+}
+
 /**
  * Kinematic steering with local avoidance (SPEC §3): no physics, no navmesh.
  * Units turn with their turn rate (hero "weight"), then move along facing.
@@ -17,32 +23,53 @@ export function steerToward(sim: Sim, u: Unit, point: Vec2, dt: number, arriveRa
 
   let desired = Math.atan2(toTarget.y, toTarget.x);
 
-  // Local avoidance: blocked ahead -> bias to a deterministic side
-  const probe = Math.min(d, u.radius + 90);
-  const ahead = v2(u.pos.x + Math.cos(u.facing) * probe, u.pos.y + Math.sin(u.facing) * probe);
-  let blocker: { pos: Vec2; radius: number } | null = null;
-  sim.forEachNearbyUnit(ahead, probe + u.radius + 80, (o) => {
-    if (blocker) return;
+  // Local avoidance: only dodge circles that actually block the current path.
+  // Facing-only probes can trap a unit into orbiting a prop when the clicked
+  // point is on the collider rim.
+  const localReach = u.radius + 90;
+  const blockers: MovementBlocker[] = [];
+  const considerBlocker = (pos: Vec2, radius: number): void => {
+    const clearance = radius + u.radius + 6;
+    const dx = pos.x - u.pos.x;
+    const dy = pos.y - u.pos.y;
+    const nearSurface = Math.hypot(dx, dy) - clearance;
+    if (nearSurface > localReach) return;
+    const targetLen2 = toTarget.x * toTarget.x + toTarget.y * toTarget.y;
+    if (targetLen2 <= 1e-6) return;
+    const t = (dx * toTarget.x + dy * toTarget.y) / targetLen2;
+    if (t <= 0 || t >= 1) return;
+    if (pointSegDist(pos, u.pos, point) >= clearance) return;
+    blockers.push({ pos, radius, nearSurface });
+  };
+  sim.forEachNearbyUnit(u.pos, localReach + u.radius + 120, (o) => {
     if (o === u || !o.alive || o.summary.cycloned) return;
-    const aheadR = o.radius + u.radius + 6;
-    const unitR = probe + o.radius + u.radius;
-    if (dist2(o.pos, ahead) < aheadR * aheadR && dist2(o.pos, u.pos) < unitR * unitR) {
-      blocker = o;
-    }
+    considerBlocker(o.pos, o.radius);
   });
-  if (!blocker) {
-    for (const o of sim.obstacles) {
-      const r = o.radius + u.radius + 6;
-      if (dist2(o.pos, ahead) < r * r) {
-        blocker = o;
-        break;
-      }
-    }
+  for (const o of sim.obstacles) {
+    considerBlocker(o.pos, o.radius);
   }
+  blockers.sort((a, b) => a.nearSurface - b.nearSurface);
+  const blocker = blockers[0];
   if (blocker) {
-    const off = sub(blocker.pos, u.pos);
-    const side = off.x * toTarget.y - off.y * toTarget.x; // cross sign picks the slip side
-    desired += (side >= 0 ? -1 : 1) * 0.9;
+    const shell = blocker.radius + u.radius;
+    const targetFromBlocker = sub(point, blocker.pos);
+    const targetShellDist = Math.abs(dist(point, blocker.pos) - shell);
+    if (targetShellDist <= arriveRadius) {
+      const targetDir = norm(targetFromBlocker);
+      const closestReachable = targetDir.x === 0 && targetDir.y === 0
+        ? v2(blocker.pos.x + Math.cos(u.facing) * shell, blocker.pos.y + Math.sin(u.facing) * shell)
+        : v2(blocker.pos.x + targetDir.x * shell, blocker.pos.y + targetDir.y * shell);
+      if (dist(u.pos, closestReachable) <= arriveRadius) return true;
+    }
+
+    const radial = norm(sub(u.pos, blocker.pos));
+    const side = (blocker.pos.x - u.pos.x) * toTarget.y - (blocker.pos.y - u.pos.y) * toTarget.x;
+    const slip = side >= 0 ? -1 : 1;
+    const rx = radial.x === 0 && radial.y === 0 ? Math.cos(u.facing + Math.PI) : radial.x;
+    const ry = radial.x === 0 && radial.y === 0 ? Math.sin(u.facing + Math.PI) : radial.y;
+    const tx = -ry * slip;
+    const ty = rx * slip;
+    desired = Math.atan2(ty + ry * 0.35, tx + rx * 0.35);
   }
 
   const turnSpeed = u.base.turnRate * TUNING.turnRateToRadPerSec;

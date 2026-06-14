@@ -1,7 +1,7 @@
 import { TUNING } from '../data/tuning';
 import { REG } from './registry';
 import type { ItemState, Unit } from './unit';
-import type { ItemDef, ItemSave } from './types';
+import type { ItemActiveOverride, ItemDef, ItemSave } from './types';
 
 // ------------------------------------------------------------------
 // Item runtime: slots, auto-sort, buying with component consumption,
@@ -50,11 +50,12 @@ export function freeSlotCount(items: (ItemState | null)[]): number {
   return items.filter((i) => i === null).length;
 }
 
-export function makeItemState(def: ItemDef): ItemState {
+export function makeItemState(def: ItemDef, activeOverride?: ItemActiveOverride): ItemState {
   return {
     defId: def.id,
     charges: def.charges ?? -1,
-    cooldownUntil: 0
+    cooldownUntil: 0,
+    activeOverride
   };
 }
 
@@ -107,6 +108,7 @@ export function executeBuy(def: ItemDef, unit: Unit, gold: number): number | nul
   unit.items[free] = makeItemState(def);
   unit.items = sortInventory(unit.items);
   unit.markStatsDirty();
+  unit.markVisualDirty();
   return gold - plan.goldCost;
 }
 

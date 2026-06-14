@@ -309,6 +309,17 @@ export class VfxManager {
 
   constructor(private heightAt: (x: number, y: number) => number, private transientCap: number = PERFORMANCE_BUDGET.transientVfxCap) {}
 
+  setTransientCap(cap: number): void {
+    this.transientCap = Math.max(0, Math.floor(cap));
+    while (this.transients.length > this.transientCap) {
+      const old = this.transients.shift();
+      if (old) {
+        this.group.remove(old.obj);
+        old.release?.();
+      }
+    }
+  }
+
   private w(x: number, y: number, lift = 0): THREE.Vector3 {
     return new THREE.Vector3(x / WORLD_SCALE, this.heightAt(x, y) + lift, y / WORLD_SCALE);
   }
@@ -431,7 +442,21 @@ export class VfxManager {
       }
       case 'levelup': {
         const p = unitPos(ev.uid);
-        if (p) this.pillar(p.x, p.y, '#ffe27d', 1.2);
+        if (p) {
+          this.pillar(p.x, p.y, '#ffe27d', 1.2);
+          this.burst(p.x, p.y, '#ffd86a', 1.35, 0.55, '#ffffff', 'shard');
+          this.impactDecal(p.x, p.y, '#ffd86a', 0.9, 0.8);
+        }
+        break;
+      }
+      case 'skill-spend': {
+        const p = unitPos(ev.uid);
+        if (p) {
+          const color = ev.kind === 'attribute' ? '#8adf7a' : ev.kind === 'talent' ? '#d990ff' : '#59c0e0';
+          const accent = ev.kind === 'attribute' ? '#ffffff' : '#ffd86a';
+          this.burst(p.x, p.y, color, ev.kind === 'talent' ? 1.05 : 0.82, 0.34, accent, ev.kind === 'ability' ? 'shard' : 'soft');
+          this.pillar(p.x, p.y, accent, ev.kind === 'talent' ? 0.42 : 0.28);
+        }
         break;
       }
       case 'loot-drop': {

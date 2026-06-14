@@ -8,6 +8,7 @@ import {
   installTestApi,
   testEnabled,
   testHudEnabled,
+  testQuality,
   testRenderHeadless,
   testSeed,
   testStarterHero
@@ -15,7 +16,7 @@ import {
 import { Hud } from './ui/hud';
 import { showTitle } from './ui/title';
 import { withLoading } from './ui/loading';
-import { evictTextureAssets, preloadAssetGroups } from './engine/asset-loaders';
+import { evictModelAssets, evictTextureAssets, preloadAssetGroups } from './engine/asset-loaders';
 import { ENABLED_HOLDOUT_SIGNATURES, heroAssetEntry, holdoutReplacementUrl } from './engine/assets';
 import type { GameSave } from './core/types';
 
@@ -67,6 +68,20 @@ function prewarmModelPathsForSave(save: GameSave): string[] {
   return [...paths];
 }
 
+function assetUrl(path: string): string {
+  return path.startsWith('/assets/') ? path : `/assets/${path}`;
+}
+
+function retainedModelUrlsForSave(save: GameSave): Set<string> {
+  const paths = new Set(prewarmModelPathsForSave(save).map(assetUrl));
+  for (const id of ENABLED_HOLDOUT_SIGNATURES) {
+    paths.add(assetUrl(`holdouts/${id}.glb`));
+    const replacement = holdoutReplacementUrl(id);
+    if (replacement) paths.add(assetUrl(replacement));
+  }
+  return paths;
+}
+
 function teardown(): void {
   cancelAnimationFrame(rafId);
   clearInterval(tickTimer);
@@ -116,6 +131,8 @@ function startGame(save: GameSave, opts: { headless?: boolean; hud?: boolean } =
   const enhancedAssets = tier !== 'low';
   const retainedAssetUrls = retainedAssetUrlsForRegion(save.regionId, enhancedAssets, enhancedAssets);
   evictTextureAssets((url) => !retainedAssetUrls.has(url));
+  const retainedModelUrls = retainedModelUrlsForSave(save);
+  evictModelAssets((url) => !retainedModelUrls.has(url));
   // Build + warm the scene behind a loading screen so the one-time shader/env
   // compile hitch lands off-screen instead of on the first playable frame.
   withLoading(`Entering ${regionName}…`, async (progress) => {
@@ -201,6 +218,7 @@ if (testEnabled()) {
     hero: testStarterHero(),
     seed: testSeed(),
     region,
+    quality: testQuality(),
     headless: HEADLESS_RENDER
   });
 } else {

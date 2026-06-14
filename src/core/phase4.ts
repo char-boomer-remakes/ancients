@@ -12,7 +12,22 @@ export function defaultAudioSettings(): AudioSettings {
 }
 
 export function defaultGraphicsSettings(): GraphicsSettings {
-  return { quality: 'auto', autoAdjustQuality: true, frameTarget: 60, exposure: 0.92, grade: 1, reducedMotion: false };
+  return {
+    quality: 'auto',
+    autoAdjustQuality: true,
+    frameTarget: 60,
+    bloom: 'tier',
+    ambientOcclusion: 'tier',
+    antiAliasing: 'tier',
+    shadows: 'tier',
+    drawDistance: 'medium',
+    crowdDetail: 'auto',
+    vfxDensity: 1,
+    screenShake: 1,
+    exposure: 0.92,
+    grade: 1,
+    reducedMotion: false
+  };
 }
 
 export function defaultCutsceneSettings(): CutsceneSettings {
@@ -39,6 +54,14 @@ export function migrateAudioSettings(old: (LegacySettings & { audio?: AudioSetti
       quality: gx?.quality ?? gd.quality,
       autoAdjustQuality: gx?.autoAdjustQuality ?? gd.autoAdjustQuality,
       frameTarget: gx?.frameTarget === 30 || gx?.frameTarget === 60 ? gx.frameTarget : gd.frameTarget,
+      bloom: gx?.bloom ?? gd.bloom,
+      ambientOcclusion: gx?.ambientOcclusion ?? gd.ambientOcclusion,
+      antiAliasing: gx?.antiAliasing ?? gd.antiAliasing,
+      shadows: gx?.shadows ?? gd.shadows,
+      drawDistance: gx?.drawDistance ?? gd.drawDistance,
+      crowdDetail: gx?.crowdDetail ?? gd.crowdDetail,
+      vfxDensity: gx?.vfxDensity ?? gd.vfxDensity,
+      screenShake: gx?.screenShake ?? gd.screenShake,
       exposure: gx?.exposure ?? gd.exposure,
       grade: gx?.grade ?? gd.grade,
       reducedMotion: gx?.reducedMotion ?? gd.reducedMotion

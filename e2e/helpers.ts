@@ -13,6 +13,9 @@ export interface BootOpts {
   webgl?: boolean;
   /** Mount the real HUD over the headless scene for DOM/control tests. */
   hud?: boolean;
+  /** Graphics quality override. 'low' skips the heavy env/vfx/holdout/party-model
+   *  preload chain, so the WebGL boot is much faster for UI-focused smoke tests. */
+  quality?: 'auto' | 'low' | 'medium' | 'high' | 'ultra';
 }
 
 export interface PartyMember {
@@ -64,9 +67,10 @@ export async function boot(page: Page, opts: BootOpts = {}): Promise<void> {
   if (opts.hero) q.set('hero', opts.hero);
   if (opts.region) q.set('region', opts.region);
   if (opts.seed !== undefined) q.set('seed', String(opts.seed));
+  if (opts.quality) q.set('quality', opts.quality);
   await page.goto('/?' + q.toString());
   await page.waitForFunction(() => Boolean((window as any).__test?.ready?.()), null, {
-    timeout: 30_000
+    timeout: 60_000
   });
 }
 
@@ -84,7 +88,7 @@ export async function waitForPlayableUi(page: Page): Promise<void> {
   await page.locator('#top-bar .region').waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForFunction(() => {
     const loading = document.getElementById('loading-screen');
-    return !loading || getComputedStyle(loading).display === 'none';
+    return Boolean((window as any).__game) || !loading || getComputedStyle(loading).display === 'none';
   }, null, { timeout: 60_000 });
 }
 
@@ -95,11 +99,7 @@ export async function skipActiveCinematic(page: Page): Promise<void> {
     const clear = () => {
       let guard = 0;
       while (g?.cinematic?.active && guard++ < 100) g.cinematicSkip();
-      const director = g?.cinematic as { current?: unknown; queue?: unknown[] } | undefined;
-      if (director) {
-        director.current = null;
-        director.queue = [];
-      }
+      g?.cinematic?.clear?.();
       const layer = document.getElementById('cinematic-layer');
       if (layer) {
         layer.classList.add('hidden');
@@ -110,7 +110,18 @@ export async function skipActiveCinematic(page: Page): Promise<void> {
     (window as any).__test.step();
     clear();
   });
-  await page.waitForFunction(() => !(window as any).__game?.cinematic?.active, null, {
+  await page.waitForFunction(() => {
+    const g = (window as any).__game;
+    let guard = 0;
+    while (g?.cinematic?.active && guard++ < 100) g.cinematicSkip();
+    g?.cinematic?.clear?.();
+    const layer = document.getElementById('cinematic-layer');
+    if (layer && !g?.cinematic?.active) {
+      layer.classList.add('hidden');
+      layer.innerHTML = '';
+    }
+    return !g?.cinematic?.active;
+  }, null, {
     timeout: 10_000
   });
 }

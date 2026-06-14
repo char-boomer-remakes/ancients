@@ -8,14 +8,15 @@ import { itemSetDef } from '../data/sets';
 import { xpProgress } from '../core/progression';
 import { itemReady, sellValue, computeBuyPlan } from '../core/items';
 import { buybackCost } from '../core/phase3';
-import { levelArr } from '../core/values';
+import { abilityMaxLevel, abilityRankRequiredHeroLevel, levelArr } from '../core/values';
 import { buildDefaultGambit } from '../core/controllers';
 import { statLabel, fmtStatValue, statLines, buildAbilityCard, buildItemCard, buildNeutralItemCard, buildHeroCard, type TooltipCard } from '../core/describe';
 import { abilityIcon, itemIcon, heroPortrait } from '../engine/icons';
 import { WORLD_SCALE } from '../engine/scale';
 import { Game } from '../systems/game';
 import type { InputController } from '../systems/input';
-import type { DifficultyTier, GambitAction, GambitCondition, GambitRule, GambitTargetMode, GraphicsSettings, ItemDef, ItemRarity, ItemSave, SimEvent, StatModMap } from '../core/types';
+import type { Unit } from '../core/unit';
+import type { DifficultyTier, GambitAction, GambitCondition, GambitRule, GambitTargetMode, GraphicsSettings, HeroDef, ItemDef, ItemRarity, ItemSave, SimEvent, StatModMap, TalentDef } from '../core/types';
 import * as THREE from 'three';
 
 // ------------------------------------------------------------------
@@ -181,6 +182,45 @@ function itemTooltip(def: ItemDef, item: ItemSave, equipped: (ItemSave | null)[]
   return lines.join('\n');
 }
 
+function liveRegen(stats: { maxHp: number; maxMana: number; hpRegen: number; manaRegen: number; hpRegenPctMax: number; manaRegenPctMax: number }): { hp: number; mana: number } {
+  return {
+    hp: stats.hpRegen + (stats.maxHp * stats.hpRegenPctMax) / 100,
+    mana: stats.manaRegen + (stats.maxMana * stats.manaRegenPctMax) / 100
+  };
+}
+
+function fmtRegen(value: number): string {
+  return value.toFixed(Math.abs(value) >= 10 ? 0 : 1);
+}
+
+function talentAbilityLines(talent: TalentDef, def: HeroDef): string[] {
+  const lines: string[] = [];
+  if (talent.abilityOverride) {
+    const patch = talent.abilityOverride;
+    const ability = def.abilities.find((a) => a.id === patch.abilityId);
+    const label = patch.valueKey.replace(/([A-Z])/g, ' $1').toLowerCase();
+    const value = patch.mode === 'add'
+      ? `${patch.amount >= 0 ? '+' : ''}${patch.amount}`
+      : patch.mode === 'mul'
+        ? `x${patch.amount}`
+        : `${patch.amount}`;
+    lines.push(`${ability?.name ?? patch.abilityId}: ${label} ${value}`);
+  }
+  if (talent.cooldownAdd) {
+    const patch = talent.cooldownAdd;
+    const ability = def.abilities.find((a) => a.id === patch.abilityId);
+    lines.push(`${ability?.name ?? patch.abilityId}: cooldown ${patch.amount >= 0 ? '+' : ''}${patch.amount}s`);
+  }
+  return lines;
+}
+
+function talentDetailLines(talent: TalentDef, def: HeroDef): string[] {
+  return [
+    ...(talent.mods ? statLines(talent.mods, 4) : []),
+    ...talentAbilityLines(talent, def)
+  ];
+}
+
 interface Floater {
   el: HTMLElement;
   simX: number;
@@ -221,7 +261,23 @@ export class Hud {
   private hoverCard!: HTMLElement;
   private tips = new Map<string, string>();
   private hoverKey: string | null = null;
+  private hoverKind: 'ui' | 'world' | null = null;
   private lastLiveGymKey = '';
+  private draggingItemSlot: number | null = null;
+  private readonly onItemDragOver = (e: DragEvent): void => {
+    if (this.draggingItemSlot === null) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  };
+  private readonly onItemDrop = (e: DragEvent): void => {
+    if (this.draggingItemSlot === null) return;
+    e.preventDefault();
+    this.finishItemDrag(e.clientX, e.clientY);
+  };
+  private readonly onItemDragEnd = (e: DragEvent): void => {
+    if (this.draggingItemSlot === null) return;
+    this.finishItemDrag(e.clientX, e.clientY);
+  };
 
   // gambit editor working state (§3.5)
   private gambitDraft: GambitRule[] = [];
@@ -326,6 +382,9 @@ export class Hud {
     input.onToggleJournal = () => this.toggleModal('journal');
     input.onToggleCodex = () => this.toggleModal('codex');
     input.onToggleServices = () => this.toggleModal('services');
+    window.addEventListener('dragover', this.onItemDragOver);
+    window.addEventListener('drop', this.onItemDrop);
+    window.addEventListener('dragend', this.onItemDragEnd);
     this.topBar.addEventListener('click', (e) => {
       const open = (e.target as HTMLElement).closest('[data-open]') as HTMLElement | null;
       const kind = open?.dataset.open as 'journal' | 'codex' | undefined;
@@ -343,21 +402,23 @@ export class Hud {
       const tipEl = target?.closest?.('[data-tip]') as HTMLElement | null;
       const key = tipEl?.dataset.tip ?? null;
       if (key && this.tips.has(key)) {
-        if (key !== this.hoverKey) {
+        if (key !== this.hoverKey || this.hoverKind !== 'ui') {
           this.hoverKey = key;
+          this.hoverKind = 'ui';
           this.hoverCard.innerHTML = this.tips.get(key)!;
           this.hoverCard.classList.remove('hidden');
         }
         this.positionHoverCard(e.clientX, e.clientY);
-      } else if (this.hoverKey !== null) {
+      } else if (this.hoverKind === 'ui') {
         this.hideHoverCard();
       }
     });
   }
 
   private hideHoverCard(): void {
-    if (this.hoverKey === null) return;
+    if (this.hoverKey === null && this.hoverKind === null) return;
     this.hoverKey = null;
+    this.hoverKind = null;
     this.hoverCard.classList.add('hidden');
   }
 
@@ -390,6 +451,165 @@ export class Hud {
     return `${head}${blurb}${effect}${stats}${meta}`;
   }
 
+  private renderWorldHoverCard(): void {
+    if (this.hoverKind === 'ui') return;
+    if (this.modalKind !== 'none' || this.input.uiModalOpen || this.game.cinematic.active) {
+      if (this.hoverKind === 'world') this.hideHoverCard();
+      return;
+    }
+
+    if (this.input.hoverItemUid >= 0) {
+      const drop = this.game.groundItemDrops.find((item) => item.uid === this.input.hoverItemUid);
+      if (!drop) {
+        if (this.hoverKind === 'world') this.hideHoverCard();
+        return;
+      }
+      const def = REG.item(drop.item.id);
+      const key = `world-item-${drop.uid}`;
+      if (this.hoverKey !== key || this.hoverKind !== 'world') {
+        this.hoverKey = key;
+        this.hoverKind = 'world';
+        this.hoverCard.innerHTML = this.cardHtml(buildItemCard(def, { mods: itemMods(drop.item, def) }), {
+          accent: rarityColor(def.rarity),
+          extra: [...itemDetailLines(drop.item, []), 'Click to pick up']
+        });
+        this.hoverCard.classList.remove('hidden');
+      }
+      this.positionHoverCard(this.input.mouseX, this.input.mouseY);
+      return;
+    }
+
+    if (this.input.hoverUid >= 0) {
+      const u = this.game.inputSim().unit(this.input.hoverUid);
+      if (!u || !u.alive) {
+        if (this.hoverKind === 'world') this.hideHoverCard();
+        return;
+      }
+      const key = this.worldUnitHoverKey(u);
+      if (this.hoverKey !== key || this.hoverKind !== 'world') {
+        this.hoverKey = key;
+        this.hoverKind = 'world';
+        this.hoverCard.innerHTML = this.cardHtml(this.worldUnitCard(u), { accent: this.worldUnitAccent(u) });
+        this.hoverCard.classList.remove('hidden');
+      }
+      this.positionHoverCard(this.input.mouseX, this.input.mouseY);
+      return;
+    }
+
+    if (this.hoverKind === 'world') this.hideHoverCard();
+  }
+
+  private worldUnitHoverKey(u: Unit): string {
+    const s = u.summary;
+    return [
+      'world-unit',
+      u.uid,
+      u.level,
+      Math.ceil(u.hp),
+      Math.ceil(u.mana),
+      Math.ceil(u.stats.maxHp),
+      Math.ceil(u.stats.maxMana),
+      u.team,
+      u.kind,
+      u.star,
+      u.elite ? 1 : 0,
+      u.capturable ? 1 : 0,
+      this.input.targeting.kind,
+      this.input.attackMoveArmed() ? 1 : 0,
+      s.stunned ? 1 : 0,
+      s.rooted ? 1 : 0,
+      s.silenced ? 1 : 0,
+      s.disarmed ? 1 : 0,
+      s.hexed ? 1 : 0,
+      s.magicImmune ? 1 : 0,
+      s.invisible ? 1 : 0,
+      s.invulnerable ? 1 : 0
+    ].join(':');
+  }
+
+  private worldUnitCard(u: Unit): TooltipCard {
+    const mana = u.stats.maxMana > 0 ? `${Math.ceil(u.mana)}/${Math.ceil(u.stats.maxMana)}` : null;
+    const stats = [
+      `HP ${Math.ceil(u.hp)}/${Math.ceil(u.stats.maxHp)}`,
+      mana ? `MP ${mana}` : '',
+      `DMG ${Math.round(u.stats.damage)}`,
+      `ARM ${u.stats.armor.toFixed(1)}`,
+      `MS ${Math.round(u.stats.moveSpeed)}`
+    ].filter(Boolean);
+    const meta = [
+      this.worldUnitType(u),
+      this.worldTeamLabel(u),
+      `Lv ${u.level}`,
+      u.star > 1 ? `${u.star} star` : '',
+      u.elite ? 'Elite' : '',
+      ...this.worldStatusLabels(u)
+    ].filter(Boolean);
+    return {
+      name: u.name,
+      kind: `Lv ${u.level} ${this.worldTeamLabel(u)}`,
+      blurb: this.worldUnitBlurb(u),
+      effect: this.worldUnitActions(u),
+      stats,
+      meta
+    };
+  }
+
+  private worldUnitType(u: Unit): string {
+    if (this.game.npcAt(u.uid)) return 'Recruit';
+    if (u.kind === 'hero' && u.heroId) return REG.hero(u.heroId).attribute.toUpperCase();
+    if (u.kind === 'creep' && u.tier) return `${u.tier} creep`;
+    return u.kind;
+  }
+
+  private worldTeamLabel(u: Unit): string {
+    if (u.kind === 'npc') return 'NPC';
+    if (u.team === 0) return 'Ally';
+    if (u.team === 2) return 'Neutral';
+    return 'Enemy';
+  }
+
+  private worldUnitBlurb(u: Unit): string {
+    if (u.kind === 'hero' && u.heroId) return REG.hero(u.heroId).title;
+    if (this.game.npcAt(u.uid)) return 'Available for recruitment.';
+    if (u.capturable) return 'Wild creature.';
+    if (u.ownerUid !== undefined) return 'Summoned unit.';
+    return '';
+  }
+
+  private worldUnitActions(u: Unit): string[] {
+    const g = this.game;
+    if (this.input.targeting.kind !== 'none') return ['Left-click to target this unit.'];
+    if (this.input.attackMoveArmed()) return [u.team === 0 ? 'Left-click to inspect this ally.' : 'Left-click to attack this unit.'];
+    if (g.npcAt(u.uid)) return ['Right-click to recruit.', 'Left-click to inspect.'];
+    if (!g.liveGym && !g.liveRaid && !g.liveDungeon && u.capturable && u.tier) {
+      const elig = g.captureEligible(u);
+      return [elig.ok ? 'Press T to capture.' : `Capture: ${elig.reason ?? 'not eligible'}.`, 'Right-click to attack.'];
+    }
+    if (u.team === 0 && g.liveGym) return ['Click to select for Captain\'s Call.'];
+    if (u.team !== 0 && g.controlledUnit()) return ['Right-click to attack.', 'Left-click to inspect.'];
+    return ['Left-click to inspect.'];
+  }
+
+  private worldStatusLabels(u: Unit): string[] {
+    const s = u.summary;
+    return [
+      s.stunned ? 'Stunned' : '',
+      s.rooted ? 'Rooted' : '',
+      s.silenced ? 'Silenced' : '',
+      s.disarmed ? 'Disarmed' : '',
+      s.hexed ? 'Hexed' : '',
+      s.magicImmune ? 'Magic Immune' : '',
+      s.invisible ? 'Invisible' : '',
+      s.invulnerable ? 'Invulnerable' : ''
+    ].filter(Boolean);
+  }
+
+  private worldUnitAccent(u: Unit): string {
+    if (u.team === 0) return 'var(--good)';
+    if (u.team === 2) return 'var(--brass-lite)';
+    return 'var(--bad)';
+  }
+
   // ---------- per frame ----------
 
   update(): void {
@@ -404,15 +624,11 @@ export class Hud {
     this.updateCoinFx();
     this.updateCaptureBar();
     this.renderHint();
+    this.renderWorldHoverCard();
     this.renderTrialChoice();
     this.renderLiveGym();
     this.renderCinematic();
     if (this.modalKind === 'shop' || this.modalKind === 'party') this.refreshModalDynamic();
-    // auto-open talent picker (never over a live gym fight or a blocking modal)
-    if (this.modalKind === 'none' && !this.game.liveGym) {
-      const rec = this.game.party[this.game.activeIdx];
-      if (rec && this.game.pendingTalentTier(rec) >= 0) this.toggleModal('talents');
-    }
   }
 
   // ---------- top bar ----------
@@ -554,16 +770,22 @@ export class Hud {
     const rec = g.party[g.activeIdx];
     const u = rec?.unit;
     if (!rec || !u) {
+      this.heroPanel.classList.remove('skill-ready');
       this.heroPanel.innerHTML = '';
       return;
     }
     const def = REG.hero(rec.heroId);
     const now = g.sim.time;
     const xp = xpProgress(u.level, u.xp);
+    const pendingSkillPoints = g.pendingSkillPoints(rec);
+    this.heroPanel.classList.toggle('skill-ready', pendingSkillPoints > 0);
 
     let abilitiesHtml = '';
     u.abilities.forEach((a, i) => {
       if (i >= 6) return;
+      const maxLevel = abilityMaxLevel(a.def);
+      const nextReq = a.level < maxLevel ? abilityRankRequiredHeroLevel(a.def, a.level + 1) : 0;
+      const canUpgrade = pendingSkillPoints > 0 && g.canLevelAbility(g.activeIdx, i);
       const cdLeft = Math.max(0, a.cooldownUntil - now);
       const cdTotal = (levelArr(a.def.cooldown, Math.max(1, a.level), 1) || 1) * TUNING.cooldownScale;
       const cdPct = cdLeft > 0 ? Math.min(100, (cdLeft / cdTotal) * 100) : 0;
@@ -571,13 +793,19 @@ export class Hud {
       const noMana = mana > 0 && u.mana < mana;
       const passive = ['passive', 'aura', 'attack-modifier'].includes(a.def.targeting);
       const toggledOn = a.toggled;
-      const abTip = this.registerTip(`ab-${i}`, buildAbilityCard(a.def, a.level));
+      const abTip = this.registerTip(`ab-${i}`, buildAbilityCard(a.def, a.level), {
+        extra: [
+          `Rank ${a.level}/${maxLevel}`,
+          a.level < maxLevel ? `Next rank: hero level ${nextReq}` : 'Max rank'
+        ]
+      });
       abilitiesHtml += `
-        <div class="ab-slot ${a.level <= 0 ? 'unlearned' : ''} ${noMana ? 'nomana' : ''} ${passive ? 'passive' : ''} ${toggledOn ? 'toggled' : ''}"${abTip}>
+        <div class="ab-slot ${a.level <= 0 ? 'unlearned' : ''} ${noMana ? 'nomana' : ''} ${passive ? 'passive' : ''} ${toggledOn ? 'toggled' : ''} ${canUpgrade ? 'upgradeable' : ''}"${abTip}>
           <img src="${abilityIcon(a.def)}" alt="">
           ${cdLeft > 0 ? `<div class="cd" style="height:${cdPct}%"></div><span class="cd-num">${cdLeft.toFixed(cdLeft > 5 ? 0 : 1)}</span>` : ''}
           <span class="hotkey">${passive ? '' : ABILITY_KEYS[i]}</span>
-          <span class="ab-level">${'•'.repeat(Math.max(0, a.level))}</span>
+          <span class="ab-level">${a.level}/${maxLevel}</span>
+          ${pendingSkillPoints > 0 && a.level < maxLevel ? `<button class="ab-plus" data-skill="${i}" ${canUpgrade ? '' : 'disabled'} title="${canUpgrade ? 'Spend a skill point' : `Requires hero level ${nextReq}`}">+</button>` : ''}
           ${mana > 0 ? `<span class="ab-mana">${Math.round(mana)}</span>` : ''}
         </div>`;
     });
@@ -607,7 +835,7 @@ export class Hud {
         extra: [...(qLine ? [qLine] : []), ...itemDetailLines(savedItem, equippedSaves)]
       });
       itemsHtml += `
-        <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}"${itemTip} style="border-color:${rarityColor(idef.rarity)};${gradeFrame}${qBorder}">
+        <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}" draggable="true" data-item-slot="${i}"${itemTip} style="border-color:${rarityColor(idef.rarity)};${gradeFrame}${qBorder}">
           <img src="${itemIcon(idef)}" alt="">
           ${cdLeft > 0 ? `<span class="cd-num">${cdLeft.toFixed(cdLeft > 5 ? 0 : 1)}</span>` : ''}
           ${it.charges >= 0 ? `<span class="charges">${it.charges}</span>` : ''}
@@ -615,26 +843,89 @@ export class Hud {
         </div>`;
     });
 
-    const talentPending = g.pendingTalentTier(rec) >= 0;
+    const talentPending = pendingSkillPoints > 0 && g.pendingTalentTier(rec) >= 0;
+    const attrPending = pendingSkillPoints > 0 && g.canSpendAttributePoint(g.activeIdx);
+    const facet = def.facets[rec.facetIdx];
+    const regen = liveRegen(u.stats);
+    const pickedTalents = rec.talentPicks
+      .map((pick, idx) => pick === null ? null : `Lv ${def.talents[idx].level}: ${def.talents[idx].options[pick].name}`)
+      .filter((line): line is string => !!line);
+    const talentPips = def.talents.map((tier, idx) => {
+      const pick = rec.talentPicks[idx];
+      const unlocked = rec.echo.talentTierUnlocks[idx];
+      const title = pick === null
+        ? `Lv ${tier.level}: unpicked`
+        : `Lv ${tier.level}: ${tier.options[pick].name}${unlocked ? ' + echo branch' : ''}`;
+      return `<span class="talent-pip ${pick === null ? '' : `picked branch-${pick}`} ${unlocked ? 'echo' : ''}" title="${esc(title)}">${tier.level}</span>`;
+    }).join('');
+    const facetLine = facet
+      ? `Facet: ${facet.name}${rec.echo.facetSwapUnlocked ? '' : ' (swap locked)'}`
+      : 'Facet: none';
+    const heroExtra = [
+      `Live: STR ${Math.round(u.stats.str)} · AGI ${Math.round(u.stats.agi)} · INT ${Math.round(u.stats.int)}`,
+      `Regen: +${fmtRegen(regen.hp)} HP/s · +${fmtRegen(regen.mana)} MP/s`,
+      facetLine,
+      `Talents: ${pickedTalents.length > 0 ? pickedTalents.join(' · ') : 'none picked'}`,
+      `Echo: ${rec.echo.kills} kill${rec.echo.kills === 1 ? '' : 's'} · ${rec.echo.talentTierUnlocks.filter(Boolean).length}/4 echo branches`
+    ];
+    const facetBadge = facet
+      ? `<span class="facet-badge ${rec.echo.facetSwapUnlocked ? '' : 'locked'}" title="${esc(facet.description)}">Facet: ${esc(facet.name)}</span>`
+      : '';
+    const skillSpendHtml = pendingSkillPoints > 0
+      ? `<div class="skill-points"><b>${pendingSkillPoints}</b> skill point${pendingSkillPoints === 1 ? '' : 's'} available
+          ${talentPending ? '<button class="talent-btn inline" id="talent-open">Talent</button>' : ''}
+          ${attrPending ? `<button class="btn tiny attr-btn" id="attr-up">+2 all stats (${rec.attributePoints}/${g.maxAttributePoints(rec)})</button>` : ''}
+        </div>`
+      : rec.attributePoints > 0
+        ? `<div class="skill-points spent">Attributes +${rec.attributePoints * 2} all stats</div>`
+        : '';
 
-    const heroTip = this.registerTip(`hero-active`, buildHeroCard(def, { level: u.level }), { accent: def.palette[2] ?? 'var(--brass)' });
+    const heroTip = this.registerTip(`hero-active`, buildHeroCard(def, { level: u.level }), { accent: def.palette[2] ?? 'var(--brass)', extra: heroExtra });
     this.heroPanel.innerHTML = `
       <div class="hp-left">
         <img class="portrait" src="${heroPortrait(def.palette, def.name[0], 72, def.silhouette)}" alt=""${heroTip}>
         <div class="hp-id">
-          <div class="hp-name">${def.name} <em>Lv ${u.level}</em>
-            ${talentPending ? '<button class="talent-btn" id="talent-open">Talent!</button>' : ''}
-          </div>
+          <div class="hp-name">${def.name} <em>Lv ${u.level}</em></div>
+          <div class="build-row">${facetBadge}<span class="talent-pips">${talentPips}</span></div>
           <div class="bar hp big"><div style="width:${(u.hp / u.stats.maxHp) * 100}%"></div><span>${Math.ceil(u.hp)} / ${Math.ceil(u.stats.maxHp)}</span></div>
           <div class="bar mana big"><div style="width:${u.stats.maxMana > 0 ? (u.mana / u.stats.maxMana) * 100 : 0}%"></div><span>${Math.ceil(u.mana)} / ${Math.ceil(u.stats.maxMana)}</span></div>
           <div class="bar xp"><div style="width:${xp.pct * 100}%"></div></div>
-          <div class="hp-stats">DMG ${Math.round(u.stats.damage)} · ARM ${u.stats.armor.toFixed(1)} · MS ${Math.round(u.stats.moveSpeed)}</div>
+          ${skillSpendHtml}
+          <div class="hp-stats">DMG ${Math.round(u.stats.damage)} · ARM ${u.stats.armor.toFixed(1)} · MS ${Math.round(u.stats.moveSpeed)} · HP +${fmtRegen(regen.hp)}/s · MP +${fmtRegen(regen.mana)}/s</div>
         </div>
       </div>
       <div class="ab-row">${abilitiesHtml}</div>
       <div class="item-grid">${itemsHtml}</div>
     `;
     this.heroPanel.querySelector('#talent-open')?.addEventListener('click', () => this.toggleModal('talents'));
+    this.heroPanel.querySelector('#attr-up')?.addEventListener('click', () => g.applyAttributePoint(g.activeIdx));
+    this.heroPanel.querySelectorAll('[data-skill]').forEach((el) => {
+      el.addEventListener('click', () => g.levelAbility(g.activeIdx, Number((el as HTMLElement).dataset.skill)));
+    });
+    this.heroPanel.querySelectorAll<HTMLElement>('[data-item-slot]').forEach((el) => {
+      el.addEventListener('dragstart', (e) => {
+        this.draggingItemSlot = Number(el.dataset.itemSlot);
+        el.classList.add('dragging');
+        e.dataTransfer?.setData('text/plain', `item-slot:${el.dataset.itemSlot}`);
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      });
+    });
+  }
+
+  private finishItemDrag(clientX: number, clientY: number): void {
+    const slot = this.draggingItemSlot;
+    this.draggingItemSlot = null;
+    this.heroPanel.querySelectorAll('.item-slot.dragging').forEach((el) => el.classList.remove('dragging'));
+    if (slot === null || !Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+    const target = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    if (target?.closest('#hero-panel, #modal-root')) return;
+    const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
+    const rect = canvas?.getBoundingClientRect();
+    const overCanvas = !!rect && clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+    if (!overCanvas) return;
+    const pick = this.game.scene.pick(clientX, clientY, this.game.inputSim(), this.game.visibleGroundItemDrops());
+    const fallback = this.game.activeUnit()?.pos;
+    this.game.dropHeroItemToGround(slot, pick.ground ?? this.input.hoverGround ?? fallback);
   }
 
   // ---------- toasts ----------
@@ -920,9 +1211,8 @@ export class Hud {
     }
     const gate = g.nearbyGate();
     if (gate && this.modalKind === 'none' && !hint) {
-      hint = gate.requiredBadge && !g.badges.has(gate.requiredBadge)
-        ? `${gate.name} — requires ${gate.requiredBadge.replace('-', ' ')}`
-        : `${gate.name} — press G to travel`;
+      const blockReason = g.gateTravelBlockReason(gate);
+      hint = blockReason ? `${gate.name} — ${blockReason}` : `${gate.name} — press G to travel`;
     }
     if (g.canShop() && this.modalKind === 'none' && !hint) hint = `${g.region.town.name} — B to shop · Y for services`;
     this.hint.textContent = hint;
@@ -2166,8 +2456,9 @@ export class Hud {
       const discounted = plan.goldCost < d.cost;
       const components = d.components && d.components.length > 0 ? [`Built from: ${d.components.map((c) => REG.item(c).name).join(', ')}`] : [];
       const shopTip = this.registerTip(`shop-${d.id}`, buildItemCard(d), { accent: rarityColor(d.rarity), extra: components });
+      const canBuy = plan.affordable && plan.fits;
       grid += `
-        <div class="shop-item ${plan.affordable && plan.fits ? '' : 'cant'}" data-buy="${d.id}"${shopTip}>
+        <div class="shop-item ${canBuy ? '' : 'cant'}" ${canBuy ? `data-buy="${d.id}"` : ''}${shopTip}>
           <img src="${itemIcon(d)}" alt="">
           <div class="si-name">${d.name}</div>
           <div class="si-cost ${discounted ? 'discount' : ''}">${plan.goldCost} g</div>
@@ -2504,13 +2795,21 @@ export class Hud {
     const echoText = echoUnlocked
       ? 'Echo attunement unlocked: after you choose a branch, the opposite branch applies too.'
       : "The other branch stays echo-locked until this hero's echo is defeated.";
+    const optionHtml = (pick: 0 | 1) => {
+      const option = t.options[pick];
+      const details = talentDetailLines(option, def);
+      const detailsHtml = details.length > 0
+        ? `<em>${details.map((line) => esc(line)).join(' · ')}</em>`
+        : '<em>Kit upgrade</em>';
+      return `<button class="talent-opt" data-pick="${pick}"><b>${esc(option.name)}</b>${detailsHtml}</button>`;
+    };
     this.modalShell(
       `${def.name} — Level ${t.level} Talent`,
       `
       <div class="talent-choice">
-        <button class="talent-opt" data-pick="0"><b>${t.options[0].name}</b></button>
+        ${optionHtml(0)}
         <div class="talent-or">or</div>
-        <button class="talent-opt" data-pick="1"><b>${t.options[1].name}</b></button>
+        ${optionHtml(1)}
       </div>
       <p class="dim">${echoText}</p>`
     );
@@ -2575,6 +2874,38 @@ export class Hud {
                 .join('')}
             </select>
           </label>
+          <label class="opt-row">Bloom
+            <select id="opt-bloom">
+              ${(['tier', 'off', 'low', 'high'] as const).map((v) => `<option value="${v}"${(g.settings.graphics?.bloom ?? 'tier') === v ? ' selected' : ''}>${v === 'tier' ? 'Tier' : v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="opt-row">Anti-aliasing
+            <select id="opt-aa">
+              ${(['tier', 'off', 'on'] as const).map((v) => `<option value="${v}"${(g.settings.graphics?.antiAliasing ?? 'tier') === v ? ' selected' : ''}>${v === 'tier' ? 'Tier' : v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="opt-row">Ambient occlusion
+            <select id="opt-ao">
+              ${(['tier', 'off', 'on'] as const).map((v) => `<option value="${v}"${(g.settings.graphics?.ambientOcclusion ?? 'tier') === v ? ' selected' : ''}>${v === 'tier' ? 'Tier' : v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="opt-row">Shadows
+            <select id="opt-shadows">
+              ${(['tier', 'off', 'low', 'high'] as const).map((v) => `<option value="${v}"${(g.settings.graphics?.shadows ?? 'tier') === v ? ' selected' : ''}>${v === 'tier' ? 'Tier' : v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="opt-row">Draw distance
+            <select id="opt-draw-distance">
+              ${(['low', 'medium', 'high'] as const).map((v) => `<option value="${v}"${(g.settings.graphics?.drawDistance ?? 'medium') === v ? ' selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="opt-row">Crowd detail
+            <select id="opt-crowd-detail">
+              ${(['auto', 'full', 'balanced', 'reduced'] as const).map((v) => `<option value="${v}"${(g.settings.graphics?.crowdDetail ?? 'auto') === v ? ' selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="opt-row">VFX density <input type="range" id="opt-vfx-density" min="0.5" max="1.5" step="0.05" value="${g.settings.graphics?.vfxDensity ?? 1}"></label>
+          <label class="opt-row">Screen shake <input type="range" id="opt-screen-shake" min="0" max="1" step="0.05" value="${g.settings.graphics?.screenShake ?? 1}"></label>
           <label class="opt-row">Exposure <input type="range" id="opt-exposure" min="0.5" max="1.5" step="0.02" value="${g.settings.graphics?.exposure ?? 0.92}"></label>
           <label class="opt-row">Color grade <input type="range" id="opt-grade" min="0" max="1.5" step="0.05" value="${g.settings.graphics?.grade ?? 1}"></label>
           <label class="opt-row"><input type="checkbox" id="opt-reduced-motion" ${g.settings.graphics?.reducedMotion ? 'checked' : ''}> Reduced motion (ambient FX)</label>
@@ -2658,6 +2989,38 @@ export class Hud {
       if (g.settings.graphics) g.settings.graphics.frameTarget = Number((e.target as HTMLSelectElement).value) as 30 | 60;
       g.applyGraphics();
     });
+    this.modal.querySelector('#opt-bloom')?.addEventListener('change', (e) => {
+      if (g.settings.graphics) g.settings.graphics.bloom = (e.target as HTMLSelectElement).value as GraphicsSettings['bloom'];
+      g.applyGraphics();
+    });
+    this.modal.querySelector('#opt-aa')?.addEventListener('change', (e) => {
+      if (g.settings.graphics) g.settings.graphics.antiAliasing = (e.target as HTMLSelectElement).value as GraphicsSettings['antiAliasing'];
+      g.applyGraphics();
+    });
+    this.modal.querySelector('#opt-ao')?.addEventListener('change', (e) => {
+      if (g.settings.graphics) g.settings.graphics.ambientOcclusion = (e.target as HTMLSelectElement).value as GraphicsSettings['ambientOcclusion'];
+      g.applyGraphics();
+    });
+    this.modal.querySelector('#opt-shadows')?.addEventListener('change', (e) => {
+      if (g.settings.graphics) g.settings.graphics.shadows = (e.target as HTMLSelectElement).value as GraphicsSettings['shadows'];
+      g.applyGraphics();
+    });
+    this.modal.querySelector('#opt-draw-distance')?.addEventListener('change', (e) => {
+      if (g.settings.graphics) g.settings.graphics.drawDistance = (e.target as HTMLSelectElement).value as GraphicsSettings['drawDistance'];
+      g.applyGraphics();
+    });
+    this.modal.querySelector('#opt-crowd-detail')?.addEventListener('change', (e) => {
+      if (g.settings.graphics) g.settings.graphics.crowdDetail = (e.target as HTMLSelectElement).value as GraphicsSettings['crowdDetail'];
+      g.applyGraphics();
+    });
+    this.modal.querySelector('#opt-vfx-density')?.addEventListener('input', (e) => {
+      if (g.settings.graphics) g.settings.graphics.vfxDensity = Number((e.target as HTMLInputElement).value);
+      g.applyGraphics();
+    });
+    this.modal.querySelector('#opt-screen-shake')?.addEventListener('input', (e) => {
+      if (g.settings.graphics) g.settings.graphics.screenShake = Number((e.target as HTMLInputElement).value);
+      g.applyGraphics();
+    });
     this.modal.querySelector('#opt-exposure')?.addEventListener('input', (e) => {
       if (g.settings.graphics) g.settings.graphics.exposure = Number((e.target as HTMLInputElement).value);
       g.applyGraphics();
@@ -2713,6 +3076,9 @@ export class Hud {
   }
 
   dispose(): void {
+    window.removeEventListener('dragover', this.onItemDragOver);
+    window.removeEventListener('drop', this.onItemDrop);
+    window.removeEventListener('dragend', this.onItemDragEnd);
     this.root.innerHTML = '';
   }
 }

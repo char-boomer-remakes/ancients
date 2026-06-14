@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { AttackVisualSpec, DungeonRoom, ItemAppearanceSpec, RegionDef, RoomTemplate, StageAction, Vec2, VfxSpec } from '../core/types';
+import type { AttackVisualSpec, DungeonRoom, GraphicsCrowdDetail, GraphicsDistance, GraphicsIntensityOverride, GraphicsTierOverride, GroundItemDrop, ItemAppearanceSpec, RegionDef, RoomTemplate, SilhouetteSpec, StageAction, Vec2, VfxSpec } from '../core/types';
 import type { Sim } from '../core/sim';
 import type { Unit } from '../core/unit';
 import { REG } from '../core/registry';
@@ -9,9 +9,10 @@ import { HeroAssetLoader, heroAssetEntry, creepCreatureUrl, ENABLED_HOLDOUT_MODE
 import { animateRig, applyCinematicGesture, newAnimState, type AnimState } from './animator';
 import { loadVfxBeamRamp, loadVfxTextureAtlas, VfxManager } from './vfx';
 import type { CinematicView } from './cinematic';
-import { lodForDistance, shouldAnimateAtLod } from './lod';
+import { lodForDistance, shouldAnimateAtLod, shouldUseCrowdImpostor, type LodTier } from './lod';
 import { WORLD_SCALE } from './scale';
 import { TUNING } from '../data/tuning';
+import { rarityColor } from '../data/quality';
 import { clampedPixelRatio, higherQualityTier, lowerQualityTier, qualityPreset, type QualityTier, type QualityPreset } from './performance';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -41,7 +42,7 @@ interface UnitView {
   lastTeamColor: string;
   stars: THREE.Group;
   immuneShell: THREE.Mesh;
-  lastItemVisualIds: (string | null)[];
+  lastItemVisualEpoch: number;
   materialMode: 'shared' | 'unique';
   materialOriginals: Map<THREE.Mesh, THREE.Material | THREE.Material[]>;
   materialClones: Set<THREE.Material>;
@@ -50,9 +51,30 @@ interface UnitView {
   removeAt: number; // time to despawn after death
 }
 
+interface UnitVisualSpec {
+  sil: SilhouetteSpec;
+  palette: [string, string, string];
+  key: string;
+}
+
+interface CrowdImpostorBatch {
+  mesh: THREE.InstancedMesh;
+  material: THREE.MeshStandardMaterial;
+  capacity: number;
+  count: number;
+}
+
 interface MapMarker {
   mesh: THREE.Mesh;
   material: THREE.MeshBasicMaterial;
+}
+
+interface GroundItemView {
+  root: THREE.Group;
+  disc: THREE.Mesh;
+  glow: THREE.Mesh;
+  material: THREE.MeshBasicMaterial;
+  glowMaterial: THREE.MeshBasicMaterial;
 }
 
 export type CameraMode = 'follow' | 'map' | 'cinematic';
@@ -72,6 +94,22 @@ export interface GraphicsRenderStats {
   adaptiveAuto: boolean;
   frameTarget: 30 | 60;
 }
+
+type SceneGraphicsControls = {
+  exposure?: number;
+  grade?: number;
+  reducedMotion?: boolean;
+  autoAdjustQuality?: boolean;
+  frameTarget?: 30 | 60;
+  bloom?: GraphicsIntensityOverride;
+  ambientOcclusion?: GraphicsTierOverride;
+  antiAliasing?: GraphicsTierOverride;
+  shadows?: GraphicsIntensityOverride;
+  drawDistance?: GraphicsDistance;
+  crowdDetail?: GraphicsCrowdDetail;
+  vfxDensity?: number;
+  screenShake?: number;
+};
 
 // Hemi is deliberately low: the PBR env map now supplies most of the ambient
 // fill, so a strong hemisphere light on top would wash the scene out.
@@ -269,7 +307,16 @@ const HP_BAR_GEOMETRY = new THREE.PlaneGeometry(1, 1);
 const HP_BAR_WIDTH = 1.5;
 const HP_BAR_HEIGHT = 0.16;
 const MANA_BAR_HEIGHT = 0.035;
+const UNIT_PICK_MIN_RADIUS = 0.85;
+const UNIT_PICK_RADIUS_PADDING = 0.38;
+const UNIT_PICK_VISUAL_RADIUS_FACTOR = 0.64;
+const UNIT_PICK_BOTTOM_FRAC = 0.12;
+const UNIT_PICK_TOP_PADDING = 0.35;
+const GROUND_ITEM_PICK_RADIUS = 0.72;
 const BLOOM_RESOLUTION_SCALE = 0.5;
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const CROWD_IMPOSTOR_GEOMETRY = new THREE.ConeGeometry(0.45, 1.45, 6);
+CROWD_IMPOSTOR_GEOMETRY.translate(0, 0.725, 0);
 
 export class GameScene {
   readonly renderer: THREE.WebGLRenderer;
@@ -298,6 +345,7 @@ export class GameScene {
   private weather: THREE.Points | null = null;
   private weatherVel: Float32Array | null = null;
   private views = new Map<number, UnitView>();
+  private crowdImpostors = new Map<string, CrowdImpostorBatch>();
   private heroAssets = new HeroAssetLoader();
   private disposed = false;
   private sceneToken = 0;
@@ -306,10 +354,25 @@ export class GameScene {
   private exposureBase = 0.92;
   private gradeScale = 1;
   private reducedMotion = false;
+  private bloomOverride: GraphicsIntensityOverride = 'tier';
+  private ambientOcclusionOverride: GraphicsTierOverride = 'tier';
+  private antiAliasingOverride: GraphicsTierOverride = 'tier';
+  private shadowOverride: GraphicsIntensityOverride = 'tier';
+  private drawDistanceScale = 1;
+  private crowdDetail: GraphicsCrowdDetail = 'auto';
+  private vfxDensity = 1;
+  private screenShakeScale = 1;
   private raycaster = new THREE.Raycaster();
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private pickSegmentStart = new THREE.Vector3();
+  private pickSegmentEnd = new THREE.Vector3();
+  private pickRayPoint = new THREE.Vector3();
+  private groundItemPoint = new THREE.Vector3();
+  private groundItemViews = new Map<number, GroundItemView>();
+  private groundItemGroup = new THREE.Group();
   private mapMarkers: MapMarker[] = [];
   private dungeonRoomGroup: THREE.Group | null = null;
+  private dungeonRoomFloorY: number | null = null;
 
   cameraMode: CameraMode = 'follow';
   private gameplayCameraMode: 'follow' | 'map' = 'follow';
@@ -317,6 +380,10 @@ export class GameScene {
   private viewFrustum = new THREE.Frustum();
   private viewFrustumMatrix = new THREE.Matrix4();
   private unitCullSphere = new THREE.Sphere();
+  private crowdMatrix = new THREE.Matrix4();
+  private crowdQuat = new THREE.Quaternion();
+  private crowdScale = new THREE.Vector3();
+  private crowdPos = new THREE.Vector3();
   private cinematicTarget = new THREE.Vector3();
   private cinematicLookAt = new THREE.Vector3();
   private cinematicBeatKey = '';
@@ -415,8 +482,10 @@ export class GameScene {
 
     if (qualityCfg.weatherDensity > 0) this.buildWeather(region.biome, qualityCfg.weatherDensity);
 
-    this.vfx = new VfxManager((x, y) => this.terrain.heightAt(x, y), qualityCfg.transientVfxCap);
+    this.vfx = new VfxManager((x, y) => this.visualGroundHeightAt(x, y), qualityCfg.transientVfxCap);
     this.scene.add(this.vfx.group);
+    this.groundItemGroup.name = 'ground-item-drops';
+    this.scene.add(this.groundItemGroup);
     if (qualityCfg.tier !== 'low') {
       void loadVfxTextureAtlas();
       void loadVfxBeamRamp();
@@ -433,6 +502,10 @@ export class GameScene {
     return !this.disposed;
   }
 
+  private visualGroundHeightAt(simX: number, simY: number): number {
+    return this.dungeonRoomFloorY ?? this.terrain.heightAt(simX, simY);
+  }
+
   private applyPixelRatio(): void {
     const base = clampedPixelRatio(window.devicePixelRatio, this.quality.tier);
     this.renderer.setPixelRatio(Math.max(0.75, base * this.adaptiveScale));
@@ -440,6 +513,36 @@ export class GameScene {
 
   /** Build the EffectComposer stack: render → bloom → grade → output → SMAA.
    *  Each pass is gated by the quality preset (GRAPHICS_SPEC §1.5, §9.6). */
+  private effectiveQuality(base: QualityPreset): QualityPreset {
+    const q: QualityPreset = { ...base };
+    if (this.bloomOverride === 'off') q.bloom = false;
+    else if (this.bloomOverride !== 'tier') {
+      q.bloom = true;
+      q.bloomStrength = this.bloomOverride === 'low' ? Math.min(q.bloomStrength, 0.45) : Math.max(q.bloomStrength, 0.75);
+      q.bloomRadius = this.bloomOverride === 'low' ? Math.min(q.bloomRadius, 0.35) : Math.max(q.bloomRadius, 0.55);
+    }
+    if (this.ambientOcclusionOverride !== 'tier') q.ao = this.ambientOcclusionOverride === 'on';
+    if (this.antiAliasingOverride !== 'tier') q.smaa = this.antiAliasingOverride === 'on';
+    if (this.shadowOverride === 'off') {
+      q.shadows = false;
+      q.staticPropShadows = false;
+    } else if (this.shadowOverride === 'low') {
+      q.shadows = true;
+      q.staticPropShadows = false;
+      q.shadowType = 'basic';
+      q.shadowMapSize = Math.min(q.shadowMapSize, 1024);
+    } else if (this.shadowOverride === 'high') {
+      q.shadows = true;
+      q.shadowType = 'pcf';
+      q.shadowMapSize = Math.max(q.shadowMapSize, 2048);
+    }
+    q.transientVfxCap = Math.max(0, Math.round(q.transientVfxCap * this.vfxDensity));
+    if (this.crowdDetail === 'full') q.fullRigAnimationBudget = Math.max(q.fullRigAnimationBudget, 64);
+    else if (this.crowdDetail === 'balanced') q.fullRigAnimationBudget = Math.min(q.fullRigAnimationBudget, 24);
+    else if (this.crowdDetail === 'reduced') q.fullRigAnimationBudget = Math.min(q.fullRigAnimationBudget, 12);
+    return q;
+  }
+
   private setupComposer(q: QualityPreset): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -555,8 +658,11 @@ export class GameScene {
     window.removeEventListener('resize', this.onResize);
     this.resetUnitViews();
     this.clearDungeonRoomVisuals();
+    this.clearGroundItemViews();
     this.scene.remove(this.vfx.group);
+    this.scene.remove(this.groundItemGroup);
     this.vfx.reset();
+    this.disposeCrowdImpostors();
     if (this.weather) {
       this.scene.remove(this.weather);
       this.weather.geometry.dispose();
@@ -591,8 +697,10 @@ export class GameScene {
     });
   }
 
-  /** Live-apply user graphics settings: exposure, grade strength, reduced motion, and adaptive policy. */
-  setGraphics(g: { exposure?: number; grade?: number; reducedMotion?: boolean; autoAdjustQuality?: boolean; frameTarget?: 30 | 60 }): void {
+  /** Live-apply user graphics settings: cheap scalar updates apply in place;
+   *  pass/shadow/LOD controls rebuild only the quality-gated systems. */
+  setGraphics(g: SceneGraphicsControls): void {
+    let rebuildQuality = false;
     if (g.exposure !== undefined) {
       this.exposureBase = Math.max(0.5, Math.min(1.5, g.exposure));
       this.renderer.toneMappingExposure = this.exposureBase;
@@ -614,6 +722,40 @@ export class GameScene {
       this.resetAdaptiveCounters();
       if (!this.adaptiveAuto) this.restoreQualityCeiling();
     }
+    if (g.bloom !== undefined && g.bloom !== this.bloomOverride) {
+      this.bloomOverride = g.bloom;
+      rebuildQuality = true;
+    }
+    if (g.ambientOcclusion !== undefined && g.ambientOcclusion !== this.ambientOcclusionOverride) {
+      this.ambientOcclusionOverride = g.ambientOcclusion;
+      rebuildQuality = true;
+    }
+    if (g.antiAliasing !== undefined && g.antiAliasing !== this.antiAliasingOverride) {
+      this.antiAliasingOverride = g.antiAliasing;
+      rebuildQuality = true;
+    }
+    if (g.shadows !== undefined && g.shadows !== this.shadowOverride) {
+      this.shadowOverride = g.shadows;
+      rebuildQuality = true;
+    }
+    if (g.drawDistance !== undefined) {
+      this.drawDistanceScale = g.drawDistance === 'low' ? 0.72 : g.drawDistance === 'high' ? 1.35 : 1;
+    }
+    if (g.crowdDetail !== undefined && g.crowdDetail !== this.crowdDetail) {
+      this.crowdDetail = g.crowdDetail;
+      rebuildQuality = true;
+    }
+    if (g.vfxDensity !== undefined) {
+      const next = Math.max(0.5, Math.min(1.5, g.vfxDensity));
+      if (Math.abs(next - this.vfxDensity) > 0.001) {
+        this.vfxDensity = next;
+        rebuildQuality = true;
+      }
+    }
+    if (g.screenShake !== undefined) {
+      this.screenShakeScale = Math.max(0, Math.min(1, g.screenShake));
+    }
+    if (rebuildQuality) this.applyQualityTier(this.quality.tier, true);
   }
 
   /** Add bounded camera-shake trauma (0..1). No-op under reducedMotion. Applied
@@ -621,7 +763,7 @@ export class GameScene {
    *  ones punch, then decay back to rest (WS-H hit-stop/shake feedback). */
   addShake(amount: number): void {
     if (this.reducedMotion) return;
-    this.shakeTrauma = Math.min(1, this.shakeTrauma + amount);
+    this.shakeTrauma = Math.min(1, this.shakeTrauma + amount * this.screenShakeScale);
   }
 
   /** Push the color grade toward an element color for a beat (big casts). The
@@ -654,10 +796,11 @@ export class GameScene {
   }
 
   private applyQualityTier(tier: QualityTier, resetCounters = false): void {
-    const q = qualityPreset(tier);
+    const q = this.effectiveQuality(qualityPreset(tier));
     this.quality = q;
     if (resetCounters) this.resetAdaptiveCounters();
     this.applyPixelRatio();
+    this.vfx.setTransientCap(q.transientVfxCap);
 
     this.renderer.shadowMap.enabled = q.shadows;
     this.renderer.shadowMap.type = q.shadowType === 'pcf' ? THREE.PCFShadowMap : THREE.BasicShadowMap;
@@ -771,7 +914,7 @@ export class GameScene {
 
   // ---------- per-frame ----------
 
-  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView: CinematicView | null = null): void {
+  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView: CinematicView | null = null, groundItems: readonly GroundItemDrop[] = []): void {
     this.recordFrameMs(renderDt * 1000, renderDt);
     this.time += renderDt;
     this.frameParity ^= 1;
@@ -780,6 +923,7 @@ export class GameScene {
     if (this.accentStrength > 0) this.accentStrength = Math.max(0, this.accentStrength - renderDt * 0.85);
     this.refreshViewFrustum();
     this.syncUnits(sim, renderDt);
+    this.syncGroundItems(groundItems);
     this.applyCinematicStage(cinematicView, sim, followUnit);
     this.vfx.syncProjectiles(sim.projectiles);
     this.vfx.syncZoneFollow((uid) => {
@@ -922,8 +1066,79 @@ export class GameScene {
       this.scene.remove(view.rig.root);
     }
     this.views.clear();
+    this.disposeCrowdImpostors();
     this.selectedUid = -1;
     this.vfx.reset();
+  }
+
+  private createGroundItemView(drop: GroundItemDrop): GroundItemView {
+    const color = rarityColor(REG.item(drop.item.id).rarity);
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false
+    });
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.52,
+      depthWrite: false
+    });
+    const root = new THREE.Group();
+    root.name = `ground-item:${drop.uid}`;
+    const disc = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.48, 24), material);
+    disc.rotation.x = -Math.PI / 2;
+    disc.renderOrder = 35;
+    const glow = new THREE.Mesh(new THREE.OctahedronGeometry(0.18), glowMaterial);
+    glow.position.y = 0.34;
+    glow.renderOrder = 36;
+    root.add(disc, glow);
+    this.groundItemGroup.add(root);
+    return { root, disc, glow, material, glowMaterial };
+  }
+
+  private syncGroundItems(drops: readonly GroundItemDrop[]): void {
+    const seen = new Set<number>();
+    for (const drop of drops) {
+      seen.add(drop.uid);
+      let view = this.groundItemViews.get(drop.uid);
+      if (!view) {
+        view = this.createGroundItemView(drop);
+        this.groundItemViews.set(drop.uid, view);
+      }
+      const y = this.visualGroundHeightAt(drop.pos.x, drop.pos.y) + 0.05;
+      view.root.position.set(drop.pos.x / WORLD_SCALE, y, drop.pos.y / WORLD_SCALE);
+      const pulse = 1 + Math.sin(this.time * 3.2 + drop.uid) * 0.08;
+      view.disc.scale.setScalar(pulse);
+      view.glow.position.y = 0.32 + Math.sin(this.time * 4.1 + drop.uid) * 0.08;
+    }
+    for (const [uid, view] of this.groundItemViews) {
+      if (seen.has(uid)) continue;
+      this.disposeGroundItemView(view);
+      this.groundItemViews.delete(uid);
+    }
+  }
+
+  private disposeGroundItemView(view: GroundItemView): void {
+    this.groundItemGroup.remove(view.root);
+    view.disc.geometry.dispose();
+    view.glow.geometry.dispose();
+    view.material.dispose();
+    view.glowMaterial.dispose();
+  }
+
+  private clearGroundItemViews(): void {
+    for (const [, view] of this.groundItemViews) this.disposeGroundItemView(view);
+    this.groundItemViews.clear();
+  }
+
+  private disposeCrowdImpostors(): void {
+    for (const batch of this.crowdImpostors.values()) {
+      this.scene.remove(batch.mesh);
+      batch.material.dispose();
+    }
+    this.crowdImpostors.clear();
   }
 
   setDungeonRoom(template: RoomTemplate | null, room: DungeonRoom | null = null): void {
@@ -949,16 +1164,17 @@ export class GameScene {
       depthTest: false,
       depthWrite: false
     });
+    const floorY = this.terrain.heightAt(template.size.x / 2, template.size.y / 2) + 0.08;
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, h), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(w / 2, this.terrain.heightAt(template.size.x / 2, template.size.y / 2) + 0.08, h / 2);
+    floor.position.set(w / 2, floorY, h / 2);
     floor.renderOrder = 6;
     group.add(floor);
 
     const edgePoints: THREE.Vector3[] = [];
     const edgeSegments = 24;
     const pushEdgePoint = (x: number, y: number): void => {
-      edgePoints.push(new THREE.Vector3(x / WORLD_SCALE, this.terrain.heightAt(x, y) + 0.24, y / WORLD_SCALE));
+      edgePoints.push(new THREE.Vector3(x / WORLD_SCALE, floorY + 0.16, y / WORLD_SCALE));
     };
     for (let i = 0; i <= edgeSegments; i++) pushEdgePoint(template.size.x * (i / edgeSegments), 0);
     for (let i = 1; i <= edgeSegments; i++) pushEdgePoint(template.size.x, template.size.y * (i / edgeSegments));
@@ -974,7 +1190,7 @@ export class GameScene {
     for (const c of template.connectors) {
       const door = new THREE.Mesh(doorGeo, doorMat);
       door.rotation.x = -Math.PI / 2;
-      door.position.set(c.at.x / WORLD_SCALE, this.terrain.heightAt(c.at.x, c.at.y) + 0.3, c.at.y / WORLD_SCALE);
+      door.position.set(c.at.x / WORLD_SCALE, floorY + 0.22, c.at.y / WORLD_SCALE);
       door.renderOrder = 8;
       group.add(door);
     }
@@ -984,12 +1200,13 @@ export class GameScene {
     for (const a of template.spawnAnchors) {
       const marker = new THREE.Mesh(anchorGeo, anchorMat);
       marker.rotation.x = -Math.PI / 2;
-      marker.position.set(a.x / WORLD_SCALE, this.terrain.heightAt(a.x, a.y) + 0.28, a.y / WORLD_SCALE);
+      marker.position.set(a.x / WORLD_SCALE, floorY + 0.2, a.y / WORLD_SCALE);
       marker.renderOrder = 8;
       group.add(marker);
     }
 
     this.dungeonRoomGroup = group;
+    this.dungeonRoomFloorY = floorY;
     this.scene.add(group);
   }
 
@@ -1009,6 +1226,7 @@ export class GameScene {
       Array.isArray(material) ? material.forEach(dispose) : dispose(material);
     });
     this.dungeonRoomGroup = null;
+    this.dungeonRoomFloorY = null;
   }
 
   private createMapMarkers(region: RegionDef): void {
@@ -1079,9 +1297,25 @@ export class GameScene {
   private syncUnits(sim: Sim, dt: number): void {
     const seen = new Set<number>();
     let fullAnimationBudget = this.quality.fullRigAnimationBudget;
+    this.beginCrowdImpostors();
     for (const u of sim.unitsArr) {
       if (u.kind === 'npc' && !u.alive) continue;
       seen.add(u.uid);
+      const tier = this.lodTierForUnit(u);
+      if (shouldUseCrowdImpostor({
+        tier,
+        crowdDetail: this.crowdDetail,
+        fullAnimationBudget,
+        selected: u.uid === this.selectedUid,
+        alive: u.alive,
+        isHero: u.kind === 'hero',
+        isNpc: u.kind === 'npc'
+      })) {
+        const view = this.views.get(u.uid);
+        if (view) this.hideViewForCrowd(view);
+        this.syncCrowdImpostor(u, sim.time);
+        continue;
+      }
       let view = this.views.get(u.uid);
       if (!view) {
         if (!u.alive) continue;
@@ -1090,6 +1324,7 @@ export class GameScene {
       }
       fullAnimationBudget = this.updateView(u, view, dt, sim.time, fullAnimationBudget);
     }
+    this.endCrowdImpostors();
     // remove views for despawned units or finished death anims
     for (const [uid, view] of this.views) {
       const u = sim.unit(uid);
@@ -1101,6 +1336,107 @@ export class GameScene {
         this.views.delete(uid);
       }
     }
+  }
+
+  private lodTierForUnit(u: Unit): LodTier {
+    const wx = u.pos.x / WORLD_SCALE;
+    const wz = u.pos.y / WORLD_SCALE;
+    const distLod = Math.hypot(wx - this.camTarget.x, wz - this.camTarget.z);
+    return lodForDistance(distLod / this.drawDistanceScale);
+  }
+
+  private hideViewForCrowd(view: UnitView): void {
+    view.rig.root.visible = false;
+    this.setUnitShadowCasting(view, false);
+    this.restoreSharedMaterials(view);
+  }
+
+  private beginCrowdImpostors(): void {
+    for (const batch of this.crowdImpostors.values()) {
+      batch.count = 0;
+      batch.mesh.visible = false;
+    }
+  }
+
+  private endCrowdImpostors(): void {
+    for (const batch of this.crowdImpostors.values()) {
+      batch.mesh.count = batch.count;
+      batch.mesh.visible = batch.count > 0;
+      if (batch.count > 0) {
+        batch.mesh.instanceMatrix.needsUpdate = true;
+        batch.mesh.computeBoundingSphere();
+      }
+    }
+  }
+
+  private syncCrowdImpostor(u: Unit, simTime: number): void {
+    const visible = u.alive ? u.isVisibleTo(this.playerTeam, simTime) : true;
+    if (!visible && u.team !== this.playerTeam) return;
+    const spec = this.unitVisualSpec(u);
+    const batch = this.ensureCrowdImpostorBatch(spec, TUNING.scaleCeilings.raidUnits);
+    if (batch.count >= batch.capacity) return;
+    const wx = u.pos.x / WORLD_SCALE;
+    const wz = u.pos.y / WORLD_SCALE;
+    const y = this.visualGroundHeightAt(u.pos.x, u.pos.y);
+    const s = Math.max(0.55, spec.sil.scale ?? 1);
+    const rotY = Math.atan2(Math.cos(u.facing), Math.sin(u.facing));
+    this.crowdPos.set(wx, y, wz);
+    this.crowdQuat.setFromAxisAngle(Y_AXIS, rotY);
+    this.crowdScale.set(s, s, s);
+    this.crowdMatrix.compose(this.crowdPos, this.crowdQuat, this.crowdScale);
+    batch.mesh.setMatrixAt(batch.count, this.crowdMatrix);
+    batch.count++;
+  }
+
+  private ensureCrowdImpostorBatch(spec: UnitVisualSpec, minCapacity: number): CrowdImpostorBatch {
+    const existing = this.crowdImpostors.get(spec.key);
+    if (existing && existing.capacity >= minCapacity) return existing;
+    return this.growCrowdImpostorBatch(spec, Math.max(8, minCapacity));
+  }
+
+  private growCrowdImpostorBatch(spec: UnitVisualSpec, capacity: number): CrowdImpostorBatch {
+    const old = this.crowdImpostors.get(spec.key);
+    if (old) {
+      this.scene.remove(old.mesh);
+      old.material.dispose();
+    }
+    const material = new THREE.MeshStandardMaterial({
+      color: spec.palette[0],
+      emissive: spec.palette[2],
+      emissiveIntensity: 0.08,
+      roughness: 0.76,
+      metalness: 0.12
+    });
+    const mesh = new THREE.InstancedMesh(CROWD_IMPOSTOR_GEOMETRY, material, capacity);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    mesh.count = 0;
+    mesh.visible = false;
+    this.scene.add(mesh);
+    const batch = { mesh, material, capacity, count: 0 };
+    this.crowdImpostors.set(spec.key, batch);
+    return batch;
+  }
+
+  private unitVisualSpec(u: Unit): UnitVisualSpec {
+    let sil = u.kind === 'hero' && u.heroId ? REG.hero(u.heroId).silhouette : undefined;
+    let palette: [string, string, string] | undefined =
+      u.kind === 'hero' && u.heroId ? REG.hero(u.heroId).palette : undefined;
+    let id = u.kind === 'hero' ? u.heroId ?? 'hero' : u.kind;
+    if (u.kind === 'creep' && u.creepId) {
+      const def = REG.creep(u.creepId);
+      sil = def.silhouette;
+      palette = def.palette;
+      id = u.creepId;
+    }
+    if (u.visual) {
+      sil = u.visual.silhouette;
+      palette = u.visual.palette;
+      id = `visual:${u.visual.silhouette.build}:${u.name}`;
+    }
+    if (!sil) sil = { build: 'biped', scale: 1 };
+    if (!palette) palette = ['#888899', '#666677', '#aaaabb'];
+    return { sil, palette, key: `${u.kind}:${id}:${sil.build}:${palette.join('/')}` };
   }
 
   /** Apply the generated bump detail to a hero's PBR materials (browser only). */
@@ -1115,20 +1451,7 @@ export class GameScene {
   }
 
   private createView(u: Unit): UnitView {
-    let sil = u.kind === 'hero' && u.heroId ? REG.hero(u.heroId).silhouette : undefined;
-    let palette: [string, string, string] | undefined =
-      u.kind === 'hero' && u.heroId ? REG.hero(u.heroId).palette : undefined;
-    if (u.kind === 'creep' && u.creepId) {
-      const def = REG.creep(u.creepId);
-      sil = def.silhouette;
-      palette = def.palette;
-    }
-    if (u.visual) {
-      sil = u.visual.silhouette;
-      palette = u.visual.palette;
-    }
-    if (!sil) sil = { build: 'biped', scale: 1 };
-    if (!palette) palette = ['#888899', '#666677', '#aaaabb'];
+    const { sil, palette } = this.unitVisualSpec(u);
 
     const rig = buildUnitRig(sil, palette);
     if (u.kind === 'hero' && u.heroId) {
@@ -1197,8 +1520,8 @@ export class GameScene {
     }
 
     // Phase 3 (GRAPHICS_SPEC §13): mount an authored Quaternius creature (CC0)
-    // for creeps; mountHeroModel hides the procedural body, so the rig stays the
-    // live fallback if the GLB is missing. The model rides rig.body (bob/lean).
+    // for creeps. Keep the procedural body visible underneath as a guaranteed
+    // readable fallback; creature assets are an enhancement layer, not the floor.
     if (u.kind === 'creep') {
       const creatureUrl = creepCreatureUrl(u.creepId, sil.build);
       if (creatureUrl) {
@@ -1206,7 +1529,7 @@ export class GameScene {
           if (asset && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
             const model = cloneModel(asset.scene);
             recolorToPalette(model, palette, undefined, { solid: true, opaque: true });
-            mountHeroModel(rig, model, asset.animations);
+            mountHeroModel(rig, model, asset.animations, undefined, { hideProcedural: false });
           }
         });
       }
@@ -1274,7 +1597,7 @@ export class GameScene {
     const view: UnitView = {
       rig, anim: newAnimState(), ring, hpBar, hpFill, manaFill, hpMaterial,
       lastHpPct: -1, lastManaPct: -1, lastTeamColor: '',
-      stars, immuneShell, lastItemVisualIds: this.itemVisualIds(u),
+      stars, immuneShell, lastItemVisualEpoch: u.visualEpoch,
       materialMode: 'shared', materialOriginals: new Map(), materialClones: new Set(),
       shadowCasters: [], shadowCasting: true,
       removeAt: 0
@@ -1287,14 +1610,13 @@ export class GameScene {
     const { rig } = view;
     const wx = u.pos.x / WORLD_SCALE;
     const wz = u.pos.y / WORLD_SCALE;
-    const distLod = Math.hypot(wx - this.camTarget.x, wz - this.camTarget.z);
-    const tier = lodForDistance(distLod);
+    const tier = this.lodTierForUnit(u);
 
     // death cleanup timer
     if (!u.alive && view.removeAt === 0) view.removeAt = this.time + 2.2;
     if (u.alive) view.removeAt = 0;
 
-    if (this.shouldSkipOffscreenUnit(u, view, wx, wz, tier)) {
+    if (this.shouldSkipOffscreenUnit(u, view, wx, wz)) {
       rig.root.visible = false;
       this.setUnitShadowCasting(view, false);
       this.restoreSharedMaterials(view);
@@ -1307,14 +1629,17 @@ export class GameScene {
       if (view.materialMode === 'unique') this.ensureUniqueMaterials(view);
     }
 
-    const wy = this.terrain.heightAt(u.pos.x, u.pos.y);
+    const wy = this.visualGroundHeightAt(u.pos.x, u.pos.y);
 
     // smooth visual position (sim ticks at 30 Hz; render is faster)
     const k = Math.min(1, dt * 18);
     if (rig.root.position.lengthSq() === 0) rig.root.position.set(wx, wy, wz);
     rig.root.position.x += (wx - rig.root.position.x) * k;
     rig.root.position.z += (wz - rig.root.position.z) * k;
-    rig.root.position.y = wy;
+    rig.root.position.y = this.visualGroundHeightAt(
+      rig.root.position.x * WORLD_SCALE,
+      rig.root.position.z * WORLD_SCALE
+    );
 
     // facing: sim dir (cos f, sin f) on (x,z); rig forward is +z
     const targetRotY = Math.atan2(Math.cos(u.facing), Math.sin(u.facing));
@@ -1369,8 +1694,8 @@ export class GameScene {
     return fullAnimationBudget;
   }
 
-  private shouldSkipOffscreenUnit(u: Unit, view: UnitView, wx: number, wz: number, tier: ReturnType<typeof lodForDistance>): boolean {
-    if (tier === 'full' || u.uid === this.selectedUid || !u.alive) return false;
+  private shouldSkipOffscreenUnit(u: Unit, view: UnitView, wx: number, wz: number): boolean {
+    if (u.uid === this.selectedUid || !u.alive) return false;
     const centerY = view.rig.root.position.lengthSq() > 0
       ? view.rig.root.position.y + view.rig.height * 0.55
       : this.camTarget.y + view.rig.height * 0.55;
@@ -1492,20 +1817,10 @@ export class GameScene {
     }
   }
 
-  private itemVisualIds(u: Unit): (string | null)[] {
-    return u.items.map((it) => it?.defId ?? null);
-  }
-
   private itemVisualChanged(u: Unit, view: UnitView): boolean {
-    let changed = false;
-    for (let i = 0; i < u.items.length; i++) {
-      const id = u.items[i]?.defId ?? null;
-      if (view.lastItemVisualIds[i] !== id) {
-        view.lastItemVisualIds[i] = id;
-        changed = true;
-      }
-    }
-    return changed;
+    if (view.lastItemVisualEpoch === u.visualEpoch) return false;
+    view.lastItemVisualEpoch = u.visualEpoch;
+    return true;
   }
 
   private itemAppearancesFor(u: Unit): ItemAppearanceSpec[] {
@@ -1686,7 +2001,7 @@ export class GameScene {
   private worldPosForUnit(u: Unit): THREE.Vector3 {
     return new THREE.Vector3(
       u.pos.x / WORLD_SCALE,
-      this.terrain.heightAt(u.pos.x, u.pos.y),
+      this.visualGroundHeightAt(u.pos.x, u.pos.y),
       u.pos.y / WORLD_SCALE
     );
   }
@@ -1844,7 +2159,7 @@ export class GameScene {
     if (follow) {
       const wx = follow.pos.x / WORLD_SCALE;
       const wz = follow.pos.y / WORLD_SCALE;
-      const wy = this.terrain.heightAt(follow.pos.x, follow.pos.y);
+      const wy = this.visualGroundHeightAt(follow.pos.x, follow.pos.y);
       const k = Math.min(1, dt * 6);
       this.camTarget.x += (wx - this.camTarget.x) * k;
       this.camTarget.y += (wy - this.camTarget.y) * k;
@@ -1882,33 +2197,68 @@ export class GameScene {
 
   // ---------- picking ----------
 
-  /** Raycast from screen coords; returns hovered unit uid or ground sim-point. */
-  pick(clientX: number, clientY: number, sim: Sim): { uid?: number; ground?: { x: number; y: number } } {
+  private unitPickRadius(u: Unit, view: UnitView): number {
+    const rootScale = Math.max(view.rig.root.scale.x, view.rig.root.scale.z, 1);
+    const simRadius = u.radius / WORLD_SCALE;
+    const visualRadius = view.rig.scale * UNIT_PICK_VISUAL_RADIUS_FACTOR;
+    return Math.max(UNIT_PICK_MIN_RADIUS, simRadius + UNIT_PICK_RADIUS_PADDING, visualRadius) * rootScale;
+  }
+
+  private unitPickHeight(view: UnitView): number {
+    const rootScaleY = Math.max(view.rig.root.scale.y, 1);
+    return view.rig.height * rootScaleY;
+  }
+
+  /** Raycast from screen coords; returns hovered unit, ground item, or ground sim-point. */
+  pick(clientX: number, clientY: number, sim: Sim, groundItems: readonly GroundItemDrop[] = []): { uid?: number; itemUid?: number; ground?: { x: number; y: number } } {
     const ndc = new THREE.Vector2(
       (clientX / window.innerWidth) * 2 - 1,
       -(clientY / window.innerHeight) * 2 + 1
     );
     this.raycaster.setFromCamera(ndc, this.camera);
 
-    // units first: ray vs cylinder approx (distance from ray to unit axis)
+    // Units first: forgiving vertical capsules around visible rigs. This only
+    // affects mouse targeting; sim radii remain combat/pathing radii.
     let best: { uid: number; d: number } | null = null;
     for (const u of sim.unitsArr) {
       if (!u.alive) continue;
       const view = this.views.get(u.uid);
       if (!view || !view.rig.root.visible) continue;
-      const center = new THREE.Vector3(
+      const height = this.unitPickHeight(view);
+      this.pickSegmentStart.set(
         view.rig.root.position.x,
-        view.rig.root.position.y + view.rig.height * 0.55,
+        view.rig.root.position.y + height * UNIT_PICK_BOTTOM_FRAC,
         view.rig.root.position.z
       );
-      const r = Math.max(0.55, u.radius / WORLD_SCALE + 0.25);
-      const distToRay = this.raycaster.ray.distanceToPoint(center);
-      if (distToRay < r) {
-        const along = center.clone().sub(this.raycaster.ray.origin).dot(this.raycaster.ray.direction);
+      this.pickSegmentEnd.set(
+        view.rig.root.position.x,
+        view.rig.root.position.y + height + UNIT_PICK_TOP_PADDING,
+        view.rig.root.position.z
+      );
+      const radius = this.unitPickRadius(u, view);
+      const distSq = this.raycaster.ray.distanceSqToSegment(this.pickSegmentStart, this.pickSegmentEnd, this.pickRayPoint);
+      if (distSq < radius * radius) {
+        const along = this.pickRayPoint.sub(this.raycaster.ray.origin).dot(this.raycaster.ray.direction);
+        if (along < 0) continue;
         if (!best || along < best.d) best = { uid: u.uid, d: along };
       }
     }
     if (best) return { uid: best.uid };
+
+    let bestItem: { uid: number; d: number } | null = null;
+    for (const drop of groundItems) {
+      this.groundItemPoint.set(
+        drop.pos.x / WORLD_SCALE,
+        this.visualGroundHeightAt(drop.pos.x, drop.pos.y) + 0.42,
+        drop.pos.y / WORLD_SCALE
+      );
+      const distSq = this.raycaster.ray.distanceSqToPoint(this.groundItemPoint);
+      if (distSq >= GROUND_ITEM_PICK_RADIUS * GROUND_ITEM_PICK_RADIUS) continue;
+      const along = this.groundItemPoint.clone().sub(this.raycaster.ray.origin).dot(this.raycaster.ray.direction);
+      if (along < 0) continue;
+      if (!bestItem || along < bestItem.d) bestItem = { uid: drop.uid, d: along };
+    }
+    if (bestItem) return { itemUid: bestItem.uid };
 
     // ground: intersect y≈avg plane then refine with height fn
     const pt = new THREE.Vector3();

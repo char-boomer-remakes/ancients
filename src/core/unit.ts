@@ -26,6 +26,7 @@ import type {
   GambitRule,
   HeroBaseStats,
   HeroDef,
+  ItemActiveOverride,
   ItemGrade,
   ItemQuality,
   RolledAffix,
@@ -39,7 +40,7 @@ import type {
   UnitKind,
   Vec2
 } from './types';
-import { abilityMaxLevel, abilityVal, levelArr } from './values';
+import { abilityMaxLevel, abilityVal, autoAbilityLevels, levelArr, normalizeAbilityLevels } from './values';
 
 export interface CreepCombatScaleOpts {
   regionId?: string;
@@ -60,6 +61,7 @@ export interface ItemState {
   defId: string;
   charges: number;           // -1 = n/a
   cooldownUntil: number;
+  activeOverride?: ItemActiveOverride;
   bound?: boolean;
   quality?: ItemQuality;
   inscribedKills?: number;   // banked holder kills for an Inscribed copy (LOOT L5)
@@ -186,6 +188,7 @@ export class Unit {
 
   abilities: AbilityState[] = [];
   items: (ItemState | null)[] = [null, null, null, null, null, null];
+  visualEpoch = 0; // bumped when equipment changes so the renderer avoids per-frame item-key work
   statuses: StatusInstance[] = [];
   elementAuras: Partial<Record<Exclude<import('./types').ElementId, 'neutral'>, { gauge: number; until: number; sourceUid: number }>> = {};
   permanentMods: Record<string, number> = {};  // Flesh Heap stacks etc.
@@ -207,6 +210,10 @@ export class Unit {
 
   ctrl: ControllerRef = { kind: 'none' };
 
+  markVisualDirty(): void {
+    this.visualEpoch++;
+  }
+
   bounty = { xp: 0, gold: 0 };
 
   lastEnemyDamageAt = -999;  // for blink lockout + save combat lock
@@ -226,6 +233,8 @@ export class Unit {
   castingUntil = -1;
   /** Gesture the animator should play during the current cast window (Phase 6 §3.11). */
   castGesture: AnimGesture | null = null;
+  /** Presentation lock for multi-step abilities; lower-priority item taps must not steal their pose. */
+  castGestureLockUntil = -1;
   /** Per-hero rig/weight/voice profile, copied from the def for the animator + audio. */
   animProfile?: AnimProfile;
   /** In-character bark lines, copied from the def; the sim core emits one on triggers (Phase 6 §3.13). */
@@ -259,6 +268,13 @@ export class Unit {
     this.stats = this.computeStats(0);
     this.hp = this.stats.maxHp;
     this.mana = this.stats.maxMana;
+  }
+
+  setCastGesture(gesture: AnimGesture, until: number, opts: { now: number; lock?: boolean } = { now: -Infinity }): void {
+    if (!opts.lock && this.castGestureLockUntil > opts.now && this.castingUntil > opts.now) return;
+    this.castGesture = gesture;
+    this.castingUntil = Math.max(this.castingUntil, until);
+    if (opts.lock) this.castGestureLockUntil = Math.max(this.castGestureLockUntil, until);
   }
 
   // ---------- stats ----------
@@ -425,35 +441,14 @@ export class Unit {
 
   /** Auto-assign skill points: ult at 6/12/18, basics round-robin via skillOrder. */
   autoLevelAbilities(skillOrder?: number[]): void {
-    for (const a of this.abilities) a.level = 0;
-    const ultIdx = this.abilities.findIndex((a) => a.def.ult);
-    const basics = this.abilities.map((_, i) => i).filter((i) => i !== ultIdx);
-    const order = (skillOrder ?? basics).filter((i) => basics.includes(i));
-    let oi = 0;
-    for (let lvl = 1; lvl <= this.level; lvl++) {
-      if (ultIdx >= 0 && (lvl === 6 || lvl === 12 || lvl === 18)) {
-        const ult = this.abilities[ultIdx];
-        if (ult.level < abilityMaxLevel(ult.def)) {
-          ult.level++;
-          continue;
-        }
-      }
-      // find next basic that can still level
-      let assigned = false;
-      for (let tries = 0; tries < order.length; tries++) {
-        const slot = order[oi % order.length];
-        oi++;
-        const ab = this.abilities[slot];
-        if (ab.level < abilityMaxLevel(ab.def)) {
-          ab.level++;
-          assigned = true;
-          break;
-        }
-      }
-      if (!assigned && ultIdx >= 0) {
-        const ult = this.abilities[ultIdx];
-        if (ult.level < abilityMaxLevel(ult.def)) ult.level++;
-      }
+    this.setAbilityLevels(autoAbilityLevels({ abilities: this.abilities.map((a) => a.def), skillOrder } as HeroDef, this.level, skillOrder));
+  }
+
+  setAbilityLevels(levels: number[]): void {
+    const def = { abilities: this.abilities.map((a) => a.def) } as HeroDef;
+    const normalized = normalizeAbilityLevels(def, levels, this.level);
+    for (let i = 0; i < this.abilities.length; i++) {
+      this.abilities[i].level = normalized[i] ?? 0;
     }
     // init charges
     for (const a of this.abilities) {

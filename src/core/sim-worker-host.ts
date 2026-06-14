@@ -1,5 +1,6 @@
 import { Sim } from './sim';
 import type { Order, SimEvent, Vec2 } from './types';
+import type { SimWorkerRequest, SimWorkerResponse } from './sim-worker-protocol';
 
 export interface SimSnapshotUnit {
   uid: number;
@@ -44,6 +45,26 @@ export class SimWorkerHost {
 
   drainEvents(): SimEvent[] {
     return this.sim.events.drain();
+  }
+}
+
+export function handleSimWorkerRequest(host: SimWorkerHost, request: SimWorkerRequest): SimWorkerResponse {
+  try {
+    switch (request.kind) {
+      case 'init':
+        return { id: request.id, ok: false, error: 'sim worker host is already initialized' };
+      case 'order':
+        host.order(request.uid, request.order);
+        return { id: request.id, ok: true };
+      case 'step':
+        return { id: request.id, ok: true, snapshot: host.stepTicks(request.ticks) };
+      case 'snapshot':
+        return { id: request.id, ok: true, snapshot: snapshotSim(host.sim) };
+      case 'drain-events':
+        return { id: request.id, ok: true, events: host.drainEvents() };
+    }
+  } catch (err) {
+    return { id: request.id, ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 

@@ -3,7 +3,7 @@ import { execEffects, type EffectCtx } from '../core/effects';
 import { buildHero } from '../core/hero-setup';
 import { heroesAlive } from '../core/macro';
 import { v2 } from '../core/math2d';
-import { tierScale } from '../core/phase3';
+import { bossBkbItemOverrides, tierScale } from '../core/phase3';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { makeItemState, sortInventory } from '../core/items';
@@ -251,6 +251,7 @@ export class DungeonSession {
       });
       u.items = sortInventory(u.items);
       u.markStatsDirty();
+      u.markVisualDirty();
       u.refresh(this.sim.time);
       u.hp = u.stats.maxHp;
       u.mana = u.stats.maxMana;
@@ -380,7 +381,7 @@ export class DungeonSession {
       }
     });
     for (const [k, v] of Object.entries(build.externalMods)) u.externalMods[k] = (u.externalMods[k] ?? 0) + v;
-    u.items[0] = makeItemState(REG.item('black-king-bar'));
+    u.items[0] = makeItemState(REG.item('black-king-bar'), bossBkbItemOverrides(this.tier)['black-king-bar']);
     u.items[1] = makeItemState(REG.item('assault-cuirass'));
     u.externalMods.maxHp = (u.externalMods.maxHp ?? 0) + u.stats.maxHp * (TUNING.raidBossHpScale * scale.hp - 1);
     u.externalMods.damagePct = (u.externalMods.damagePct ?? 0) + (TUNING.raidBossDamageScale * scale.damage - 1) * 100;
