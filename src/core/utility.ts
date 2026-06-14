@@ -3,6 +3,7 @@ import { add, dist, dist2, norm, pointSegDist, scale, sub, v2 } from './math2d';
 import { combatProfile, type CombatProfile } from './combat-profile';
 import { itemArchetypes, type ItemArchetype } from './item-archetype';
 import { comboStepMatchesOrder, orderForComboStep, planTeamCombos, planUnitCombo, type ComboPlan, type ComboStep } from './combo-planner';
+import { bossArchetypeBias } from './boss-brain';
 import { abilityVal } from './values';
 import { itemReady } from './items';
 import { isDisabled } from './status';
@@ -894,32 +895,34 @@ function scoreBossItemActive(sim: Sim, u: Unit, slot: number, focus: Unit | null
 
   const is = TUNING.ai.itemScore;
   const ir = TUNING.ai.itemRange;
+  // GAMBIT_AI_OVERHAUL Phase 3 §5: the boss posture biases which archetypes it reaches for.
+  const archBias = bossArchetypeBias(u, def);
   switch (it.defId) {
     case 'black-king-bar': {
       if (u.summary.magicImmune) return null;
       const threatened = incomingDisable(sim, u, 1200) || enemyCastSeen(sim, u, 'ult', 1300) || enemyCastSeen(sim, u, 'channel', 1300);
       if (!threatened) return null;
-      return { score: is.bossBkb * Math.max(0.9, profile.weights.survival), order: { kind: 'item', invSlot: slot }, slot: ITEM };
+      return { score: is.bossBkb * Math.max(0.9, profile.weights.survival) * archBias, order: { kind: 'item', invSlot: slot }, slot: ITEM };
     }
     case 'glimmer-cape': {
       if (u.summary.invisible || u.summary.fading) return null;
       const hpPct = u.hp / Math.max(1, u.stats.maxHp);
       if (hpPct > ir.bossGlimmerHpPct && sim.time - u.lastEnemyDamageAt > 1.5) return null;
-      return { score: is.bossGlimmer * Math.max(0.8, profile.weights.survival), order: { kind: 'item', invSlot: slot, uid: u.uid }, slot: ITEM };
+      return { score: is.bossGlimmer * Math.max(0.8, profile.weights.survival) * archBias, order: { kind: 'item', invSlot: slot, uid: u.uid }, slot: ITEM };
     }
     case 'euls-scepter': {
       const range = ir.euls + u.stats.castRangeBonus;
       const target = enemyChannelingInRange(sim, u, range) ?? bestOffensiveTarget(sim, u, focus, range);
       if (!target) return null;
-      return { score: is.bossEuls * Math.max(0.8, profile.weights.control), order: { kind: 'item', invSlot: slot, uid: target.uid }, slot: ITEM };
+      return { score: is.bossEuls * Math.max(0.8, profile.weights.control) * archBias, order: { kind: 'item', invSlot: slot, uid: target.uid }, slot: ITEM };
     }
     case 'force-staff': {
       const hpPct = u.hp / Math.max(1, u.stats.maxHp);
       if (hpPct > ir.bossForceHpPct || enemiesNear(sim, u, 420) === 0) return null;
-      return { score: is.bossForce * Math.max(0.8, profile.weights.survival), order: { kind: 'item', invSlot: slot, uid: u.uid }, slot: ITEM };
+      return { score: is.bossForce * Math.max(0.8, profile.weights.survival) * archBias, order: { kind: 'item', invSlot: slot, uid: u.uid }, slot: ITEM };
     }
   }
-  return scoreItemByIntent(sim, u, slot, focus, profile, is.bossIntentBias);
+  return scoreItemByIntent(sim, u, slot, focus, profile, is.bossIntentBias * archBias);
 }
 
 /**

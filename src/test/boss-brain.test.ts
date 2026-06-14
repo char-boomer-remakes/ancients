@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllContent } from '../data';
 import { setupRaidSim } from '../core/macro';
-import { bossPhaseOf, pickBossFocus, pickBossMechanic, type BossMechanicCandidate } from '../core/boss-brain';
+import { bossArchetypeBias, bossPhaseOf, pickBossFocus, pickBossMechanic, type BossMechanicCandidate } from '../core/boss-brain';
+import { REG } from '../core/registry';
 import type { Unit } from '../core/unit';
 
 // ============================================================
@@ -110,6 +111,52 @@ describe('boss phase-FSM', () => {
     const fb = pickBossFocus(b.sim, b.boss);
     expect(a.boss.ctrl.boss!.pref).toBe(b.boss.ctrl.boss!.pref);
     expect(fa?.heroId).toBe(fb?.heroId);
+  });
+});
+
+describe('boss posture archetype reach (Phase 3 §5)', () => {
+  const item = (id: string) => REG.items.get(id)!;
+
+  it('stays neutral until a posture plan has rolled', () => {
+    const { boss } = raid(['sniper', 'crystal-maiden']);
+    boss.ctrl.boss = { depth: 0 }; // no phase committed yet
+    expect(bossArchetypeBias(boss, item('shivas-guard'))).toBe(1);
+    expect(bossArchetypeBias(boss, item('black-king-bar'))).toBe(1);
+  });
+
+  it('pops immunity and escape when desperate, not a pure nuke', () => {
+    const { boss } = raid(['sniper', 'crystal-maiden']);
+    boss.ctrl.boss = { depth: 1, phase: 'desperation', pref: 'threat' };
+    // BKB carries the immunity archetype; Force Staff carries escape.
+    expect(bossArchetypeBias(boss, item('black-king-bar'))).toBeGreaterThan(1);
+    expect(bossArchetypeBias(boss, item('force-staff'))).toBeGreaterThan(1);
+    // Dagon is a pure nuke: desperation does not reach for it.
+    expect(bossArchetypeBias(boss, item('dagon'))).toBe(1);
+  });
+
+  it('ramps field and offense in enrage', () => {
+    const { boss } = raid(['sniper', 'crystal-maiden']);
+    boss.ctrl.boss = { depth: 1, phase: 'enrage', pref: 'threat' };
+    expect(bossArchetypeBias(boss, item('shivas-guard'))).toBeGreaterThan(1); // field + nuke
+    expect(bossArchetypeBias(boss, item('dagon'))).toBeGreaterThan(1);        // nuke
+  });
+
+  it('reaches harder for lockdown-and-burst against a healer under pressure', () => {
+    const { boss } = raid(['sniper', 'crystal-maiden']);
+    boss.ctrl.boss = { depth: 1, phase: 'pressure', pref: 'threat' };
+    const threatOnly = bossArchetypeBias(boss, item('rod-of-atos')); // lockdown
+    boss.ctrl.boss = { depth: 1, phase: 'pressure', pref: 'healer' };
+    const healerPref = bossArchetypeBias(boss, item('rod-of-atos'));
+    expect(healerPref).toBeGreaterThan(threatOnly);
+  });
+
+  it('never exceeds the reach cap and is deterministic for the same posture', () => {
+    const { boss } = raid(['sniper', 'crystal-maiden']);
+    boss.ctrl.boss = { depth: 1, phase: 'enrage', pref: 'cluster' };
+    const a = bossArchetypeBias(boss, item('shivas-guard'));
+    const b = bossArchetypeBias(boss, item('shivas-guard'));
+    expect(a).toBe(b);
+    expect(a).toBeLessThanOrEqual(1.5);
   });
 });
 

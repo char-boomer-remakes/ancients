@@ -1536,7 +1536,13 @@ export type GambitCondition =
   // swap-combat reads (SWAP_COMBAT_OVERHAUL §3.5/§8.7): point the reactive grammar
   // at the Tag Gauge and the live combo state so an ally routes the chain.
   | { k: 'tag-in-ready' }
-  | { k: 'combo-setup-active' };
+  | { k: 'combo-setup-active' }
+  // combo-planner reads (GAMBIT_AI_OVERHAUL §6): expose the planner and team
+  // assignments so an author can write the same intent the planner runs.
+  | { k: 'combo-ready' }
+  | { k: 'save-assigned' }
+  | { k: 'in-friendly-field' }
+  | { k: 'enemy-in-hostile-field' };
 
 export type GambitTargetMode =
   | 'lowest-hp-enemy'

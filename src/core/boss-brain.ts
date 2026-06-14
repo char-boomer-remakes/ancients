@@ -1,10 +1,12 @@
 import { TUNING } from '../data/tuning';
 import { combatProfile } from './combat-profile';
+import { itemArchetypes, type ItemArchetype } from './item-archetype';
 import { dist2 } from './math2d';
 import { pickThreatTarget } from './threat';
 import { REG } from './registry';
 import type { Sim } from './sim';
 import type { Unit } from './unit';
+import type { ItemDef } from './types';
 
 // ============================================================
 // Boss phase-FSM (AI_OVERHAUL §5, Layer 3). A thin outer machine —
@@ -158,6 +160,34 @@ export function pickBossFocus(sim: Sim, boss: Unit): Unit | null {
   else if (cfg.pref === 'kill') chosen = killTarget(sim, boss);
 
   return chosen ?? threatT;
+}
+
+/**
+ * Layer 3 → Layer 2 bridge (GAMBIT_AI_OVERHAUL Phase 3 §5). The boss posture
+ * decides which item archetypes the boss reaches for: hold the area nuke/field
+ * for a cluster in the opening, lockdown-and-burst a reachable healer under
+ * pressure, pop immunity or escape when desperate, ramp field and offense in
+ * enrage. Returns a score multiplier the boss item scorer folds in, leaving the
+ * underlying survival/threat/range checks to decide whether the item fires.
+ * Neutral (1) until a plan has rolled a phase, and capped so it only nudges.
+ */
+export function bossArchetypeBias(boss: Unit, def: ItemDef): number {
+  const cfg = boss.ctrl.boss;
+  if (!cfg) return 1;
+  const phase = cfg.phase;
+  if (!phase) return 1;
+  const arch = itemArchetypes(def);
+  if (arch.size === 0) return 1;
+
+  const b = TUNING.ai.boss;
+  const phaseReach = b.archetypeReach[phase] ?? {};
+  const prefReach = b.prefReach[cfg.pref ?? 'threat'] ?? {};
+  let mult = 1;
+  for (const a of arch as Set<ItemArchetype>) {
+    // phase sets the baseline reach; the focus pref layers a nudge on top.
+    mult = Math.max(mult, (phaseReach[a] ?? 1) * (prefReach[a] ?? 1));
+  }
+  return Math.min(b.archetypeReachCap, mult);
 }
 
 function mechanicPhase(kind: BossMechanicKind, atHpPct: number): BossPhase {

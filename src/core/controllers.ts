@@ -3,6 +3,8 @@ import { add, closestOnSeg, dist, dist2, norm, pointSegDist, scale, sub, v2 } fr
 import { nearestEnemy } from './actions';
 import { REG } from './registry';
 import { chooseUtilityOrder, dangerousScore, enemyCastSeen, incomingDisable, peelOrder, pickUtilityFocus, spreadSpacingOrder } from './utility';
+import { planUnitCombo } from './combo-planner';
+import { itemArchetypes } from './item-archetype';
 import { dominantRole } from './combat-profile';
 import { tauntToTop } from './threat';
 import { pickBossFocus } from './boss-brain';
@@ -282,7 +284,48 @@ export function evalCondition(sim: Sim, u: Unit, cond: GambitCondition, focus: U
       return sim.time >= (u.tagGaugeReadyAt ?? 0);
     case 'combo-setup-active':
       return focus ? comboSetupActive(sim, focus) : false;
+    case 'combo-ready':
+      return focus ? planUnitCombo(sim, u, focus) !== null : false;
+    case 'save-assigned':
+      return sim.teamMind(u.team).saveHolderUid === u.uid;
+    case 'in-friendly-field':
+      return inFriendlyField(sim, u);
+    case 'enemy-in-hostile-field':
+      return enemyInHostileField(sim, u, focus);
   }
+}
+
+// GAMBIT_AI_OVERHAUL §5/§6: field awareness keyed off aura radii. The widest
+// `field`-archetype aura a unit projects, filtered to who it touches.
+function unitFieldRadius(u: Unit, affects: 'allies' | 'enemies'): number {
+  let radius = 0;
+  for (const it of u.items) {
+    if (!it) continue;
+    const def = REG.items.get(it.defId);
+    if (!def?.aura || def.aura.affects !== affects) continue;
+    if (!itemArchetypes(def).has('field')) continue;
+    if (typeof def.aura.radius === 'number') radius = Math.max(radius, def.aura.radius);
+  }
+  return radius;
+}
+
+function inFriendlyField(sim: Sim, u: Unit): boolean {
+  for (const ally of sim.unitsArr) {
+    if (!ally.alive || ally.team !== u.team) continue;
+    const r = unitFieldRadius(ally, 'allies');
+    if (r > 0 && dist2(u.pos, ally.pos) <= r * r) return true;
+  }
+  return false;
+}
+
+function enemyInHostileField(sim: Sim, u: Unit, focus: Unit | undefined): boolean {
+  if (!focus) return false;
+  for (const ally of sim.unitsArr) {
+    if (!ally.alive || ally.team !== u.team) continue;
+    const r = unitFieldRadius(ally, 'enemies');
+    if (r > 0 && dist2(focus.pos, ally.pos) <= r * r) return true;
+  }
+  return false;
 }
 
 // SWAP_COMBAT_OVERHAUL §3.5: a setup tag (Lockdown/Gather/Soak) leaves a

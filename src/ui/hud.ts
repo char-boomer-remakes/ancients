@@ -2290,6 +2290,7 @@ export class Hud {
     { label: 'Allies', kinds: ['ally-hp-below'] },
     { label: 'Enemies', kinds: ['enemy-hp-below', 'enemies-within', 'focus-is-role', 'enemy-count-by-role', 'distance-to-focus-gt', 'distance-to-focus-lt'] },
     { label: 'Reactions', kinds: ['enemy-cast-seen', 'incoming-disable', 'tag-in-ready', 'combo-setup-active'] },
+    { label: 'Combos', kinds: ['combo-ready', 'save-assigned', 'in-friendly-field', 'enemy-in-hostile-field'] },
     { label: 'Abilities', kinds: ['ability-ready'] }
   ];
   private static readonly COND_KINDS = Hud.COND_GROUPS.flatMap((g) => g.kinds);
@@ -2300,7 +2301,9 @@ export class Hud {
     'standing-in-zone': 'Standing in zone', 'focus-is-role': 'Focus role is', 'enemy-count-by-role': 'Enemy role count ≥',
     'distance-to-focus-gt': 'Focus farther than', 'distance-to-focus-lt': 'Focus closer than',
     'enemy-cast-seen': 'Enemy casting', 'self-disabled': "I'm disabled", 'incoming-disable': 'Disable incoming',
-    'tag-in-ready': 'Tag-in ready', 'combo-setup-active': 'Combo setup active'
+    'tag-in-ready': 'Tag-in ready', 'combo-setup-active': 'Combo setup active',
+    'combo-ready': 'Combo ready', 'save-assigned': "I'm the save-holder",
+    'in-friendly-field': 'In friendly field', 'enemy-in-hostile-field': 'Focus in our field'
   };
   private static readonly ACT_KINDS = ['cast', 'use-item', 'attack-focus', 'focus-fire', 'kite', 'peel', 'spread', 'dodge-zones', 'retreat', 'hold'];
   private static readonly ACT_LABEL: Record<string, string> = {
@@ -2363,6 +2366,10 @@ export class Hud {
       case 'incoming-disable': return { k: 'incoming-disable' };
       case 'tag-in-ready': return { k: 'tag-in-ready' };
       case 'combo-setup-active': return { k: 'combo-setup-active' };
+      case 'combo-ready': return { k: 'combo-ready' };
+      case 'save-assigned': return { k: 'save-assigned' };
+      case 'in-friendly-field': return { k: 'in-friendly-field' };
+      case 'enemy-in-hostile-field': return { k: 'enemy-in-hostile-field' };
       default: return { k: 'always' };
     }
   }

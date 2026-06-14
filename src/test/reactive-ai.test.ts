@@ -140,6 +140,82 @@ describe('reactive reads', () => {
   });
 });
 
+// GAMBIT_AI_OVERHAUL §6: the combo-planner reads expose the planner and the
+// team assignments so an author can write the same intent the planner runs.
+describe('combo-planner gambit reads', () => {
+  it('combo-ready reflects whether the planner has a reachable chain', () => {
+    // a Veil (amplifier) into Dagon (payoff) is a chain the item planner builds.
+    const sim = macro([{ heroId: 'zeus', level: 18, items: ['veil-of-discord', 'dagon'] }], [{ heroId: 'sven', level: 18 }]);
+    const hero = sim.unitsArr.find((u) => u.team === 0)!;
+    const focus = sim.unitsArr.find((u) => u.team === 1)!;
+    hero.mana = hero.stats.maxMana;
+
+    // no focus: no chain to plan
+    expect(evalCondition(sim, hero, { k: 'combo-ready' }, undefined)).toBe(false);
+
+    hero.pos = { x: 2000, y: 2000 };
+    focus.pos = { x: 5200, y: 2000 }; // far past every cast range: no reachable payoff
+    sim.rebuildSpatial();
+    expect(evalCondition(sim, hero, { k: 'combo-ready' }, focus)).toBe(false);
+
+    focus.pos = { x: 2450, y: 2000 }; // in range: the Veil→Dagon chain is reachable
+    sim.rebuildSpatial();
+    expect(evalCondition(sim, hero, { k: 'combo-ready' }, focus)).toBe(true);
+  });
+
+  it('save-assigned marks exactly the team save-holder', () => {
+    const sim = macro(
+      [{ heroId: 'omniknight', level: 18 }, { heroId: 'sniper', level: 18 }],
+      [{ heroId: 'sven', level: 18 }]
+    );
+    const tm = sim.teamMind(0);
+    const heroes = sim.unitsArr.filter((u) => u.team === 0 && u.kind === 'hero');
+    expect(tm.saveHolderUid).not.toBeNull();
+    for (const h of heroes) {
+      expect(evalCondition(sim, h, { k: 'save-assigned' }, undefined)).toBe(h.uid === tm.saveHolderUid);
+    }
+  });
+
+  it('in-friendly-field fires inside an ally field aura and not outside it', () => {
+    const sim = macro(
+      [{ heroId: 'sven', level: 18, items: ['assault-cuirass'] }, { heroId: 'sniper', level: 18 }],
+      [{ heroId: 'lich', level: 18 }]
+    );
+    const carrier = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'sven')!;
+    const ally = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'sniper')!;
+
+    carrier.pos = { x: 2000, y: 2000 };
+    ally.pos = { x: 2300, y: 2000 }; // within the 1200 aura
+    sim.rebuildSpatial();
+    expect(evalCondition(sim, ally, { k: 'in-friendly-field' }, undefined)).toBe(true);
+    expect(evalCondition(sim, carrier, { k: 'in-friendly-field' }, undefined)).toBe(true); // in its own field
+
+    ally.pos = { x: 4000, y: 2000 }; // outside the aura radius
+    sim.rebuildSpatial();
+    expect(evalCondition(sim, ally, { k: 'in-friendly-field' }, undefined)).toBe(false);
+  });
+
+  it('enemy-in-hostile-field fires when the focus stands in our enemy field', () => {
+    const sim = macro(
+      [{ heroId: 'sven', level: 18, items: ['shivas-guard'] }],
+      [{ heroId: 'lich', level: 18 }]
+    );
+    const carrier = sim.unitsArr.find((u) => u.team === 0)!;
+    const focus = sim.unitsArr.find((u) => u.team === 1)!;
+
+    expect(evalCondition(sim, carrier, { k: 'enemy-in-hostile-field' }, undefined)).toBe(false); // no focus
+
+    carrier.pos = { x: 2000, y: 2000 };
+    focus.pos = { x: 2400, y: 2000 }; // within the 900 enemy aura
+    sim.rebuildSpatial();
+    expect(evalCondition(sim, carrier, { k: 'enemy-in-hostile-field' }, focus)).toBe(true);
+
+    focus.pos = { x: 3200, y: 2000 }; // outside the aura
+    sim.rebuildSpatial();
+    expect(evalCondition(sim, carrier, { k: 'enemy-in-hostile-field' }, focus)).toBe(false);
+  });
+});
+
 describe('item-active considers', () => {
   it('glimmer-cape saves a wounded ally under fire', () => {
     const teamA: MacroHeroSetup[] = [

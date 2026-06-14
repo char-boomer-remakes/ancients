@@ -136,7 +136,24 @@ export const TUNING = {
     boss: {
       prefHealerChance: 0.45, prefClusterChance: 0.5, prefKillChance: 0.5,
       healerHpNeed: 2.2, healerLowThreat: 0.9, healerReach: 0.45, healerThreatNorm: 600, healerReachDist: 900,
-      mechanicBase: { enrage: 100, signature: 70, addWave: 55, zone: 45 }
+      mechanicBase: { enrage: 100, signature: 70, addWave: 55, zone: 45 },
+      // GAMBIT_AI_OVERHAUL Phase 3 §5: posture decides which item archetypes the
+      // boss reaches for. Phase sets the baseline reach; the focus pref layers a
+      // nudge on top (max-combined, then capped). Neutral (1) until a plan rolls.
+      archetypeReachCap: 1.5,
+      archetypeReach: {
+        opening: { field: 1.2, nuke: 1.12 },
+        sustained: { lockdown: 1.1, amplify: 1.08 },
+        pressure: { lockdown: 1.25, nuke: 1.18, amplify: 1.12 },
+        enrage: { field: 1.28, nuke: 1.22, amplify: 1.16 },
+        desperation: { immunity: 1.32, escape: 1.26, save: 1.16 }
+      } as Record<string, Partial<Record<string, number>>>,
+      prefReach: {
+        threat: {},
+        healer: { lockdown: 1.18, nuke: 1.12 },
+        cluster: { field: 1.15, nuke: 1.12 },
+        kill: { nuke: 1.18, lockdown: 1.1 }
+      } as Record<string, Partial<Record<string, number>>>
     }
   },
 
