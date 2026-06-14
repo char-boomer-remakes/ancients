@@ -36,6 +36,18 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 const PUBLIC_ASSETS = path.join(ROOT, 'public', 'assets');
 const MANIFEST_PATH = path.join(PUBLIC_ASSETS, 'manifest.json');
+// OVERWORLD_PLANNING §5.6: path -> declared WorldSize the build fits to. Generated
+// from the TS resolver (src/test/asset-world-sizes.test.ts) so a .mjs build with no
+// TS runtime still knows each entity's lifelike height. Refresh via that test.
+const WORLD_SIZES_PATH = path.join(HERE, 'world-sizes.generated.json');
+function loadWorldSizes() {
+  try {
+    return JSON.parse(fs.readFileSync(WORLD_SIZES_PATH, 'utf8')).sizes ?? {};
+  } catch {
+    return {};
+  }
+}
+const WORLD_SIZES = loadWorldSizes();
 // No-budget policy (DECISIONS 2026-06-13): download/repo size is explicitly NOT a
 // constraint. We ship a per-hero retextured GLB for every cohort member (80+ heroes)
 // and any HDRIs/props/music the theme wants. These caps are kept only as a sanity
@@ -402,13 +414,16 @@ function buildManifest(sourceByOut) {
     const bytes = fs.statSync(abs).size;
     const group = meta.group ?? meta.preloadGroup ?? assetGroup(rel);
     const dims = meta.dims ?? null;
+    // The declared WorldSize for this path, if any (heroes/props/critters/etc).
+    const worldSize = meta.worldSize ?? WORLD_SIZES[rel] ?? null;
+    const targetHeightM = meta.targetHeightM ?? worldSize?.heightM ?? null;
     // Post-fit meters: scale the authored AABB to the declared fit target so lint
     // can compare against the entity's WorldSize.heightM (§5.4 / §9.5).
     let dimsM = meta.dimsM ?? null;
-    if (dims && meta.targetHeightM && dims.h > 0) {
-      const k = meta.targetHeightM / dims.h;
+    if (dims && targetHeightM && dims.h > 0) {
+      const k = targetHeightM / dims.h;
       const r3 = (v) => +(v * k).toFixed(4);
-      dimsM = { h: meta.targetHeightM, w: r3(dims.w), d: r3(dims.d) };
+      dimsM = { h: targetHeightM, w: r3(dims.w), d: r3(dims.d) };
     }
     return {
       path: rel,
@@ -419,6 +434,7 @@ function buildManifest(sourceByOut) {
       preloadGroup: meta.preloadGroup ?? group,
       sourceSpec: meta.sourceSpec ?? null,
       source: meta.source ?? meta.src ?? null,
+      ...(worldSize ? { worldSize } : {}),
       ...(dims ? { dims } : {}),
       ...(dimsM ? { dimsM } : {})
     };

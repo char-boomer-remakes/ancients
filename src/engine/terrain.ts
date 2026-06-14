@@ -365,10 +365,10 @@ function buildTerrainEdge(sizeW: number, edgeHeights: TerrainEdgeHeights, colors
 // Phase 2 (GRAPHICS_SPEC §13): authored Quaternius foliage/props + buildings
 // (CC0). Loaded async; the instanced primitives / box huts stay live until the
 // GLBs arrive, so no-asset and headless runs keep the procedural silhouette.
-const FOLIAGE_BASE = '/assets/props/foliage';
-const TOWN_BASE = '/assets/props/town';
+export const FOLIAGE_BASE = '/assets/props/foliage';
+export const TOWN_BASE = '/assets/props/town';
 
-const TREE_MODELS: Record<string, string[]> = {
+export const TREE_MODELS: Record<string, string[]> = {
   grass: ['oak_1', 'oak_2', 'pine_1'],
   forest: ['oak_1', 'oak_2', 'oak_4', 'pine_1', 'pine_2'],
   coast: ['oak_1', 'pine_1'],
@@ -376,8 +376,8 @@ const TREE_MODELS: Record<string, string[]> = {
   desert: ['oak_4'],
   wasteland: ['oak_4', 'pine_4']
 };
-const ROCK_MODELS = ['rock_1', 'rock_2', 'rock_3'];
-const TOWN_BUILDINGS = ['house_1', 'house_2', 'house_3', 'inn', 'blacksmith'];
+export const ROCK_MODELS = ['rock_1', 'rock_2', 'rock_3'];
+export const TOWN_BUILDINGS = ['house_1', 'house_2', 'house_3', 'inn', 'blacksmith'];
 
 function modelUrls(base: string, names: string[]): string[] {
   return names.map((n) => `${base}/${n}.glb`);
