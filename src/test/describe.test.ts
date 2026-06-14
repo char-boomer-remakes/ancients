@@ -3,7 +3,9 @@ import { registerAllContent, ALL_HEROES } from '../data/index';
 import { ALL_ITEMS } from '../data/items/index';
 import { ALL_CREEPS } from '../data/creeps/index';
 import { ALL_NEUTRAL_ITEMS } from '../data/neutral-items';
-import { buildAbilityCard, buildItemCard, buildNeutralItemCard, cardToText } from '../core/describe';
+import { buildAbilityCard, buildItemCard, buildNeutralItemCard, buildHeroCard, cardToText } from '../core/describe';
+import { HERO_BLURBS } from '../data/heroes/blurbs';
+import { REG } from '../core/registry';
 import type { AbilityDef, ItemDef } from '../core/types';
 
 // ============================================================
@@ -93,6 +95,23 @@ describe('item cards', () => {
     expect(active).toBeTruthy();
     const card = buildItemCard(active!);
     expect(card.effect.some((line) => line.startsWith('Active'))).toBe(true);
+  });
+
+  it('builds a hero card with a blurb, base stats, and abilities for every hero', () => {
+    const heroes = [...REG.heroes.values()];
+    expect(heroes.length).toBeGreaterThan(0);
+    for (const hero of heroes) {
+      const card = buildHeroCard(hero, { level: 5 });
+      expect(card.name, `${hero.id} name`).toBe(hero.name);
+      expect(card.blurb && card.blurb.trim().length > 0, `${hero.id} blurb`).toBe(true);
+      expect(card.effect.length, `${hero.id} abilities`).toBe(hero.abilities.length);
+      expect(card.stats.length, `${hero.id} base stats`).toBeGreaterThan(0);
+    }
+  });
+
+  it('has an authored intro blurb for every registered hero', () => {
+    const missing = [...REG.heroes.values()].filter((h) => !HERO_BLURBS[h.id]).map((h) => h.id);
+    expect(missing, `heroes missing a blurb: ${missing.join(', ')}`).toEqual([]);
   });
 
   it('uses an authored item description verbatim when present', () => {

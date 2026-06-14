@@ -10,7 +10,7 @@ import { itemReady, sellValue, computeBuyPlan } from '../core/items';
 import { buybackCost } from '../core/phase3';
 import { levelArr } from '../core/values';
 import { buildDefaultGambit } from '../core/controllers';
-import { statLabel, fmtStatValue, statLines, buildAbilityCard, buildItemCard, buildNeutralItemCard, type TooltipCard } from '../core/describe';
+import { statLabel, fmtStatValue, statLines, buildAbilityCard, buildItemCard, buildNeutralItemCard, buildHeroCard, type TooltipCard } from '../core/describe';
 import { abilityIcon, itemIcon, heroPortrait } from '../engine/icons';
 import { WORLD_SCALE } from '../engine/scale';
 import { Game } from '../systems/game';
@@ -510,8 +510,9 @@ export class Hud {
       const manaPct = u ? (u.stats.maxMana > 0 ? (u.mana / u.stats.maxMana) * 100 : 0) : rec.manaPct * 100;
       const dead = rec.respawnAt > g.sim.time;
       const deadIn = dead ? Math.ceil(rec.respawnAt - g.sim.time) : 0;
+      const partyTip = this.registerTip(`party-${i}`, buildHeroCard(def, { level: u ? u.level : rec.level }), { accent: def.palette[2] ?? 'var(--brass)' });
       html += `
-        <div class="party-frame ${active ? 'active' : ''} ${dead ? 'dead' : ''}" data-swap="${i}">
+        <div class="party-frame ${active ? 'active' : ''} ${dead ? 'dead' : ''}" data-swap="${i}"${partyTip}>
           <img src="${heroPortrait(def.palette, def.name[0], 72, def.silhouette)}" alt="">
           <div class="pf-info">
             <div class="pf-name">${i + 1} ${def.name} <em>L${u ? u.level : rec.level}</em></div>
@@ -616,9 +617,10 @@ export class Hud {
 
     const talentPending = g.pendingTalentTier(rec) >= 0;
 
+    const heroTip = this.registerTip(`hero-active`, buildHeroCard(def, { level: u.level }), { accent: def.palette[2] ?? 'var(--brass)' });
     this.heroPanel.innerHTML = `
       <div class="hp-left">
-        <img class="portrait" src="${heroPortrait(def.palette, def.name[0], 72, def.silhouette)}" alt="">
+        <img class="portrait" src="${heroPortrait(def.palette, def.name[0], 72, def.silhouette)}" alt=""${heroTip}>
         <div class="hp-id">
           <div class="hp-name">${def.name} <em>Lv ${u.level}</em>
             ${talentPending ? '<button class="talent-btn" id="talent-open">Talent!</button>' : ''}
@@ -2433,12 +2435,18 @@ export class Hud {
         ? `<div class="codex-note"><b>Aghanim's: ${h.aghs.name}</b> <em>${h.aghs.implemented ? 'implemented' : 'planned'}</em><p>${h.aghs.description}</p></div>`
         : '';
       const ownTag = h.owned ? `<em>Owned · Lv ${h.level}</em>` : '<em>Met — plan the recruit</em>';
+      const heroDef = REG.hero(h.id);
+      const heroCard = buildHeroCard(heroDef, { level: h.owned ? h.level : null });
+      const blurb = heroCard.blurb ? `<p class="hero-blurb">${esc(heroCard.blurb)}</p>` : '';
+      const baseStats = `<div class="hero-base-stats">${heroCard.stats.map((s) => `<span>${esc(s)}</span>`).join('')}</div>`;
       return `
         <div class="codex-card hero-codex">
-          <img src="${heroPortrait(REG.hero(h.id).palette, h.name[0], 48, REG.hero(h.id).silhouette)}" alt="">
+          <img src="${heroPortrait(heroDef.palette, h.name[0], 48, heroDef.silhouette)}" alt="">
           <div>
             <b>${h.name}</b> <span class="dim">${h.title}</span><br>
             <em>${h.attribute} · ${h.roles.slice(0, 3).join(' / ')}</em> ${ownTag}
+            ${blurb}
+            ${baseStats}
             <h4>Abilities</h4><ul class="codex-list">${abilities}</ul>
             <h4>Talent Tree</h4>${talents}
             <h4>Facets</h4><ul class="codex-list">${facets}</ul>

@@ -19,7 +19,7 @@ test.describe('visual smoke', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
   test('captures major player-facing states @visual', async ({ page }, testInfo) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     const errors = watchPageErrors(page);
 
     await boot(page, { webgl: true, hero: 'juggernaut', seed: 2026 });

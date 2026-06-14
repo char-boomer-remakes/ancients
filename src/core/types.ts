@@ -317,11 +317,23 @@ export interface AudioSettings {
 // Quality tier mirrors engine/performance QualityTier; kept as a local string union
 // so core stays free of any engine/render import (boundary guard).
 export type GraphicsQuality = 'auto' | 'low' | 'medium' | 'high' | 'ultra';
+export type GraphicsTierOverride = 'tier' | 'off' | 'on';
+export type GraphicsIntensityOverride = 'tier' | 'off' | 'low' | 'high';
+export type GraphicsDistance = 'low' | 'medium' | 'high';
+export type GraphicsCrowdDetail = 'auto' | 'full' | 'balanced' | 'reduced';
 
 export interface GraphicsSettings {
   quality: GraphicsQuality;
   autoAdjustQuality: boolean; // lets the renderer lower DPR/tier under sustained frame-budget misses
   frameTarget: 30 | 60;       // adaptive setpoint; macro simulation remains fixed-step
+  bloom: GraphicsIntensityOverride;
+  ambientOcclusion: GraphicsTierOverride;
+  antiAliasing: GraphicsTierOverride;
+  shadows: GraphicsIntensityOverride;
+  drawDistance: GraphicsDistance;
+  crowdDetail: GraphicsCrowdDetail;
+  vfxDensity: number;     // 0.5..1.5 multiplier over the tier VFX cap
+  screenShake: number;    // 0..1 multiplier; 0 disables gameplay camera shake
   exposure: number;      // tonemapping exposure, 0.5..1.5 (default 0.92)
   grade: number;         // color-grade strength, 0..1.5 (default 1)
   reducedMotion: boolean; // freezes ambient particle/water motion

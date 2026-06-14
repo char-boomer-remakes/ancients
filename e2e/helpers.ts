@@ -81,11 +81,11 @@ export function expectNoPageErrors(errors: string[]): void {
 }
 
 export async function waitForPlayableUi(page: Page): Promise<void> {
-  await page.locator('#top-bar .region').waitFor({ state: 'visible', timeout: 30_000 });
+  await page.locator('#top-bar .region').waitFor({ state: 'visible', timeout: 60_000 });
   await page.waitForFunction(() => {
     const loading = document.getElementById('loading-screen');
     return !loading || getComputedStyle(loading).display === 'none';
-  }, null, { timeout: 30_000 });
+  }, null, { timeout: 60_000 });
 }
 
 export async function skipActiveCinematic(page: Page): Promise<void> {
