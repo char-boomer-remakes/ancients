@@ -13,6 +13,7 @@ interface Transient {
   obj: THREE.Object3D;
   until: number;
   update?: (t: number, lifeT: number) => void; // lifeT 0..1
+  release?: () => void;
 }
 
 type ProjKind = 'hook' | 'orb';
@@ -28,7 +29,20 @@ interface PooledProjectile {
   trailCol: Float32Array;
 }
 
+interface PooledBurstRing {
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+  material: THREE.MeshBasicMaterial;
+}
+
+interface PooledBurstSparks {
+  points: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial>;
+  material: THREE.PointsMaterial;
+  positions: Float32Array;
+  dirs: Float32Array;
+}
+
 const TRAIL_LEN = 12;
+const BURST_SPARKS = 14;
 
 const geometryCache = new Map<string, THREE.BufferGeometry>();
 
@@ -234,6 +248,8 @@ export class VfxManager {
   private transients: Transient[] = [];
   private projectiles = new Map<number, PooledProjectile>();
   private projectilePool: Record<ProjKind, PooledProjectile[]> = { hook: [], orb: [] };
+  private burstRingPool: PooledBurstRing[] = [];
+  private burstSparksPool: PooledBurstSparks[] = [];
   private projAllocated = 0; // total projectile objects ever constructed (steady-state should plateau)
   private projectileSeen = new Set<number>();
   private zones = new Map<number, Transient>();
@@ -394,7 +410,10 @@ export class VfxManager {
   /** Remove every live transient, projectile, and zone from the scene graph.
    *  Used when the rendered sim is swapped (live gym fight enter/exit). */
   reset(): void {
-    for (const tr of this.transients) this.group.remove(tr.obj);
+    for (const tr of this.transients) {
+      this.group.remove(tr.obj);
+      tr.release?.();
+    }
     this.transients.length = 0;
     for (const [, entry] of this.projectiles) this.releaseProjectile(entry);
     this.projectiles.clear();
@@ -413,6 +432,11 @@ export class VfxManager {
     return this.projectilePool.hook.length + this.projectilePool.orb.length;
   }
 
+  /** Free burst objects currently parked in the pool (test introspection). */
+  pooledBurstCount(): number {
+    return this.burstRingPool.length + this.burstSparksPool.length;
+  }
+
   update(dt: number): void {
     this.time += dt;
     const t = this.time;
@@ -421,6 +445,7 @@ export class VfxManager {
       const tr = this.transients[read];
       if (t >= tr.until) {
         this.group.remove(tr.obj);
+        tr.release?.();
       } else {
         this.transients[write++] = tr;
       }
@@ -432,13 +457,16 @@ export class VfxManager {
     for (const [, z] of this.zones) z.update?.(t, 0);
   }
 
-  private push(obj: THREE.Object3D, durSec: number, update?: Transient['update']): void {
+  private push(obj: THREE.Object3D, durSec: number, update?: Transient['update'], release?: Transient['release']): void {
     this.group.add(obj);
-    const tr: Transient & { dur: number } = { obj, until: this.time + durSec, update, dur: durSec };
+    const tr: Transient & { dur: number } = { obj, until: this.time + durSec, update, release, dur: durSec };
     this.transients.push(tr);
     while (this.transients.length > this.transientCap) {
       const old = this.transients.shift();
-      if (old) this.group.remove(old.obj);
+      if (old) {
+        this.group.remove(old.obj);
+        old.release?.();
+      }
     }
   }
 
@@ -520,44 +548,102 @@ export class VfxManager {
     entry.trail.geometry.attributes.position.needsUpdate = true;
   }
 
+  private buildBurstRing(): PooledBurstRing {
+    const material = new THREE.MeshBasicMaterial({
+      color: '#ffffff',
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const mesh = new THREE.Mesh(sharedGeometry(new THREE.RingGeometry(0.1, 1, 20)), material);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.visible = false;
+    return { mesh, material };
+  }
+
+  private acquireBurstRing(color: string): PooledBurstRing {
+    const entry = this.burstRingPool.pop() ?? this.buildBurstRing();
+    entry.material.color.set(color);
+    entry.material.opacity = 0.85;
+    entry.mesh.scale.set(1, 1, 1);
+    entry.mesh.visible = true;
+    return entry;
+  }
+
+  private releaseBurstRing(entry: PooledBurstRing): void {
+    entry.mesh.visible = false;
+    this.burstRingPool.push(entry);
+  }
+
+  private buildBurstSparks(): PooledBurstSparks {
+    const positions = new Float32Array(BURST_SPARKS * 3);
+    const dirs = new Float32Array(BURST_SPARKS * 3);
+    for (let i = 0; i < BURST_SPARKS; i++) {
+      const a = (i / BURST_SPARKS) * Math.PI * 2;
+      dirs[i * 3] = Math.cos(a);
+      dirs[i * 3 + 1] = 0.6 + (i % 3) * 0.3;
+      dirs[i * 3 + 2] = Math.sin(a);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const material = new THREE.PointsMaterial({
+      color: '#ffffff',
+      size: 0.32,
+      map: particleSprite('soft'),
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const points = new THREE.Points(geometry, material);
+    points.visible = false;
+    return { points, material, positions, dirs };
+  }
+
+  private acquireBurstSparks(color: string, sprite: SpriteKind): PooledBurstSparks {
+    const entry = this.burstSparksPool.pop() ?? this.buildBurstSparks();
+    entry.positions.fill(0);
+    entry.points.geometry.attributes.position.needsUpdate = true;
+    entry.material.color.set(color);
+    entry.material.size = sprite === 'shard' ? 0.36 : 0.32;
+    entry.material.map = particleSprite(sprite);
+    entry.material.opacity = 0.9;
+    entry.material.needsUpdate = true;
+    entry.points.visible = true;
+    return entry;
+  }
+
+  private releaseBurstSparks(entry: PooledBurstSparks): void {
+    entry.points.visible = false;
+    this.burstSparksPool.push(entry);
+  }
+
   private burst(x: number, y: number, color: string, radiusW: number, dur: number, color2?: string, sprite: SpriteKind = 'soft'): void {
-    const ring = new THREE.Mesh(
-      sharedGeometry(new THREE.RingGeometry(0.1, 1, 20)),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
-    );
-    ring.rotation.x = -Math.PI / 2;
+    const ringEntry = this.acquireBurstRing(color);
+    const ring = ringEntry.mesh;
     ring.position.copy(this.w(x, y, 0.15));
-    const mat = ring.material as THREE.MeshBasicMaterial;
     this.push(ring, dur, (_t, lifeT) => {
       const s = 0.2 + lifeT * radiusW;
       ring.scale.set(s, s, 1);
-      mat.opacity = 0.85 * (1 - lifeT);
-    });
+      ringEntry.material.opacity = 0.85 * (1 - lifeT);
+    }, () => this.releaseBurstRing(ringEntry));
     // sparks — shaped per element (ember/snow/shard) so the burst reads its type.
-    const n = 14;
-    const positions = new Float32Array(n * 3);
-    const pts = new THREE.Points(
-      new THREE.BufferGeometry(),
-      new THREE.PointsMaterial({ color: color2 ?? color, size: sprite === 'shard' ? 0.36 : 0.32, map: particleSprite(sprite), transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })
-    );
-    pts.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const sparks = this.acquireBurstSparks(color2 ?? color, sprite);
+    const pts = sparks.points;
+    const positions = sparks.positions;
     const base = this.w(x, y, 0.4);
     pts.position.copy(base);
-    const dirs: number[] = [];
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      dirs.push(Math.cos(a), 0.6 + (i % 3) * 0.3, Math.sin(a));
-    }
-    const pmat = pts.material as THREE.PointsMaterial;
     this.push(pts, dur, (_t, lifeT) => {
-      for (let i = 0; i < n; i++) {
-        positions[i * 3] = dirs[i * 3] * lifeT * radiusW * 0.9;
-        positions[i * 3 + 1] = dirs[i * 3 + 1] * lifeT * 1.6 - lifeT * lifeT * 2.2;
-        positions[i * 3 + 2] = dirs[i * 3 + 2] * lifeT * radiusW * 0.9;
+      for (let i = 0; i < BURST_SPARKS; i++) {
+        positions[i * 3] = sparks.dirs[i * 3] * lifeT * radiusW * 0.9;
+        positions[i * 3 + 1] = sparks.dirs[i * 3 + 1] * lifeT * 1.6 - lifeT * lifeT * 2.2;
+        positions[i * 3 + 2] = sparks.dirs[i * 3 + 2] * lifeT * radiusW * 0.9;
       }
       pts.geometry.attributes.position.needsUpdate = true;
-      pmat.opacity = 0.9 * (1 - lifeT);
-    });
+      sparks.material.opacity = 0.9 * (1 - lifeT);
+    }, () => this.releaseBurstSparks(sparks));
   }
 
   private blinkMark(x: number, y: number): void {
@@ -609,6 +695,10 @@ export class VfxManager {
       this.mine(x, y, vfx.color, vfx.color2 ?? '#ffffff', vfx.scale ?? 1);
       return;
     }
+    if (vfx.archetype === 'channel') {
+      this.channelColumn(x, y, vfx.color, vfx.color2 ?? '#ffffff', vfx.scale ?? 1);
+      return;
+    }
     const flash = new THREE.Mesh(
       sharedGeometry(new THREE.SphereGeometry(0.5, 8, 6)),
       new THREE.MeshBasicMaterial({ color: vfx.color, transparent: true, opacity: 0.7, depthWrite: false, blending: THREE.AdditiveBlending })
@@ -618,6 +708,48 @@ export class VfxManager {
     this.push(flash, 0.3, (_t, lifeT) => {
       flash.scale.setScalar(1 + lifeT * 1.6);
       mat.opacity = 0.7 * (1 - lifeT);
+    });
+  }
+
+  private channelColumn(x: number, y: number, color: string, color2: string, scale: number): void {
+    const g = new THREE.Group();
+    g.position.copy(this.w(x, y, 0.12));
+    const base = new THREE.Mesh(
+      sharedGeometry(new THREE.RingGeometry(0.42 * scale, 0.95 * scale, 36)),
+      new THREE.MeshBasicMaterial({ color: color2, transparent: true, opacity: 0.66, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
+    );
+    base.rotation.x = -Math.PI / 2;
+    const column = new THREE.Mesh(
+      sharedGeometry(new THREE.CylinderGeometry(0.28 * scale, 0.46 * scale, 2.6 * scale, 8, 1, true)),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.36, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
+    );
+    column.position.y = 1.25 * scale;
+    const moteMat = new THREE.MeshBasicMaterial({ color: color2, transparent: true, opacity: 0.78, depthWrite: false, blending: THREE.AdditiveBlending });
+    const motes: THREE.Mesh[] = [];
+    for (let i = 0; i < 5; i++) {
+      const mote = new THREE.Mesh(sharedGeometry(new THREE.TetrahedronGeometry(0.12 * scale)), moteMat);
+      mote.userData.phase = (i / 5) * Math.PI * 2;
+      g.add(mote);
+      motes.push(mote);
+    }
+    g.add(base, column);
+    const baseMat = base.material as THREE.MeshBasicMaterial;
+    const colMat = column.material as THREE.MeshBasicMaterial;
+    this.push(g, 0.8, (t, lifeT) => {
+      base.rotation.z = t * 2.5;
+      base.scale.setScalar(0.85 + Math.sin(t * 7) * 0.08);
+      baseMat.opacity = 0.66 * (1 - lifeT * 0.45);
+      column.rotation.y = t * 1.8;
+      colMat.opacity = 0.36 * (1 - lifeT * 0.35);
+      for (const mote of motes) {
+        const p = mote.userData.phase as number;
+        const h = 0.35 + ((p + t * 1.7) % (Math.PI * 2)) / (Math.PI * 2) * 2.1;
+        const r = 0.42 * scale;
+        const a = p + t * 3.6;
+        mote.position.set(Math.cos(a) * r, h * scale, Math.sin(a) * r);
+        mote.rotation.y = t * 3;
+        (mote.material as THREE.MeshBasicMaterial).opacity = 0.78 * (1 - lifeT);
+      }
     });
   }
 

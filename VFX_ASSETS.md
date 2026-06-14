@@ -30,9 +30,9 @@ never imports `three` or reads renderer-only fields.
 | Item visuals | D1+D2 shipped, plus `cyclone` for Eul's/Wind Waker; `appearance` on **76+** items, `attackVisual` on **28+**; the remaining basics are intentionally invisible consumables/components (§6.1) |
 | Creature GLBs | 20 Quaternius creatures vendored, mounted on creeps and the 31 creature-base heroes via the shared `mountHeroModel` + `animateAuthoredRig` path (not a static pose) |
 | Env assets | terrain PBR (ambientCG), 2 HDRIs (Poly Haven) **both wired** — day + night beds swap by the cycle (`scene.applyEnvPhase`); original tiling water normal (`textures/water/water_normal.webp`) layered into the water shader; OFL display font (Cinzel) vendored + wired via `@font-face`; foliage + town (Quaternius) |
-| VFX textures | original `/assets/vfx/vfx_atlas.webp` for sprites/telegraphs, with procedural `DataTexture` fallback |
+| VFX textures | original `/assets/vfx/vfx_atlas.webp` for sprites/telegraphs, preloaded on medium+ and backed by procedural `DataTexture` fallback |
 | Audio | synth floor (`SoundArchetype` ×12, including `lightning`) **+ sampled enhancement layer**: `engine/sampled-audio.ts` decodes original per-biome music beds + one-shot SFX (`/assets/audio/*`), layered over the synth on medium+; synth stays the guaranteed fallback (boot floor / headless / missing file) |
-| Pipeline | `build_assets.mjs` (resample/prune/dedup/meshopt/webp + **palette recolor: flat factor _and_ A4 `tritone` texture-space gradient map** + audio/font groups), generators (`generate_vfx_atlas`/`generate_water_normal`/`generate_audio`), `assets.ts` + `sampled-audio.ts` loaders + fallback, `ASSETS.md` ledger, `manifest.json` |
+| Pipeline | `build_assets.mjs` (resample/prune/dedup/meshopt/webp + **palette recolor: flat factor _and_ A4 `tritone` texture-space gradient map** + audio/font/vfx groups), generators (`generate_vfx_atlas`/`generate_water_normal`/`generate_audio`), `assets.ts` + `sampled-audio.ts` loaders + fallback, `ASSETS.md` ledger, `manifest.json` |
 | Visual target | coherent stylized fantasy theme across heroes, regions, VFX, items, UI, and audio |
 
 ---
@@ -342,11 +342,13 @@ sprite atlases raise fidelity on medium+ tiers:
   dotted (mine), plain ring — swap into `telegraphTexture(...)` by archetype.
 - **Trail/beam gradients** for projectiles and beams (1-D ramps).
 
-Shipped: medium+ attempts `/assets/vfx/vfx_atlas.webp` and slices it into four
-sprite cells plus four telegraph cells. The atlas is original/generated in-repo
-and logged in `ASSETS.md`; missing files or headless tests keep using procedural
-`DataTexture`s. The final `cyclone` archetype is landed, and coverage is complete. All
-additive, tier-gated, off on low. Gate: perf harness, no-asset boot, theme fit.
+Shipped: medium+ preloads `/assets/vfx/vfx_atlas.webp` during the loading screen
+and slices it into four sprite cells plus four telegraph cells. The atlas is
+original/generated in-repo and logged in `ASSETS.md`; missing files or headless
+tests keep using procedural `DataTexture`s. The final `cyclone` archetype is
+landed, `channel` has a distinct vertical cast read, projectile objects and burst
+rings/sparks are pooled, and coverage is complete. All additive, tier-gated, off
+on low. Gate: perf harness, no-asset boot, theme fit.
 
 ---
 
@@ -442,7 +444,8 @@ are fine when they improve the theme and load safely.
    Quaternius creature GLBs through `ENABLED_HERO_BASES`.
 6. **D1** — core item visuals (the ~29), widen coverage lint. **Shipped.**
 7. **D2** — small basics + any costed new part/kind. **Shipped.**
-8. **E**  — VFX sprite + telegraph texture atlas. **Shipped** (atlas vendored + wired).
+8. **E**  — VFX sprite + telegraph texture atlas. **Shipped** (atlas vendored,
+   preloaded on medium+, and wired with procedural fallback).
 9. **F1** — sampled-audio loader + music beds. **Shipped** (`sampled-audio.ts`
    loader + tier gating + original generated beds/SFX; synth stays the floor).
 10. **F2** — signature `sound` reassignments (pure data). **Shipped** (present in
@@ -458,14 +461,16 @@ are fine when they improve the theme and load safely.
     `toggle-stance` gesture. **Shipped.** Eul's/Wind Waker, electric chain
     signatures, and held stance casts now use distinct closed-vocabulary entries.
 
-> **Status: every workstream in this plan is shipped and green, including the
-> final vocabulary pass.**
+> **Status: every required workstream in this plan is shipped and green,
+> including the final vocabulary pass and the follow-up VFX polish pass.**
 > All 80 cohort heroes now ship a tri-tone texture-space retexture (their
 > three-color identity as shadow/body/trim), 31 creature-base heroes reuse the
 > Quaternius GLBs, and 11 abstract heroes stay procedural by design — 122/122
-> covered. Nothing engineering-side remains. Further upgrades are custom art:
-> hand-painted bespoke atlases for marquee heroes or bespoke generated models
-> for the 11 procedural holdouts. Rebuild any
+> covered. The VFX atlas is preloaded on medium+, burst transients are pooled,
+> and `channel`/`cyclone` have distinct reads. Further upgrades are optional
+> custom art or cosmetics: hand-painted bespoke atlases for marquee heroes,
+> animated boot motion trails, trail/beam ramp textures if profiling asks for
+> them, or bespoke generated models for the 11 procedural holdouts. Rebuild any
 > hero from the raw CC0 pack (`tmp/asset_src/kaykit`, gitignored); the procedural
 > floor stays the live fallback throughout.
 

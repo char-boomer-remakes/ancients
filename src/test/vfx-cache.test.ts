@@ -43,6 +43,36 @@ describe('vfx cache', () => {
     expect(state.proceduralTelegraphs).toBeGreaterThanOrEqual(0);
   });
 
+  it('returns burst rings and sparks to the transient pool', () => {
+    const vfx = new VfxManager(() => 0);
+
+    vfx.handleEvent(
+      {
+        t: 'aoe-burst',
+        pos: { x: 0, y: 0 },
+        radius: 120,
+        vfx: { archetype: 'ground-aoe', color: '#88ccff', color2: '#ffffff', scale: 1 }
+      },
+      () => null
+    );
+
+    expect(vfx.pooledBurstCount()).toBe(0);
+    vfx.update(1);
+    expect(vfx.pooledBurstCount()).toBe(2);
+
+    vfx.handleEvent(
+      {
+        t: 'aoe-burst',
+        pos: { x: 100, y: 0 },
+        radius: 120,
+        vfx: { archetype: 'ground-aoe', color: '#ffcc88', color2: '#ffffff', scale: 1 }
+      },
+      () => null
+    );
+
+    expect(vfx.pooledBurstCount()).toBe(0);
+  });
+
   it('renders the cyclone archetype as a transient without assets', () => {
     const vfx = new VfxManager(() => 0);
 
@@ -52,6 +82,22 @@ describe('vfx cache', () => {
         uid: 1,
         abilityId: 'euls-active',
         vfx: { archetype: 'cyclone', color: '#9fe8e8', color2: '#ffffff', scale: 0.9 }
+      },
+      () => ({ x: 0, y: 0, h: 0 })
+    );
+
+    expect(vfx.group.children.length).toBeGreaterThan(0);
+  });
+
+  it('renders the channel archetype as a distinct transient without assets', () => {
+    const vfx = new VfxManager(() => 0);
+
+    vfx.handleEvent(
+      {
+        t: 'cast',
+        uid: 1,
+        abilityId: 'channel-test',
+        vfx: { archetype: 'channel', color: '#b88cff', color2: '#ffffff', scale: 1 }
       },
       () => ({ x: 0, y: 0, h: 0 })
     );

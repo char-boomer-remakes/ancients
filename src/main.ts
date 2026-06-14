@@ -37,7 +37,7 @@ const TERRAIN_PBR_SET: Record<string, string> = {
   wasteland: 'Ground048'
 };
 
-function preloadPathsForRegion(regionId: string, includeEnv: boolean): string[] {
+function preloadPathsForRegion(regionId: string, includeEnv: boolean, includeVfx: boolean): string[] {
   const region = REG.region(regionId);
   const set = TERRAIN_PBR_SET[region.biome] ?? TERRAIN_PBR_SET.grass;
   const paths = [
@@ -46,6 +46,7 @@ function preloadPathsForRegion(regionId: string, includeEnv: boolean): string[] 
     `textures/terrain/${set}_Roughness.jpg`
   ];
   if (includeEnv) paths.push('env/vale_day_1k.hdr');
+  if (includeVfx) paths.push('vfx/vfx_atlas.webp');
   return paths;
 }
 
@@ -88,10 +89,11 @@ function startGame(save: GameSave, opts: { headless?: boolean } = {}): void {
   // compile hitch lands off-screen instead of on the first playable frame.
   withLoading(`Entering ${regionName}…`, async (progress) => {
     const tier = resolveQuality(save.settings.graphics?.quality);
-    await preloadAssetGroups(['terrain', 'env'], {
+    const enhancedAssets = tier !== 'low';
+    await preloadAssetGroups(enhancedAssets ? ['terrain', 'env', 'vfx'] : ['terrain'], {
       label: `${regionName} assets`,
       skipModels: true,
-      paths: preloadPathsForRegion(save.regionId, tier !== 'low'),
+      paths: preloadPathsForRegion(save.regionId, enhancedAssets, enhancedAssets),
       onProgress: progress
     });
     game = new Game(canvas, save);
