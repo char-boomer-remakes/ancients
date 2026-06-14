@@ -3,6 +3,7 @@ import { Rng, hashString } from '../core/rng';
 import type { RegionDef } from '../core/types';
 import { WORLD_SCALE } from './scale';
 import { loadTex, loadModel, instancedFromModel } from './asset-loaders';
+import { TOWN_BUILDING_SIZE, DRESSING_PROP_SIZES, FOLIAGE_SIZES } from '../data/world/props';
 
 // ------------------------------------------------------------------
 // Procedural low-poly terrain: vertex-jittered plane, painted height
@@ -437,7 +438,7 @@ function swapTownBuildings(
     const loaded = scenes.filter((s): s is THREE.Group => !!s);
     if (!loaded.length) return;
     placements.forEach((p, i) => {
-      const b = normalizedClone(loaded[i % loaded.length], 3.6);
+      const b = normalizedClone(loaded[i % loaded.length], TOWN_BUILDING_SIZE.heightM);
       b.position.x = p.x;
       b.position.z = p.z;
       b.position.y += p.baseY;
@@ -512,10 +513,10 @@ const VILLAGER_PALETTES: { robe: number; trim: number; skin: number }[] = [
 
 /** Authored town props already on disk but previously unwired, with a target height. */
 const DRESSING_PROPS = {
-  well: { url: `${TOWN_BASE}/well.glb`, height: 1.9 },
-  cart: { url: `${TOWN_BASE}/cart.glb`, height: 1.5 },
-  barrel: { url: `${TOWN_BASE}/barrel.glb`, height: 1.0 },
-  market: { url: `${TOWN_BASE}/market_stand_1.glb`, height: 2.0 }
+  well: { url: `${TOWN_BASE}/well.glb`, height: DRESSING_PROP_SIZES.well.heightM },
+  cart: { url: `${TOWN_BASE}/cart.glb`, height: DRESSING_PROP_SIZES.cart.heightM },
+  barrel: { url: `${TOWN_BASE}/barrel.glb`, height: DRESSING_PROP_SIZES.barrel.heightM },
+  market: { url: `${TOWN_BASE}/market_stand_1.glb`, height: DRESSING_PROP_SIZES.market.heightM }
 } as const;
 
 /** Load an authored prop GLB and seat it; keep a procedural fallback visible until it lands. */
@@ -907,7 +908,7 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
   markStaticShadowCaster(trees, staticPropShadows);
   group.add(trees);
   group.add(trunks);
-  swapToInstancedModels(group, [trees, trunks], modelUrls(FOLIAGE_BASE, TREE_MODELS[region.biome] ?? TREE_MODELS.grass), treeMatrices, 4.6, isLive, staticPropShadows);
+  swapToInstancedModels(group, [trees, trunks], modelUrls(FOLIAGE_BASE, TREE_MODELS[region.biome] ?? TREE_MODELS.grass), treeMatrices, FOLIAGE_SIZES.tree.heightM, isLive, staticPropShadows);
 
   // rocks
   const rockGeo = new THREE.DodecahedronGeometry(0.8, 0);
@@ -930,7 +931,7 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
   rocks.count = placedRocks;
   markStaticShadowCaster(rocks, staticPropShadows);
   group.add(rocks);
-  swapToInstancedModels(group, [rocks], modelUrls(FOLIAGE_BASE, ROCK_MODELS), rockMatrices, 1.5, isLive, staticPropShadows);
+  swapToInstancedModels(group, [rocks], modelUrls(FOLIAGE_BASE, ROCK_MODELS), rockMatrices, FOLIAGE_SIZES.rock.heightM, isLive, staticPropShadows);
 
   // grass tufts: tier-gated instanced billboards over the open ground
   const grass = buildGrassTufts(planGrassTufts(region, opts.grassDensity ?? 0), heightAt, colors);

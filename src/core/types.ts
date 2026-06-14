@@ -195,6 +195,7 @@ export interface SummonSpec {
   abilities?: AbilityDef[];
   cannotAttack?: boolean;     // Healing Ward
   silhouette: SilhouetteSpec;
+  worldSize?: WorldSize;      // explicit real-world size; else derived from silhouette.scale
   palette: [string, string, string];
 }
 export interface SummonStats {
@@ -460,6 +461,30 @@ export interface SilhouetteSpec {
   extras?: ('cape' | 'shoulderpads' | 'horns' | 'tusks' | 'crown' | 'quiver' | 'belt' | 'wings')[];
 }
 
+// ---------- World size (OVERWORLD_PLANNING) ----------
+// One canonical real-world size, in meters, for any entity that stands on the
+// world. The renderer fit pipeline and `data-lint` read it; the sim still runs
+// in Dota units and the bridge is the conversions in `src/engine/scale.ts`.
+export type SizeClass =
+  | 'tiny' | 'small' | 'human' | 'large' | 'huge' | 'colossal'  // creatures
+  | 'prop' | 'structure' | 'landmark';                          // built/env
+
+export interface WorldSize {
+  /** Standing/at-rest height, base to crown, in world meters. The GLB fit target. */
+  heightM: number;
+  /** Ground footprint radius in world meters (visual). Sim radius = footprintM * 100. */
+  footprintM: number;
+  /** Optional non-radial footprint for buildings/props that aren't round. */
+  widthM?: number;
+  depthM?: number;
+  /** Pose the height is measured in — guards quad/winged/serpentine reads. */
+  pose?: 'standing' | 'quadruped' | 'hunched' | 'winged' | 'coiled' | 'static';
+  /** Class anchor this entity belongs to (drives the lint band in §3). */
+  sizeClass?: SizeClass;
+  /** Footprint↔radius parity is intentionally decoupled (skips the §6 gate). */
+  footprintDecoupled?: boolean;
+}
+
 export type ItemWeaponVisualKind =
   | NonNullable<SilhouetteSpec['weapon']>
   | 'broad-cleaver'
@@ -535,6 +560,7 @@ export interface HeroDef {
   aghanim?: AghanimDef;
   combo?: HeroComboRule[];
   silhouette: SilhouetteSpec;
+  worldSize?: WorldSize;       // explicit real-world size; else derived from silhouette.scale
   palette: [string, string, string];
   barks: string[];             // ~6 original lines, Dota voice, never Valve text
   bounty: { xp: number; gold: number };
@@ -558,6 +584,7 @@ export interface CreepDef {
   abilities: AbilityDef[];
   bounty: { xp: number; gold: number };
   silhouette: SilhouetteSpec;
+  worldSize?: WorldSize;       // explicit real-world size; else derived from tier + silhouette
   palette: [string, string, string];
   aggroRadius?: number;        // default from tuning
   elementalShield?: { element: ActiveElement; hp: number; weakTo: ActiveElement[]; weakMult: number };
@@ -689,6 +716,7 @@ export interface BossDef {
   heroId: string;
   region: string;
   rank: 'boss' | 'mini-boss';
+  worldSize?: WorldSize;       // explicit override; else source-hero size raised to the rank floor
   phases?: { atHpPct: number; onEnter: EffectNode[]; gambitBias?: string }[];
   loot: LootTable;
   tiers: DifficultyTier[];
@@ -1319,6 +1347,7 @@ export interface QuestGiverDef {
   patrol?: Vec2[];          // waypoints walked as a closed loop back to home
   loopSec?: number;         // seconds for one full patrol loop (default 60)
   radius?: number;          // interaction radius (default 360)
+  worldSize?: WorldSize;    // explicit real-world size; else the human-villager default
 }
 
 export interface GymDef {

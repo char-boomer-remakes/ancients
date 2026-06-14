@@ -156,6 +156,34 @@ function stripClipName(name) {
   return i >= 0 ? name.slice(i + 1) : name;
 }
 
+// OVERWORLD_PLANNING §5.4: measure the model's authored bounding box from its
+// POSITION accessors so the manifest can carry a real dimension to lint against
+// the declared WorldSize. Node transforms are not composed (these props ship as
+// single-root meshes), so this is the authored local-space AABB — good enough to
+// catch a model that fits to height but has a wildly wrong footprint.
+function authoredDims(root) {
+  let min = [Infinity, Infinity, Infinity];
+  let max = [-Infinity, -Infinity, -Infinity];
+  let seen = false;
+  for (const mesh of root.listMeshes()) {
+    for (const prim of mesh.listPrimitives()) {
+      const pos = prim.getAttribute('POSITION');
+      if (!pos) continue;
+      const lo = pos.getMin([]);
+      const hi = pos.getMax([]);
+      if (!Array.isArray(lo) || !Array.isArray(hi)) continue;
+      for (let i = 0; i < 3; i++) {
+        min[i] = Math.min(min[i], lo[i]);
+        max[i] = Math.max(max[i], hi[i]);
+      }
+      seen = true;
+    }
+  }
+  if (!seen) return null;
+  const r3 = (v) => +v.toFixed(4);
+  return { w: r3(max[0] - min[0]), h: r3(max[1] - min[1]), d: r3(max[2] - min[2]) };
+}
+
 // sRGB hex -> linear RGB triplet (glTF baseColorFactor is linear).
 function hexToLinear(hex) {
   const h = hex.replace('#', '');
@@ -339,12 +367,13 @@ async function processModel(io, fns, item) {
   await io.write(outPath, doc);
   const bytes = fs.statSync(outPath).size;
   const complexity = complexityForRoot(root);
+  const dims = authoredDims(root);
   console.log(
     `  ${item.out}  ${formatBytes(bytes)}` +
     ` (${complexity.meshes} meshes, ${complexity.materials} materials` +
     `${complexity.animations ? `, ${complexity.animations} clips` : ''})`
   );
-  return { rel: item.out, bytes, type: 'model', complexity };
+  return { rel: item.out, bytes, type: 'model', complexity, dims };
 }
 
 function processCopy(item) {
@@ -372,6 +401,15 @@ function buildManifest(sourceByOut) {
     const meta = sourceByOut.get(rel) ?? previousByPath.get(rel) ?? {};
     const bytes = fs.statSync(abs).size;
     const group = meta.group ?? meta.preloadGroup ?? assetGroup(rel);
+    const dims = meta.dims ?? null;
+    // Post-fit meters: scale the authored AABB to the declared fit target so lint
+    // can compare against the entity's WorldSize.heightM (§5.4 / §9.5).
+    let dimsM = meta.dimsM ?? null;
+    if (dims && meta.targetHeightM && dims.h > 0) {
+      const k = meta.targetHeightM / dims.h;
+      const r3 = (v) => +(v * k).toFixed(4);
+      dimsM = { h: meta.targetHeightM, w: r3(dims.w), d: r3(dims.d) };
+    }
     return {
       path: rel,
       url: assetUrl(rel),
@@ -380,7 +418,9 @@ function buildManifest(sourceByOut) {
       group,
       preloadGroup: meta.preloadGroup ?? group,
       sourceSpec: meta.sourceSpec ?? null,
-      source: meta.source ?? meta.src ?? null
+      source: meta.source ?? meta.src ?? null,
+      ...(dims ? { dims } : {}),
+      ...(dimsM ? { dimsM } : {})
     };
   });
   const totalBytes = files.reduce((sum, f) => sum + f.bytes, 0);
@@ -511,11 +551,18 @@ async function main() {
           source: item.source,
           group: item.group,
           preloadGroup: item.preloadGroup,
-          assetType: item.assetType
+          assetType: item.assetType,
+          // OVERWORLD_PLANNING §5.6: the declared fit target travels with the spec
+          // so the manifest can record post-fit meters (dimsM) for the §9.5 gate.
+          targetHeightM: item.targetHeightM
         });
         try {
           const result = item.type === 'copy' ? processCopy(item) : await processModel(io, deps, item);
           built.push(result);
+          if (result.dims) {
+            const meta = sourceByOut.get(result.rel);
+            if (meta) meta.dims = result.dims;
+          }
         } catch (err) {
           failures++;
           console.error(`  FAIL ${item.src}: ${err instanceof Error ? err.message : err}`);

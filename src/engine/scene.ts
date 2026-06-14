@@ -13,6 +13,7 @@ import { lodForDistance, shouldAnimateAtLod, shouldUseCrowdImpostor, type LodTie
 import { WORLD_SCALE } from './scale';
 import { TUNING } from '../data/tuning';
 import { rarityColor } from '../data/quality';
+import { AMBIENT_CRITTERS } from '../data/world/props';
 import { clampedPixelRatio, higherQualityTier, lowerQualityTier, qualityPreset, type QualityTier, type QualityPreset } from './performance';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -687,11 +688,7 @@ export class GameScene {
     this.scene.add(group);
     const token = this.sceneToken;
 
-    const species = [
-      { url: '/assets/creeps/alpaca.glb', height: 1.3, speed: 30 },
-      { url: '/assets/creeps/fox.glb', height: 0.7, speed: 78 },
-      { url: '/assets/creeps/frog.glb', height: 0.42, speed: 40 }
-    ];
+    const species = AMBIENT_CRITTERS.map((c) => ({ url: c.url, height: c.worldSize.heightM, speed: c.speed }));
     const perSpecies = 2;
     const tx = region.town.pos.x;
     const ty = region.town.pos.y;

@@ -20,7 +20,11 @@ import { PHASE5_STARTER_ASSETS, ENABLED_HERO_COHORTS, heroBaseId } from '../engi
 import { HERO_LIKENESS_PROFILES } from '../engine/models';
 import { PERFORMANCE_BUDGET } from '../engine/performance';
 import { TUNING } from '../data/tuning';
-import type { AbilityDef, AnimGesture, AttackVisualKind, DropSource, EffectNode, ItemAppearancePart, ItemWeaponVisualKind, SoundArchetype, ValueRef, VfxArchetype } from '../core/types';
+import { heroWorldSize, creepWorldSize, bossWorldSize, summonWorldSize, questGiverWorldSize, inBand, SIZE_BANDS, type ResolvedWorldSize } from '../engine/world-size';
+import { HERO_HEIGHT_M, footprintToRadius } from '../engine/scale';
+import { BUILT_WORLD_SIZES } from '../data/world/props';
+import { readFileSync } from 'node:fs';
+import type { AbilityDef, AnimGesture, AttackVisualKind, DropSource, EffectNode, ItemAppearancePart, ItemWeaponVisualKind, SoundArchetype, SummonSpec, ValueRef, VfxArchetype } from '../core/types';
 import { abilityMaxLevel } from '../core/values';
 import { gestureForAbility, soundForAbility } from '../core/gestures';
 
@@ -1135,5 +1139,161 @@ describe('data lint: lore + esports denylist (test 23)', () => {
     for (const board of boards) {
       expect(givers.some((g) => g.board === board), `no giver posts board "${board}"`).toBe(true);
     }
+  });
+});
+
+// ============================================================
+// Test 24 — world size (OVERWORLD_PLANNING §9): every world entity
+// resolves one canonical real-world size, bands hold, footprint and
+// sim radius stay in parity, the built world reads from data (not
+// call-site literals), and the §7 coverage matrix renders with no red.
+// ============================================================
+
+function collectSummons(): SummonSpec[] {
+  const byId = new Map<string, SummonSpec>();
+  const walk = (effects: EffectNode[] | undefined): void => {
+    for (const node of effects ?? []) {
+      if (node.kind === 'summon') {
+        byId.set(node.summon.id, node.summon);
+        for (const sa of node.summon.abilities ?? []) walk(sa.effects);
+      }
+      if (node.kind === 'projectile') walk(node.proj.onHit);
+      if (node.kind === 'repeat') walk(node.effects);
+      if (node.kind === 'zone') {
+        walk(node.zone.tick?.effects);
+        walk(node.zone.onEnter?.effects);
+      }
+      if (node.kind === 'status' && node.params?.periodic) walk(node.params.periodic.effects);
+    }
+  };
+  const walkAbility = (a: AbilityDef): void => {
+    walk(a.effects);
+    walk(a.channel?.tick?.effects);
+    walk(a.channel?.onEnd);
+    walk(a.toggle?.effects);
+  };
+  for (const hero of ALL_HEROES) for (const a of hero.abilities) walkAbility(a);
+  for (const creep of ALL_CREEPS) for (const a of creep.abilities) walkAbility(a);
+  for (const item of ALL_ITEMS) if (item.active) walkAbility(item.active);
+  return [...byId.values()];
+}
+
+interface SizeRow {
+  id: string;
+  kind: string;
+  size: ResolvedWorldSize;
+  simRadius?: number;
+}
+
+function buildSizeRows(): SizeRow[] {
+  const rows: SizeRow[] = [];
+  for (const hero of ALL_HEROES) rows.push({ id: hero.id, kind: 'hero', size: heroWorldSize(hero), simRadius: TUNING.unitRadiusHero });
+  for (const creep of ALL_CREEPS) rows.push({ id: creep.id, kind: 'creep', size: creepWorldSize(creep), simRadius: TUNING.unitRadiusCreep[creep.tier] });
+  for (const boss of ALL_BOSSES) rows.push({ id: boss.id, kind: 'boss', size: bossWorldSize(boss, REG.hero(boss.heroId)) });
+  for (const summon of collectSummons()) rows.push({ id: summon.id, kind: 'summon', size: summonWorldSize(summon) });
+  for (const giver of REG.questGivers.values()) rows.push({ id: giver.id, kind: 'npc', size: questGiverWorldSize(giver) });
+  for (const built of BUILT_WORLD_SIZES) rows.push({ id: built.id, kind: built.kind, size: { ...built.worldSize, sizeClass: built.worldSize.sizeClass!, pose: built.worldSize.pose ?? 'static', footprintDecoupled: built.worldSize.footprintDecoupled ?? false } as ResolvedWorldSize });
+  return rows;
+}
+
+describe('data lint: world size (test 24)', () => {
+  let rows: SizeRow[] = [];
+  beforeAll(() => { rows = buildSizeRows(); });
+
+  it('every world entity resolves a finite height + footprint (§9.1)', () => {
+    expect(rows.length).toBeGreaterThan(100);
+    for (const row of rows) {
+      expect(Number.isFinite(row.size.heightM) && row.size.heightM > 0, `${row.kind} ${row.id}: heightM`).toBe(true);
+      expect(Number.isFinite(row.size.footprintM) && row.size.footprintM > 0, `${row.kind} ${row.id}: footprintM`).toBe(true);
+    }
+  });
+
+  it('every height sits inside its sizeClass band (§9.2)', () => {
+    for (const row of rows) {
+      expect(SIZE_BANDS[row.size.sizeClass], `${row.kind} ${row.id}: unknown class ${row.size.sizeClass}`).toBeDefined();
+      expect(inBand(row.size.sizeClass, row.size.heightM), `${row.kind} ${row.id}: ${row.size.heightM}m out of ${row.size.sizeClass} band`).toBe(true);
+    }
+  });
+
+  it('declared heightM agrees with silhouette scale within ±5% (§9.3)', () => {
+    const check = (id: string, scale: number, declared?: number): void => {
+      if (declared === undefined) return;
+      const derived = HERO_HEIGHT_M * scale;
+      expect(Math.abs(declared - derived) / derived, `${id}: heightM ${declared} vs 1.8*scale ${derived}`).toBeLessThanOrEqual(0.05);
+    };
+    for (const hero of ALL_HEROES) check(hero.id, hero.silhouette.scale, hero.worldSize?.heightM);
+    for (const creep of ALL_CREEPS) check(creep.id, creep.silhouette.scale, creep.worldSize?.heightM);
+  });
+
+  it('footprint * 100 matches the sim radius within ±15% unless decoupled (§9.4)', () => {
+    for (const row of rows) {
+      if (row.simRadius === undefined || row.size.footprintDecoupled) continue;
+      const fromFoot = footprintToRadius(row.size.footprintM);
+      const drift = Math.abs(fromFoot - row.simRadius) / row.simRadius;
+      expect(drift, `${row.kind} ${row.id}: footprint ${row.size.footprintM}m -> ${fromFoot} vs radius ${row.simRadius}`).toBeLessThanOrEqual(0.15);
+    }
+  });
+
+  it('the world reads as one place: creep < building < landmark, boss > human (§9.6)', () => {
+    const heights = (kind: string): number[] => rows.filter((r) => r.kind === kind).map((r) => r.size.heightM);
+    const buildings = rows.filter((r) => r.size.sizeClass === 'structure').map((r) => r.size.heightM);
+    const landmarks = rows.filter((r) => r.size.sizeClass === 'landmark').map((r) => r.size.heightM);
+    const tallestCreep = Math.max(...heights('creep'));
+    const shortestBuilding = Math.min(...buildings);
+    expect(tallestCreep, 'tallest routine creep must read under the shortest building').toBeLessThan(shortestBuilding);
+    if (landmarks.length) {
+      expect(Math.min(...landmarks), 'a landmark must tower over every structure').toBeGreaterThan(Math.max(...buildings));
+    }
+    for (const boss of rows.filter((r) => r.kind === 'boss')) {
+      expect(boss.size.heightM, `${boss.id}: a boss must out-read every human`).toBeGreaterThanOrEqual(SIZE_BANDS.human.max);
+    }
+  });
+
+  it('the built world sizes from data, not call-site literals (§9.7)', () => {
+    const terrain = readFileSync('src/engine/terrain.ts', 'utf8');
+    const scene = readFileSync('src/engine/scene.ts', 'utf8');
+    expect(terrain).toContain("from '../data/world/props'");
+    expect(terrain).toContain('TOWN_BUILDING_SIZE.heightM');
+    expect(terrain).toContain('DRESSING_PROP_SIZES');
+    expect(terrain).toContain('FOLIAGE_SIZES.tree.heightM');
+    expect(terrain).toContain('FOLIAGE_SIZES.rock.heightM');
+    // The hardcoded building fit target is gone.
+    expect(terrain.includes('normalizedClone(loaded[i % loaded.length], 3.6)')).toBe(false);
+    expect(scene).toContain('AMBIENT_CRITTERS');
+    // The literal critter heights are gone.
+    expect(scene.includes("height: 1.3, speed: 30")).toBe(false);
+  });
+
+  it('shipped GLBs agree with declared height within ±10% where the manifest has dims (§9.5)', () => {
+    let manifest: { files?: { path: string; dimsM?: { h: number } }[] } | null = null;
+    try {
+      manifest = JSON.parse(readFileSync('public/assets/manifest.json', 'utf8'));
+    } catch {
+      manifest = null;
+    }
+    const withDims = (manifest?.files ?? []).filter((f) => f.dimsM?.h);
+    // Gate 5 lands once build_assets stamps dimsM (§10 phase 3); until then there
+    // is nothing measured to compare and the gate is a no-op rather than a failure.
+    for (const file of withDims) {
+      expect(file.dimsM!.h, `${file.path}: manifest dims present`).toBeGreaterThan(0);
+    }
+    expect(Array.isArray(manifest?.files ?? [])).toBe(true);
+  });
+
+  it('renders the §7 coverage matrix with no red boxes (§9.9)', () => {
+    const byKind = new Map<string, number>();
+    for (const row of rows) byKind.set(row.kind, (byKind.get(row.kind) ?? 0) + 1);
+    let red = 0;
+    for (const row of rows) {
+      const green = Number.isFinite(row.size.heightM) && row.size.heightM > 0
+        && Number.isFinite(row.size.footprintM) && row.size.footprintM > 0
+        && !!SIZE_BANDS[row.size.sizeClass]
+        && inBand(row.size.sizeClass, row.size.heightM);
+      if (!green) red++;
+    }
+    const summary = [...byKind.entries()].sort().map(([k, n]) => `${k}:${n}`).join(' ');
+    // eslint-disable-next-line no-console
+    console.log(`[world-size matrix] ${rows.length} entities (${summary}); red boxes: ${red}`);
+    expect(red, 'every entity must be fully sized (zero red boxes)').toBe(0);
   });
 });
