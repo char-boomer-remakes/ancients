@@ -1,0 +1,71 @@
+{
+  "_comment": "Phase 5 hero GLBs (VFX_OVERHAUL WS-J batch 13). CC0 KayKit Adventurers bases (Knight/Mage/Barbarian/Rogue), retextured to each hero's three-color palette via the build recolor step and trimmed to the six clips the animator drives (idle/run/attack/cast/channel/death). Raw bases live in tmp/asset_src/kaykit (gitignored); only the optimized output under public/assets/heroes is committed. materialMap maps KayKit's single *_texture atlas material to the palette's primary so each hero reads in its signature color.",
+  "items": [
+    {
+      "src": "tmp/asset_src/kaykit/Knight.glb",
+      "out": "heroes/juggernaut.glb",
+      "type": "model",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0",
+      "maxTex": 128,
+      "recolor": ["#c8742c", "#f3e3c2", "#7adfc4"],
+      "materialMap": { "texture": "primary" },
+      "renameClips": { "Idle": "idle", "Running_A": "run", "1H_Melee_Attack_Slice_Diagonal": "attack", "Spellcasting": "cast", "Death_A": "death" },
+      "keepClips": ["idle", "run", "attack", "cast", "death"]
+    },
+    {
+      "src": "tmp/asset_src/kaykit/Mage.glb",
+      "out": "heroes/crystal-maiden.glb",
+      "type": "model",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0",
+      "maxTex": 128,
+      "recolor": ["#7ec8f2", "#f4fbff", "#b8c4d8"],
+      "materialMap": { "texture": "primary" },
+      "renameClips": { "Idle": "idle", "Running_A": "run", "Spellcast_Shoot": "attack", "Spellcasting": "cast", "Spellcast_Long": "channel", "Death_A": "death" },
+      "keepClips": ["idle", "run", "attack", "cast", "channel", "death"]
+    },
+    {
+      "src": "tmp/asset_src/kaykit/Mage.glb",
+      "out": "heroes/lich.glb",
+      "type": "model",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0",
+      "maxTex": 128,
+      "recolor": ["#7ec8f2", "#2c4a78", "#d8f4ff"],
+      "materialMap": { "texture": "primary" },
+      "renameClips": { "Idle": "idle", "Running_A": "run", "Spellcast_Shoot": "attack", "Spellcasting": "cast", "Spellcast_Long": "channel", "Death_A": "death" },
+      "keepClips": ["idle", "run", "attack", "cast", "channel", "death"]
+    },
+    {
+      "src": "tmp/asset_src/kaykit/Barbarian.glb",
+      "out": "heroes/pudge.glb",
+      "type": "model",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0",
+      "maxTex": 128,
+      "recolor": ["#7a9b3a", "#d8a39b", "#8a4b2f"],
+      "materialMap": { "texture": "primary" },
+      "renameClips": { "Idle": "idle", "Running_A": "run", "2H_Melee_Attack_Chop": "attack", "Spellcasting": "cast", "Death_A": "death" },
+      "keepClips": ["idle", "run", "attack", "cast", "death"]
+    },
+    {
+      "src": "tmp/asset_src/kaykit/Barbarian.glb",
+      "out": "heroes/earthshaker.glb",
+      "type": "model",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0",
+      "maxTex": 128,
+      "recolor": ["#5b8cc8", "#a9743c", "#e8b15c"],
+      "materialMap": { "texture": "primary" },
+      "renameClips": { "Idle": "idle", "Running_A": "run", "2H_Melee_Attack_Chop": "attack", "Spellcasting": "cast", "Death_A": "death" },
+      "keepClips": ["idle", "run", "attack", "cast", "death"]
+    },
+    {
+      "src": "tmp/asset_src/kaykit/Rogue.glb",
+      "out": "heroes/sniper.glb",
+      "type": "model",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0",
+      "maxTex": 128,
+      "recolor": ["#c8a05c", "#5c4a32", "#ffd27f"],
+      "materialMap": { "texture": "primary" },
+      "renameClips": { "Idle": "idle", "Running_A": "run", "1H_Ranged_Shoot": "attack", "Spellcasting": "cast", "Death_A": "death" },
+      "keepClips": ["idle", "run", "attack", "cast", "death"]
+    }
+  ]
+}

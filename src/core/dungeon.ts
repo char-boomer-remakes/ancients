@@ -1,4 +1,4 @@
-import { Rng } from './rng';
+import { Rng, hashString } from './rng';
 import type {
   AffixDef,
   DifficultyTier,
@@ -155,16 +155,46 @@ function bestRarity(table: ItemDropTable | undefined): ItemRarity | undefined {
   return best;
 }
 
-function roomTypeAt(index: number, depth: number, rng: Rng): RoomType {
+function roomTypeAt(index: number, depth: number, rng: Rng, endless = false): RoomType {
   if (index === 0) return 'entrance';
   if (index === depth - 1) return 'boss';
   if (depth >= 4 && index === depth - 2) return 'rest';
+  if (endless) {
+    // Endless descent breathes with periodic safe rooms (Left 4 Dead valleys) and
+    // skews dense: mostly combat, frequent elites, no treasure/shrine detours.
+    if (index > 1 && index % 4 === 0) return 'rest';
+    if (index <= 1) return 'combat';
+    return rng.next() < 0.34 ? 'elite' : 'combat';
+  }
   if (depth >= 5 && index === Math.floor(depth / 2)) return 'treasure';
   if (index <= 1) return 'combat';
   const roll = rng.next();
   if (roll < 0.16) return 'elite';
   if (roll < 0.28) return 'shrine';
   return 'combat';
+}
+
+const PACK_PROGRESS_WEIGHT: Record<MonsterRarity, number> = { normal: 1, champion: 3, rare: 6 };
+
+/** Rarity-weighted total the endless meter fills toward; reaching it summons the guardian (Diablo III greater rift). */
+function endlessProgressTarget(rooms: DungeonRoom[]): number {
+  let total = 0;
+  for (const room of rooms) {
+    if (room.type === 'boss') continue;
+    for (const pack of room.packs) total += PACK_PROGRESS_WEIGHT[pack.rarity] * pack.cards.length;
+  }
+  return Math.max(1, total);
+}
+
+/** The endless level folds into the modifier profile: deeper levels buy bigger budgets and richer elite odds. */
+function withEndlessScaling(profile: ModifierProfile, level: number): ModifierProfile {
+  if (level <= 0) return profile;
+  return {
+    ...profile,
+    budgetMult: profile.budgetMult * (1 + level * 0.12),
+    championChanceBonus: profile.championChanceBonus + level * 0.03,
+    rareChanceBonus: profile.rareChanceBonus + level * 0.015
+  };
 }
 
 function roomBudget(def: DungeonDef, tier: DifficultyTier, depth: number, type: RoomType, profile = DEFAULT_MODIFIER_PROFILE): number {
@@ -217,27 +247,51 @@ export function rollRoomSpawns(
   return packs;
 }
 
+/** Day index since the Unix epoch (UTC), the rotation key for a daily dungeon seed. */
+export function dayIndex(now = Date.now()): number {
+  return Math.floor(now / 86_400_000);
+}
+
+/** Week index since the epoch (UTC), the rotation key for a weekly dungeon seed. */
+export function weekIndex(now = Date.now()): number {
+  return Math.floor(now / (86_400_000 * 7));
+}
+
+/** A shared, reproducible seed so every player runs the same daily/weekly layout. */
+export function dungeonDailySeed(dungeonId: string, index = dayIndex()): number {
+  return hashString(`daily:${dungeonId}:${index}`);
+}
+
+export function dungeonWeeklySeed(dungeonId: string, index = weekIndex()): number {
+  return hashString(`weekly:${dungeonId}:${index}`);
+}
+
 export function generateDungeon(def: DungeonDef, tier: DifficultyTier, seed: number, opts: DungeonGenerationOptions = {}): DungeonLayout {
   if (!def.tiers.includes(tier)) throw new Error(`dungeon ${def.id} does not support tier ${tier}`);
   if (def.templates.length === 0) throw new Error(`dungeon ${def.id} has no room templates`);
   const rng = new Rng(seed);
   const authoredAffixes = def.affixes ?? [];
   const affixes = def.affixPool.map((id) => authoredAffixes.find((affix) => affix.id === id) ?? { id, name: id, apply: [] });
-  const profile = modifierProfile(def, opts.modifiers);
+  const endless = !!opts.endless;
+  const level = endless ? Math.max(0, Math.floor(opts.endlessLevel ?? 0)) : 0;
+  const profile = withEndlessScaling(modifierProfile(def, opts.modifiers), level);
   const min = Math.max(3, Math.floor(def.roomCount.min));
   const max = Math.max(min, Math.floor(def.roomCount.max));
-  const depth = rng.int(min, max) + profile.roomCountBonus;
+  // Endless runs lengthen with the level (longer, deeper descents); fixed runs roll min..max.
+  const depth = (endless ? max + level * 2 : rng.int(min, max)) + profile.roomCountBonus;
 
   const rooms: DungeonRoom[] = [];
   for (let index = 0; index < depth; index++) {
-    const type = roomTypeAt(index, depth, rng);
+    const type = roomTypeAt(index, depth, rng, endless);
     const exits: number[] = [];
     if (index < depth - 1) exits.push(index + 1);
-    if (index > 0 && index < depth - 3 && rng.chance(0.3)) exits.push(index + 2);
+    if (!endless && index > 0 && index < depth - 3 && rng.chance(0.3)) exits.push(index + 2);
 
-    const budget = roomBudget(def, tier, index, type, profile);
+    // Endless depth keeps climbing the budget curve past the def's nominal length.
+    const depthForBudget = endless ? index + level * 3 : index;
+    const budget = roomBudget(def, tier, depthForBudget, type, profile);
     const packs = budget > 0
-      ? rollRoomSpawns(def.spawnPool, affixes, budget, tier, index, rng.fork(index + 31), profile)
+      ? rollRoomSpawns(def.spawnPool, affixes, budget, tier, depthForBudget, rng.fork(index + 31), profile)
       : [];
 
     rooms.push({
@@ -256,6 +310,7 @@ export function generateDungeon(def: DungeonDef, tier: DifficultyTier, seed: num
     tier,
     modifiers: profile.ids,
     depth,
-    rooms
+    rooms,
+    ...(endless ? { endless: true, endlessLevel: level, progressTarget: endlessProgressTarget(rooms) } : {})
   };
 }

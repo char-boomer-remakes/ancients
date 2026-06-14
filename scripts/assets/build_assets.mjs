@@ -127,6 +127,7 @@ function complexityForRoot(root) {
   return {
     meshes: root.listMeshes().length,
     materials: root.listMaterials().length,
+    materialNames: root.listMaterials().map((m) => m.getName() || '(unnamed)'),
     textures: textures.length,
     textureDimensions: textures.filter((t) => t.width && t.height),
     animations: root.listAnimations().length
@@ -136,6 +137,48 @@ function complexityForRoot(root) {
 function stripClipName(name) {
   const i = name.lastIndexOf('|');
   return i >= 0 ? name.slice(i + 1) : name;
+}
+
+// sRGB hex -> linear RGB triplet (glTF baseColorFactor is linear).
+function hexToLinear(hex) {
+  const h = hex.replace('#', '');
+  const to = (v) => {
+    const s = v / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return [to(parseInt(h.slice(0, 2), 16)), to(parseInt(h.slice(2, 4), 16)), to(parseInt(h.slice(4, 6), 16))];
+}
+
+function luminance([r, g, b]) {
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Retexture a base mesh to a hero's three-color palette (GRAPHICS_SPEC §13 Phase 5):
+ * primary reads as cloth/skin, secondary as worked metal/armour, accent as trim/gem.
+ * Each material is mapped to a role by an explicit `materialMap` keyword match on its
+ * name, else bucketed by the luminance of its current base color. The factor tints any
+ * base-color texture, so atlas detail/AO survives while the hue swings to the palette.
+ */
+function recolorToPalette(root, palette, materialMap) {
+  const [primary, secondary, accent] = palette.map(hexToLinear);
+  const roleColor = { primary, secondary, accent };
+  const keywords = Object.entries(materialMap ?? {});
+  for (const mat of root.listMaterials()) {
+    const name = (mat.getName() || '').toLowerCase();
+    let role = null;
+    for (const [kw, r] of keywords) {
+      if (name.includes(kw.toLowerCase())) { role = r; break; }
+    }
+    if (!role) {
+      const cur = mat.getBaseColorFactor();
+      const l = luminance([cur[0], cur[1], cur[2]]);
+      role = l < 0.18 ? 'secondary' : l > 0.62 ? 'accent' : 'primary';
+    }
+    const [r, g, b] = roleColor[role] ?? primary;
+    const alpha = mat.getBaseColorFactor()[3] ?? 1;
+    mat.setBaseColorFactor([r, g, b, alpha]);
+  }
 }
 
 async function processModel(io, fns, item) {
@@ -164,6 +207,16 @@ async function processModel(io, fns, item) {
   if (item.keepClips) {
     const missing = item.keepClips.filter((c) => !seen.has(c));
     if (missing.length) console.warn(`  WARN ${item.out}: missing clips ${missing.join(', ')}`);
+  }
+
+  if (process.env.ASSET_DEBUG_MATERIALS) {
+    console.log(`  [materials] ${item.out}: ${root.listMaterials().map((m) => m.getName() || '(unnamed)').join(', ') || '(none)'}`);
+  }
+
+  // Retexture to a hero palette before compression (Phase 5). Runs on the raw
+  // materials so the keyword/luminance mapping sees their original names + colors.
+  if (item.recolor) {
+    recolorToPalette(root, item.recolor, item.materialMap);
   }
 
   const transforms = [resample(), prune(), dedup()];

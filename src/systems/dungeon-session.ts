@@ -16,6 +16,8 @@ const PLAYER_START = v2(720, ROOM_SIZE.h / 2);
 const ENEMY_START = v2(3000, ROOM_SIZE.h / 2);
 type DungeonPacingPhase = 'idle' | 'build-up' | 'peak' | 'relax';
 
+const PACK_PROGRESS_WEIGHT: Record<PlannedPack['rarity'], number> = { normal: 1, champion: 3, rare: 6 };
+
 export interface DungeonSessionResult {
   cleared: boolean;
   wiped: boolean;
@@ -23,6 +25,9 @@ export interface DungeonSessionResult {
   roomIndex: number;
   clearedRooms: number[];
   guardianCleared: boolean;
+  endless: boolean;
+  endlessLevel: number;
+  progress: number;
   hash: string;
 }
 
@@ -46,16 +51,17 @@ export class DungeonSession {
   private roomSpawnedPacks = 0;
   private nextPackAt = 0;
   private pacingPhase: DungeonPacingPhase = 'idle';
+  private readonly enemyWeight = new Map<number, number>();
 
   driverIdx = 0;
   done = false;
   result: DungeonSessionResult | null = null;
   guardianMechanicsFired: string[] = [];
 
-  constructor(def: DungeonDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number, opts?: { maxSec?: number; modifiers?: string[] }) {
+  constructor(def: DungeonDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number, opts?: { maxSec?: number; modifiers?: string[]; endless?: boolean; endlessLevel?: number }) {
     this.def = def;
     this.tier = tier;
-    this.layout = generateDungeon(def, tier, seed, { modifiers: opts?.modifiers });
+    this.layout = generateDungeon(def, tier, seed, { modifiers: opts?.modifiers, endless: opts?.endless, endlessLevel: opts?.endlessLevel });
     this.sim = new Sim({ seed, bounds: ROOM_SIZE });
     this.maxTicks = Math.round((opts?.maxSec ?? this.layout.depth * 75) / this.sim.dt);
     this.affixes = new Map((def.affixes ?? []).map((affix) => [affix.id, affix]));
@@ -111,6 +117,21 @@ export class DungeonSession {
       remainingPacks: Math.max(0, this.room.packs.length - this.roomPackCursor),
       nextPackIn: Math.max(0, this.nextPackAt - this.sim.time)
     };
+  }
+
+  /** Rarity-weighted kill progress (Diablo III greater-rift meter). 1 = guardian summoned. */
+  endlessProgress(): number {
+    const target = this.layout.progressTarget;
+    if (!target || target <= 0) return this.layout.endless ? 0 : 1;
+    let accrued = 0;
+    for (const [uid, weight] of this.enemyWeight) {
+      if (!this.sim.unit(uid)?.alive) accrued += weight;
+    }
+    return Math.min(1, accrued / target);
+  }
+
+  endlessInfo(): { active: boolean; level: number; progress: number } {
+    return { active: !!this.layout.endless, level: this.layout.endlessLevel ?? 0, progress: this.endlessProgress() };
   }
 
   chooseExit(index: number): boolean {
@@ -226,6 +247,7 @@ export class DungeonSession {
       y: ENEMY_START.y + (Math.floor(packIdx / 2) - 1) * 280
     };
     const spawned: Unit[] = [];
+    const weight = PACK_PROGRESS_WEIGHT[pack.rarity] ?? 1;
     pack.cards.forEach((card, i) => {
       const angle = (i / Math.max(1, pack.cards.length)) * Math.PI * 2;
       const pos = {
@@ -235,6 +257,7 @@ export class DungeonSession {
       const u = this.sim.spawnCreep(REG.creep(card.creepId), { team: 1, pos, star: card.star, wild: true, homePos: { ...center }, combatTier: this.tier });
       spawned.push(u);
       this.enemyUids.push(u.uid);
+      this.enemyWeight.set(u.uid, weight);
     });
     this.applyPackAffixes(pack, spawned, center);
     this.roomPackCursor += 1;
@@ -370,6 +393,9 @@ export class DungeonSession {
       roomIndex: this.room.index,
       clearedRooms: [...this.cleared].sort((a, b) => a - b),
       guardianCleared: cleared && this.cleared.has(this.layout.depth - 1),
+      endless: !!this.layout.endless,
+      endlessLevel: this.layout.endlessLevel ?? 0,
+      progress: this.endlessProgress(),
       hash: this.sim.hash()
     };
   }

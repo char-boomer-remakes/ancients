@@ -49,7 +49,7 @@ The rows below are the CC0 (public-domain) packs wired up in Phases 1–3 (`§13
 | vendored | `creeps/{alpaca,bull,crabenemy,demon,dragonevolved,fox,frog,ghost,giant,glubevolved,goblin,golelingevolved,orc,orcenemy,spider,stag,tribal,velociraptor,wolf,yeti}.glb` | animated creatures mapped to creeps (Phase 3) | Quaternius | https://poly.pizza/u/Quaternius | CC0 1.0 |
 | planned | `textures/water/*` | water normal maps | three.js authors | https://github.com/mrdoob/three.js (examples/textures) | MIT |
 | planned | `textures/vfx/*` | particle / telegraph sprites (Phase 4) | Kenney | https://kenney.nl (Particle Pack) | CC0 1.0 |
-| planned | `heroes/*` | starter hero base meshes, retextured by us (Phase 5) | KayKit / Quaternius (base) + us | https://kaylousberg.itch.io · https://quaternius.com | CC0 1.0 (base) |
+| vendored | `heroes/{juggernaut,crystal-maiden,pudge,earthshaker,sniper,lich}.glb` | six starter heroes: KayKit Adventurers bases (Knight/Mage/Barbarian/Rogue) retextured to each hero's palette + trimmed to 6 clips (Phase 5 / WS-J batch 13; spec `scripts/assets/specs/heroes.json`) | Kay Lousberg (base) + us (retexture) | https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0 | CC0 1.0 |
 | planned | `ui/*.woff2` | display font (engraved-serif feel) | free font, license logged on add | — | OFL or similar |
 
 License texts: CC0 https://creativecommons.org/publicdomain/zero/1.0/ · three.js MIT https://github.com/mrdoob/three.js/blob/master/LICENSE

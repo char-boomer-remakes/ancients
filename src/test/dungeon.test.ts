@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllContent } from '../data';
 import { REG } from '../core/registry';
 import { applyDamage } from '../core/combat';
-import { generateDungeon, rollRoomSpawns } from '../core/dungeon';
+import { generateDungeon, rollRoomSpawns, dungeonDailySeed, dungeonWeeklySeed, dayIndex, weekIndex } from '../core/dungeon';
 import { rollItemDrops } from '../core/phase3';
 import { Rng } from '../core/rng';
 import { freshEchoProgress } from '../core/echo';
@@ -542,5 +542,71 @@ describe('dungeon session D1/D2', () => {
 
     expect(session.guardianMechanicsFired).toContain('phase-0');
     expect(boss.hasStatus('buff')).toBe(true);
+  });
+});
+
+describe('dungeon endless mode (D7)', () => {
+  function clearCurrentRoom(g: Game): void {
+    for (let guard = 0; guard < 800; guard++) {
+      const session = g.liveDungeon;
+      if (!session || session.exitsUnlocked()) return;
+      const hero = session.drivenUnit()!;
+      for (const uid of [...session.enemyUids]) {
+        const enemy = session.sim.unit(uid);
+        if (enemy?.alive) applyDamage(session.sim, hero, enemy, 1e9, 'physical');
+      }
+      g.update(0.1);
+    }
+    throw new Error('room did not clear');
+  }
+
+  it('generates a deterministic, escalating endless layout that climbs with level', () => {
+    const def = REG.dungeon('frost-hollow');
+    const a = generateDungeon(def, 'normal', 4242, { endless: true, endlessLevel: 0 });
+    const b = generateDungeon(def, 'normal', 4242, { endless: true, endlessLevel: 0 });
+    expect(JSON.stringify(a)).toEqual(JSON.stringify(b)); // same seed → identical
+    expect(a.endless).toBe(true);
+    expect(a.progressTarget).toBeGreaterThan(0);
+
+    const deep = generateDungeon(def, 'normal', 4242, { endless: true, endlessLevel: 4 });
+    expect(deep.depth).toBeGreaterThan(a.depth); // deeper levels are longer
+    // ...and denser/nastier: the rarity-weighted kill total climbs with the level.
+    expect(deep.progressTarget!).toBeGreaterThan(a.progressTarget!);
+    expect(deep.rooms[deep.rooms.length - 1].type).toBe('boss'); // guardian still caps the run
+  });
+
+  it('derives stable, shared daily and weekly seeds keyed by rotation index', () => {
+    expect(dungeonDailySeed('frost-hollow', 100)).toBe(dungeonDailySeed('frost-hollow', 100));
+    expect(dungeonDailySeed('frost-hollow', 100)).not.toBe(dungeonDailySeed('frost-hollow', 101));
+    expect(dungeonDailySeed('frost-hollow', 100)).not.toBe(dungeonDailySeed('severed-dark', 100));
+    expect(dungeonWeeklySeed('frost-hollow', 5)).not.toBe(dungeonDailySeed('frost-hollow', 5));
+    expect(dayIndex(0)).toBe(0);
+    expect(weekIndex(0)).toBe(0);
+    expect(dayIndex(86_400_000 * 3 + 10)).toBe(3);
+  });
+
+  it('records the endless frontier and gates the next level on a clear', () => {
+    const g = Game.headless(dungeonSave());
+    // Cannot skip ahead: requesting L5 with no clears clamps to L0.
+    expect(g.clampEndlessLevel('frost-hollow', 5)).toBe(0);
+
+    expect(g.startDungeon('frost-hollow', 'normal', { endless: true, endlessLevel: 0, seed: 909 })).toBe(true);
+    expect(g.liveDungeon!.layout.endless).toBe(true);
+    expect(g.liveDungeon!.endlessInfo().active).toBe(true);
+    for (let guard = 0; g.liveDungeon && guard < 6000; guard++) {
+      if (g.liveDungeon.exitsUnlocked()) {
+        const next = g.liveDungeon.availableExits()[0];
+        expect(g.chooseDungeonExit(next.index)).toBe(true);
+      } else {
+        clearCurrentRoom(g);
+      }
+    }
+    expect(g.liveDungeon).toBeNull();
+
+    const progress = g.buildSave().dungeonProgress['frost-hollow'];
+    expect(progress.bestEndlessLevel).toBe(0);
+    // The frontier opened: L1 is now enterable, L2 still clamped.
+    expect(g.clampEndlessLevel('frost-hollow', 5)).toBe(1);
+    expect(g.toasts.some((t) => t.text.includes('endless L1 cleared'))).toBe(true);
   });
 });

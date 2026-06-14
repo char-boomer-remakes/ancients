@@ -36,6 +36,7 @@ import { Rng } from '../core/rng';
 import { defaultAudioSettings, defaultGraphicsSettings, defaultPhase4SaveFields } from '../core/phase4';
 import { defaultPhase5SaveFields } from '../core/phase5';
 import { higherDungeonTier, migratePhase6Save } from '../core/phase6';
+import { dungeonDailySeed, dungeonWeeklySeed } from '../core/dungeon';
 import { type QualityTier } from '../engine/performance';
 import { mergeCreeps, newCreepInstanceId, validateEntourage } from '../core/capture';
 import { computeBuyPlan, executeBuy, itemSaveOf, itemStateFromSave, sellValue, sortInventory } from '../core/items';
@@ -44,7 +45,7 @@ import { ELITE_DRAFT } from '../data/drafts';
 import { resonanceMods } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroLoadoutSlots, HeroSave, ItemDropTable, ItemQuality, ItemRarity, ItemSave, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, RoomType, SimEvent, StingerId, Vec2 } from '../core/types';
+import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroLoadoutSlots, HeroSave, ItemDropTable, ItemQuality, ItemRarity, ItemSave, LootBand, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, RoomType, SimEvent, StingerId, Vec2 } from '../core/types';
 import { ProceduralAudio } from '../engine/audio';
 import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
@@ -364,6 +365,7 @@ export class Game {
   factionChoices: Record<string, string> = {};
   heldUniques: string[] = [];
   neutralStash: GameSave['neutralStash'] = [];
+  lootMarks: GameSave['lootMarks'] = { early: 0, mid: 0, late: 0 };
   goldSinks: GameSave['goldSinks'] = { buybacks: 0, tomesUsed: 0, respecs: 0, gambleRolls: 0, salvages: 0 };
   essence = 0;
   loadouts: ArmoryLoadouts = {};
@@ -458,6 +460,12 @@ export class Game {
     this.factionChoices = { ...save.factionChoices };
     this.heldUniques = [...save.heldUniques];
     this.neutralStash = save.neutralStash.map((n) => ({ ...n }));
+    const savedLootMarks = save.lootMarks as Partial<Record<LootBand, number>> | undefined;
+    this.lootMarks = {
+      early: savedLootMarks?.early ?? 0,
+      mid: savedLootMarks?.mid ?? 0,
+      late: savedLootMarks?.late ?? 0
+    };
     this.loadouts = structuredClone(save.loadouts ?? {});
     this.goldSinks = {
       buybacks: save.goldSinks.buybacks ?? 0,
@@ -761,6 +769,26 @@ export class Game {
     if (elapsed <= 0) return;
     this.resin = Math.min(TUNING.resin.max, this.resin + elapsed * TUNING.resin.regenPerSec);
     this.resinUpdatedAt = this.playtime;
+  }
+
+  private spendResinForLoot(cost: number): boolean {
+    if (!TUNING.resin.enabled || cost <= 0) return true;
+    this.regenResinToPlaytime();
+    if (this.resin < cost) return false;
+    this.resin -= cost;
+    this.resinUpdatedAt = this.playtime;
+    return true;
+  }
+
+  private dryLootGold(items: ItemSave[]): number {
+    const value = items.reduce((sum, it) => sum + sellValue(REG.item(it.id)), 0);
+    return Math.round(value * TUNING.resin.dryLootGoldPct);
+  }
+
+  private grantDryLootGold(items: ItemSave[], reason: string, pos?: Vec2): number {
+    const gold = this.dryLootGold(items);
+    if (gold > 0) this.awardGold(gold, reason, pos, true);
+    return gold;
   }
 
   explorationFor(regionId = this.region.id): number {
@@ -1211,13 +1239,23 @@ export class Game {
     }
     const dryStreak = this.difficulty[bossId]?.dryClears ?? 0;
     const loot = rollLoot(boss.loot, tier, dryStreak, bossLootSeed(boss, tier, dryStreak));
-    this.deliverLoot(loot);
+    const fullLoot = this.spendResinForLoot(TUNING.resin.bossCost);
+    if (fullLoot) {
+      this.deliverLoot(loot);
+    } else {
+      const dryItems = [...loot.guaranteed, ...(loot.assembled ? [loot.assembled] : [])];
+      const gold = this.grantDryLootGold(dryItems, 'resin-dry', this.activeUnit()?.pos);
+      this.msg(`Moonflow dry: boss loot converted to ${gold}g`, 'info');
+    }
+    this.awardLootMarks(1);
     // store the cleared tier + new pity streak: Nightmare opens after any clear (badge-gated),
     // Hell opens once a Nightmare clear has reset the streak (bossTierUnlocked).
     this.difficulty[bossId] = { tier, dryClears: loot.dryStreak };
-    const drop = loot.assembled
-      ? `dropped ${REG.item(loot.assembled.id).name}${loot.pityUsed ? ' (pity!)' : ''}!`
-      : `${loot.guaranteed.length} component${loot.guaranteed.length === 1 ? '' : 's'}`;
+    const drop = !fullLoot
+      ? 'paid out dry gold'
+      : loot.assembled
+        ? `dropped ${REG.item(loot.assembled.id).name}${loot.pityUsed ? ' (pity!)' : ''}!`
+        : `${loot.guaranteed.length} component${loot.guaranteed.length === 1 ? '' : 's'}`;
     this.msg(`${REG.hero(boss.heroId).name} (${tier}) defeated — ${drop}`, 'good');
     this.autosave('boss');
     return { won: true, loot };
@@ -1225,8 +1263,10 @@ export class Game {
 
   private deliverLoot(loot: LootRoll): void {
     for (const it of loot.guaranteed) this.inventoryStash.push(bindIfNeeded(it));
+    this.awardLootMarksForItems(loot.guaranteed);
     if (loot.assembled) {
       this.inventoryStash.push(bindIfNeeded(loot.assembled));
+      this.awardLootMarksForItems([loot.assembled]);
       if (!this.heldUniques.includes(loot.assembled.id)) this.heldUniques.push(loot.assembled.id);
     }
   }
@@ -1396,7 +1436,11 @@ export class Game {
     return selected;
   }
 
-  startDungeon(dungeonId: string, tier: DifficultyTier = 'normal', opts: { seed?: number; maxSec?: number; modifiers?: string[] } = {}): boolean {
+  startDungeon(
+    dungeonId: string,
+    tier: DifficultyTier = 'normal',
+    opts: { seed?: number; maxSec?: number; modifiers?: string[]; endless?: boolean; endlessLevel?: number; seedMode?: 'daily' | 'weekly' } = {}
+  ): boolean {
     if (this.liveGym || this.liveRaid || this.liveDungeon) return false;
     const def = REG.dungeon(dungeonId);
     if (def.regionId !== this.region.id) {
@@ -1413,18 +1457,35 @@ export class Game {
     }
     const modifiers = this.selectedDungeonModifiers(def, opts.modifiers);
     const modSalt = modifiers.length > 0 ? `:${modifiers.join('+')}` : '';
-    const seed = opts.seed ?? stableContentSeed(`${dungeonId}:${tier}${modSalt}`, Math.round(this.playtime));
+    // Endless level may not skip ahead of what the player has cleared (+1 to push the frontier).
+    const endless = !!opts.endless;
+    const endlessLevel = endless ? this.clampEndlessLevel(dungeonId, opts.endlessLevel ?? 0) : undefined;
+    const seed = opts.seed
+      ?? (opts.seedMode === 'daily'
+        ? dungeonDailySeed(dungeonId)
+        : opts.seedMode === 'weekly'
+          ? dungeonWeeklySeed(dungeonId)
+          : endless
+            ? stableContentSeed(`${dungeonId}:endless:${tier}:${endlessLevel}${modSalt}`, Math.round(this.playtime))
+            : stableContentSeed(`${dungeonId}:${tier}${modSalt}`, Math.round(this.playtime)));
     this.liveDungeonId = dungeonId;
     this.liveDungeonTier = tier;
     this.liveDungeonModifiers = modifiers;
-    this.liveDungeon = new DungeonSession(def, this.gymPlayerTeam(), tier, seed, { maxSec: opts.maxSec, modifiers });
+    this.liveDungeon = new DungeonSession(def, this.gymPlayerTeam(), tier, seed, { maxSec: opts.maxSec, modifiers, endless, endlessLevel });
     this.queuedOrders = [];
     this.scene.resetUnitViews();
     const u = this.liveDungeon.drivenUnit();
     if (u) this.scene.selectedUid = u.uid;
     const modText = modifiers.length > 0 ? ` · ${modifiers.map((id) => def.modifiers?.find((m) => m.id === id)?.name ?? id).join(', ')}` : '';
-    this.msg(`${def.name}: ${tier} descent opened (${this.liveDungeon.layout.depth} rooms${modText}). Exits unlock on clear.`, 'info');
+    const label = endless ? `endless L${(endlessLevel ?? 0) + 1}` : opts.seedMode ? `${opts.seedMode} ${tier}` : `${tier} descent`;
+    this.msg(`${def.name}: ${label} opened (${this.liveDungeon.layout.depth} rooms${modText}). Exits unlock on clear.`, 'info');
     return true;
+  }
+
+  /** The endless frontier: you can re-run any cleared level or push one past your best. */
+  clampEndlessLevel(dungeonId: string, requested: number): number {
+    const best = this.dungeonProgress[dungeonId]?.bestEndlessLevel ?? -1;
+    return Math.max(0, Math.min(Math.floor(requested), best + 1));
   }
 
   private updateLiveDungeon(dt: number): void {
@@ -1453,7 +1514,7 @@ export class Game {
       const depth = dungeon.layout.depth;
       const modifiers = dungeon.selectedModifiers();
       this.endLiveDungeon();
-      this.applyDungeonResult(id, tier, result.cleared, clearedRooms, depth, modifiers);
+      this.applyDungeonResult(id, tier, result.cleared, clearedRooms, depth, modifiers, result.endless ? result.endlessLevel : undefined);
     }
   }
 
@@ -1523,8 +1584,12 @@ export class Game {
     this.msg(`${label}: ${names} (→ Armory)`, reward.kind === 'guardian' ? 'good' : 'info', this.dropAccent(drops));
   }
 
-  private recordDungeonProgress(dungeonId: string, tier: DifficultyTier, cleared: boolean, clearedRooms: number, depth: number, modifiers: string[]): void {
+  private recordDungeonProgress(dungeonId: string, tier: DifficultyTier, cleared: boolean, clearedRooms: number, depth: number, modifiers: string[], endlessLevel?: number): void {
     const prev = this.dungeonProgress[dungeonId] ?? { clears: 0, wipes: 0, bestDepth: 0, bestTier: 'normal' as DifficultyTier };
+    // Clearing an endless level pushes the frontier so the next one becomes enterable.
+    const bestEndlessLevel = cleared && endlessLevel !== undefined
+      ? Math.max(prev.bestEndlessLevel ?? -1, endlessLevel)
+      : prev.bestEndlessLevel;
     this.dungeonProgress[dungeonId] = {
       clears: prev.clears + (cleared ? 1 : 0),
       wipes: prev.wipes + (cleared ? 0 : 1),
@@ -1534,19 +1599,24 @@ export class Game {
       lastModifiers: [...modifiers],
       lastClearedAt: cleared ? Math.round(this.playtime) : prev.lastClearedAt,
       // Carry the pity dry streaks accrued during the run (set by grantDungeonRoomReward).
-      ...(prev.dryStreaks ? { dryStreaks: prev.dryStreaks } : {})
+      ...(prev.dryStreaks ? { dryStreaks: prev.dryStreaks } : {}),
+      ...(bestEndlessLevel !== undefined && bestEndlessLevel >= 0 ? { bestEndlessLevel } : {})
     };
   }
 
-  private applyDungeonResult(dungeonId: string, tier: DifficultyTier, cleared: boolean, clearedRooms: { index: number; type: RoomType }[], depth: number, modifiers: string[] = []): void {
+  private applyDungeonResult(dungeonId: string, tier: DifficultyTier, cleared: boolean, clearedRooms: { index: number; type: RoomType }[], depth: number, modifiers: string[] = [], endlessLevel?: number): void {
     const def = REG.dungeon(dungeonId);
-    this.recordDungeonProgress(dungeonId, tier, cleared, clearedRooms.length, depth, modifiers);
+    this.recordDungeonProgress(dungeonId, tier, cleared, clearedRooms.length, depth, modifiers, endlessLevel);
     if (!cleared) {
       this.msg(`${def.name} ejects the party at the portal. Regroup and return.`, 'bad');
       this.autosave('dungeon');
       return;
     }
-    this.msg(`${def.name} cleared: ${clearedRooms.length}/${depth} rooms. You return to the portal.`, 'good');
+    if (endlessLevel !== undefined) {
+      this.msg(`${def.name}: endless L${endlessLevel + 1} cleared (${depth} rooms). The descent to L${endlessLevel + 2} is open.`, 'good');
+    } else {
+      this.msg(`${def.name} cleared: ${clearedRooms.length}/${depth} rooms. You return to the portal.`, 'good');
+    }
     this.audio.playStinger('raid-clear');
     this.autosave('dungeon');
   }
@@ -1558,26 +1628,38 @@ export class Game {
     const next = { ...(this.raidProgress[raidId] ?? { clears: 0, dryStreak: 0 }) };
     next.clears = clears + 1;
     next.dryStreak = loot.dryStreak;
-    for (const it of loot.guaranteed) {
-      if (it.id === 'aegis-of-the-immortal') next.aegisHeld = true; // the held one-use charge
-      else this.inventoryStash.push(bindIfNeeded(it));
-    }
-    if (loot.assembled) {
-      this.inventoryStash.push(bindIfNeeded(loot.assembled));
-      if (!this.heldUniques.includes(loot.assembled.id)) this.heldUniques.push(loot.assembled.id);
-      this.msg(`Raid drop: ${REG.item(loot.assembled.id).name}${loot.pityUsed ? ' (pity!)' : ''}`, 'good', this.dropAccent([loot.assembled]));
+    const fullLoot = this.spendResinForLoot(TUNING.resin.raidCost);
+    if (!fullLoot) {
+      const dryItems = [...loot.guaranteed, ...(loot.assembled ? [loot.assembled] : [])];
+      const gold = this.grantDryLootGold(dryItems, 'resin-dry', this.activeUnit()?.pos);
+      this.msg(`Moonflow dry: raid loot converted to ${gold}g`, 'info');
+    } else {
+      for (const it of loot.guaranteed) {
+        if (it.id === 'aegis-of-the-immortal') next.aegisHeld = true; // the held one-use charge
+        else this.inventoryStash.push(bindIfNeeded(it));
+      }
+      this.awardLootMarksForItems(loot.guaranteed);
+      if (loot.assembled) {
+        this.inventoryStash.push(bindIfNeeded(loot.assembled));
+        this.awardLootMarksForItems([loot.assembled]);
+        if (!this.heldUniques.includes(loot.assembled.id)) this.heldUniques.push(loot.assembled.id);
+        this.msg(`Raid drop: ${REG.item(loot.assembled.id).name}${loot.pityUsed ? ' (pity!)' : ''}`, 'good', this.dropAccent([loot.assembled]));
+      }
     }
     if (def.id === ROSHAN_RAID_ID) {
-      next.aegisHeld = true;
       next.roshanRespawnAt = this.playtime + TUNING.roshanRespawnSec;
-      this.msg('Roshan falls — the Aegis of the Immortal is yours.', 'good');
-      if (next.clears >= TUNING.roshanRepeatDropFromClear) {
-        this.inventoryStash.push(bindIfNeeded({ id: 'refresher-shard' }));
-        this.inventoryStash.push(bindIfNeeded({ id: 'cheese', charges: 1 }));
-        this.msg('A repeat kill spills a Refresher Shard and a Cheese.', 'good');
+      if (fullLoot) {
+        next.aegisHeld = true;
+        this.msg('Roshan falls — the Aegis of the Immortal is yours.', 'good');
+        if (next.clears >= TUNING.roshanRepeatDropFromClear) {
+          this.inventoryStash.push(bindIfNeeded({ id: 'refresher-shard' }));
+          this.inventoryStash.push(bindIfNeeded({ id: 'cheese', charges: 1 }));
+          this.msg('A repeat kill spills a Refresher Shard and a Cheese.', 'good');
+        }
       }
     }
     this.raidProgress[raidId] = next;
+    this.awardLootMarks(1);
   }
 
   // ---------- Elite Five gauntlet + Champion (§3.10) ----------
@@ -1938,7 +2020,7 @@ export class Game {
     this.msg(`Creep drop: ${names} (→ stash)`, 'good', this.dropAccent(roll.items));
   }
 
-  private addDroppedItems(items: ItemSave[]): ItemSave[] {
+  private addDroppedItems(items: ItemSave[], opts: { awardMarks?: boolean } = {}): ItemSave[] {
     const drops: ItemSave[] = [];
     for (const it of items) {
       const drop = bindIfNeeded(it);
@@ -1946,6 +2028,7 @@ export class Game {
       this.codexUnlock('item:' + drop.id);
       drops.push(drop);
     }
+    if (opts.awardMarks !== false) this.awardLootMarksForItems(drops);
     return drops;
   }
 
@@ -2070,11 +2153,17 @@ export class Game {
   reclaimNeutral(recIdx: number): boolean {
     const rec = this.party[recIdx];
     if (!rec?.neutralSlot) return false;
+    const cost = TUNING.tinkersBench.reclaimCost;
+    if (this.gold < cost) {
+      this.msg(`Reclaim costs ${cost}g`, 'bad');
+      return false;
+    }
     const name = REG.neutralItem(rec.neutralSlot.id).name;
+    this.gold -= cost;
     this.addNeutral(rec.neutralSlot.id);
     rec.neutralSlot = null;
     this.applyNeutralToUnit(rec);
-    this.msg(`Reclaimed ${name} to the stash`, 'info');
+    this.msg(`Reclaimed ${name} to the stash (-${cost}g)`, 'info');
     return true;
   }
 
@@ -2243,15 +2332,23 @@ export class Game {
     inTown: boolean;
     gold: number;
     essence: number;
+    lootMarks: { band: LootBand; marks: number; quota: number; canRedeem: boolean }[];
     recipeCost: number;
     recipeRarities: ItemRarity[];
     relicCost: number;
     relicCeiling: ItemRarity;
   } {
+    const bands: LootBand[] = ['early', 'mid', 'late'];
     return {
       inTown: this.inTown(),
       gold: Math.floor(this.gold),
       essence: this.essence,
+      lootMarks: bands.map((band) => ({
+        band,
+        marks: this.lootMarks[band] ?? 0,
+        quota: TUNING.loot.bandMarkQuota[band],
+        canRedeem: this.inTown() && (this.lootMarks[band] ?? 0) >= TUNING.loot.bandMarkQuota[band]
+      })),
       recipeCost: this.blackMarketCost('recipe'),
       recipeRarities: ['uncommon', 'rare', 'mythical'],
       relicCost: this.blackMarketCost('relic'),
@@ -2261,6 +2358,25 @@ export class Game {
 
   private itemRarity(id: string): ItemRarity {
     return REG.item(id).rarity ?? 'common';
+  }
+
+  private currentLootBand(): LootBand {
+    const mult = TUNING.regionRewardMult[this.region.id as keyof typeof TUNING.regionRewardMult] ?? 1;
+    if (mult >= 2.0) return 'late';
+    if (mult >= 1.4) return 'mid';
+    return 'early';
+  }
+
+  private awardLootMarks(count: number, band: LootBand = this.currentLootBand()): number {
+    const n = Math.max(0, Math.floor(count));
+    if (n <= 0) return 0;
+    this.lootMarks[band] = Math.max(0, (this.lootMarks[band] ?? 0) + n);
+    return n;
+  }
+
+  private awardLootMarksForItems(items: ItemSave[], band: LootBand = this.currentLootBand()): number {
+    const count = items.filter((it) => RARITY_RANK[this.itemRarity(it.id)] >= RARITY_RANK.rare).length;
+    return this.awardLootMarks(count, band);
   }
 
   private rollMarketItem(candidates: string[], salt: string): string | null {
@@ -2300,7 +2416,7 @@ export class Game {
     this.gold -= cost;
     this.goldSinks.gambleRolls += 1;
     const item: ItemSave = { id };
-    this.addDroppedItems([item]);
+    this.addDroppedItems([item], { awardMarks: false });
     this.msg(`Recipe wheel: ${REG.item(id).name} (→ Armory)`, 'good', this.dropAccent([item]));
     return item;
   }
@@ -2339,9 +2455,116 @@ export class Game {
     this.goldSinks.gambleRolls += 1;
     const item: ItemSave = { id, bound: true };
     if (quality) item.quality = quality;
-    this.addDroppedItems([item]);
+    this.addDroppedItems([item], { awardMarks: false });
     const qTag = quality ? ` (${QUALITY_GRADES[quality].name})` : '';
     this.msg(`Relic wheel: ${REG.item(id).name}${qTag} (bound, → Armory)`, 'good', this.dropAccent([item]));
+    return item;
+  }
+
+  private lootMarkPool(band: LootBand): string[] {
+    const maxCost = band === 'early' ? 5600 : band === 'mid' ? 6500 : Infinity;
+    return [...REG.items.values()]
+      .filter((item) => item.tier === 'core')
+      .filter((item) => this.itemRarity(item.id) === 'legendary')
+      .filter((item) => item.cost <= maxCost)
+      .filter((item) => itemAllowedFromSource(item.id, 'gamble'))
+      .filter((item) => !GATED_TOP_TIER.has(item.id))
+      .map((item) => item.id);
+  }
+
+  blackMarketRedeemLootMark(band: LootBand = this.currentLootBand()): ItemSave | null {
+    if (!this.inTown()) {
+      this.msg('The Black Market trades from town', 'bad');
+      return null;
+    }
+    const quota = TUNING.loot.bandMarkQuota[band];
+    if ((this.lootMarks[band] ?? 0) < quota) {
+      this.msg(`${band} Loot Mark redemption needs ${quota} marks`, 'bad');
+      return null;
+    }
+    const candidates = this.lootMarkPool(band);
+    const id = this.rollMarketItem(candidates, `loot-mark:${band}:${this.lootMarks[band]}:${this.inventoryStash.length}`);
+    if (!id) {
+      this.msg(`No ${band} Loot Mark relics are available`, 'bad');
+      return null;
+    }
+    this.lootMarks[band] -= quota;
+    const item: ItemSave = { id, bound: true };
+    this.addDroppedItems([item], { awardMarks: false });
+    this.msg(`${band} Loot Marks redeemed: ${REG.item(id).name} (bound, → Armory)`, 'good', this.dropAccent([item]));
+    return item;
+  }
+
+  private legendaryAssemblyCandidates(): string[] {
+    return [...REG.items.values()]
+      .filter((item) => item.tier === 'core')
+      .filter((item) => this.itemRarity(item.id) === 'legendary')
+      .filter((item) => !!item.components && item.components.length > 0)
+      .filter((item) => !GATED_TOP_TIER.has(item.id))
+      .map((item) => item.id)
+      .sort((a, b) => REG.item(a).name.localeCompare(REG.item(b).name));
+  }
+
+  private assemblyComponentPlan(itemId: string): { consume: number[]; missing: string[] } | null {
+    const def = REG.items.get(itemId);
+    if (!def || !this.legendaryAssemblyCandidates().includes(itemId)) return null;
+    const reserved = new Set<number>();
+    const consume: number[] = [];
+    const missing: string[] = [];
+    for (const componentId of def.components ?? []) {
+      const idx = this.inventoryStash.findIndex((it, i) => !reserved.has(i) && it.id === componentId);
+      if (idx < 0) {
+        missing.push(componentId);
+        continue;
+      }
+      reserved.add(idx);
+      consume.push(idx);
+    }
+    return { consume, missing };
+  }
+
+  legendaryAssemblyOptions(): { itemId: string; name: string; essenceCost: number; components: string[]; missing: string[]; canCraft: boolean }[] {
+    return this.legendaryAssemblyCandidates().map((itemId) => {
+      const def = REG.item(itemId);
+      const plan = this.assemblyComponentPlan(itemId)!;
+      const essenceCost = TUNING.blackMarket.assemblyEssence;
+      return {
+        itemId,
+        name: def.name,
+        essenceCost,
+        components: [...(def.components ?? [])],
+        missing: plan.missing,
+        canCraft: this.inTown() && plan.missing.length === 0 && this.essence >= essenceCost
+      };
+    });
+  }
+
+  assembleLegendary(itemId: string): ItemSave | null {
+    if (!this.inTown()) {
+      this.msg('The assembly bench is in town', 'bad');
+      return null;
+    }
+    const def = REG.items.get(itemId);
+    const plan = this.assemblyComponentPlan(itemId);
+    if (!def || !plan) {
+      this.msg('That item cannot be assembled at the bench', 'bad');
+      return null;
+    }
+    if (plan.missing.length > 0) {
+      const names = [...new Set(plan.missing)].map((id) => REG.item(id).name).join(', ');
+      this.msg(`Assembly missing: ${names}`, 'bad');
+      return null;
+    }
+    const essenceCost = TUNING.blackMarket.assemblyEssence;
+    if (this.essence < essenceCost) {
+      this.msg(`Assembly needs ${essenceCost} essence`, 'bad');
+      return null;
+    }
+    for (const idx of [...plan.consume].sort((a, b) => b - a)) this.inventoryStash.splice(idx, 1);
+    this.essence -= essenceCost;
+    const item: ItemSave = { id: itemId, bound: true };
+    this.addDroppedItems([item], { awardMarks: false });
+    this.msg(`Assembled ${def.name} (bound, → Armory)`, 'good', this.dropAccent([item]));
     return item;
   }
 
@@ -3441,6 +3664,7 @@ export class Game {
       factionChoices: { ...this.factionChoices },
       heldUniques: [...this.heldUniques],
       neutralStash: this.neutralStash.map((n) => ({ ...n })),
+      lootMarks: { ...this.lootMarks },
       goldSinks: { ...this.goldSinks },
       essence: this.essence,
       loadouts: structuredClone(this.loadouts),
@@ -3580,6 +3804,10 @@ export class Game {
     if (!v.factionChoices || typeof v.factionChoices !== 'object') return false;
     if (!Array.isArray(v.heldUniques) || !v.heldUniques.every((id) => typeof id === 'string' && REG.items.has(id))) return false;
     if (!Array.isArray(v.neutralStash) || !v.neutralStash.every((n) => REG.neutralItems.has(n.id) && typeof n.count === 'number' && n.count >= 0)) return false;
+    if (!v.lootMarks || typeof v.lootMarks !== 'object') return false;
+    for (const band of ['early', 'mid', 'late'] as const) {
+      if (typeof v.lootMarks[band] !== 'number' || v.lootMarks[band] < 0) return false;
+    }
     if (!v.goldSinks || typeof v.goldSinks.buybacks !== 'number' || typeof v.goldSinks.tomesUsed !== 'number' || typeof v.goldSinks.respecs !== 'number') return false;
     if (typeof v.goldSinks.gambleRolls !== 'number' || typeof v.goldSinks.salvages !== 'number') return false;
     if (typeof v.essence !== 'number' || v.essence < 0) return false;

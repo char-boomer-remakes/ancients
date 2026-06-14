@@ -28,13 +28,18 @@ describe('procedural model cache', () => {
 });
 
 describe('pluggable hero rig (Phase 5)', () => {
-  it('only resolves an asset entry once a model is actually enabled', () => {
-    // Empty by default: no GLB ships, so the runtime never fires a load (clean console).
-    for (const a of PHASE5_STARTER_ASSETS) expect(heroAssetEntry(a.heroId)).toBeNull();
+  it('resolves an asset entry only for heroes whose GLB is enabled', () => {
+    // The six starters ship a retextured CC0 GLB (WS-J batch 13) and resolve an entry.
+    for (const a of PHASE5_STARTER_ASSETS) {
+      expect(ENABLED_HERO_MODELS.has(a.heroId), `${a.heroId} enabled`).toBe(true);
+      expect(heroAssetEntry(a.heroId), `${a.heroId} entry`).not.toBeNull();
+    }
+    // Heroes without a shipped GLB (and unknowns) never fire a load — clean console.
+    expect(heroAssetEntry('axe')).toBeNull();
     expect(heroAssetEntry('unknown-hero')).toBeNull();
     expect(heroAssetEntry(undefined)).toBeNull();
-    // ...and the gate is what disables it, not the manifest.
-    expect(ENABLED_HERO_MODELS.size).toBe(0);
+    // The gate matches exactly the shipped manifest entries.
+    expect(ENABLED_HERO_MODELS.size).toBe(PHASE5_STARTER_ASSETS.length);
   });
 
   it('mounts an authored model over the procedural body, fitting height + seating feet', () => {

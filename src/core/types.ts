@@ -501,6 +501,7 @@ export type ItemTier = 'consumable' | 'component' | 'basic' | 'core';
 export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'mythical' | 'legendary' | 'immortal' | 'arcana';
 export type ItemQuality = 'standard' | 'inscribed' | 'genuine' | 'frozen' | 'corrupted' | 'unusual';
 export type DropSource = 'shop' | 'creep' | 'echo' | 'boss' | 'raid' | 'special-battle' | 'gamble' | 'dungeon';
+export type LootBand = 'early' | 'mid' | 'late';
 
 export interface DropEntry {
   id: string;
@@ -634,6 +635,10 @@ export interface DungeonModifierDef {
 
 export interface DungeonGenerationOptions {
   modifiers?: string[];
+  /** Endless descent (Diablo III greater rift): unbounded escalating depth gated by a progress meter. */
+  endless?: boolean;
+  /** Endless tier index (0 = first endless level); scales depth, budget, and rarity. */
+  endlessLevel?: number;
 }
 
 export interface DungeonDef {
@@ -685,6 +690,11 @@ export interface DungeonLayout {
   modifiers: string[];
   depth: number;
   rooms: DungeonRoom[];
+  /** Endless run flag + level; absent on a normal fixed-length run. */
+  endless?: boolean;
+  endlessLevel?: number;
+  /** Rarity-weighted kill total that fills the endless progress meter (summons the guardian at 100%). */
+  progressTarget?: number;
 }
 
 export interface DraftMember {
@@ -1042,6 +1052,8 @@ export interface DungeonProgressSave {
   lastClearedAt?: number;
   /** Per-loot-slot dry streaks, persisted across runs so a guardian's pity actually accrues. */
   dryStreaks?: Record<string, number>;
+  /** Deepest endless level cleared; gates how far the next endless descent may start. */
+  bestEndlessLevel?: number;
 }
 export interface HeroSave {
   heroId: string;
@@ -1095,6 +1107,7 @@ export interface GameSave {
   factionChoices: Record<string, string>;
   heldUniques: string[];
   neutralStash: { id: string; count: number }[];
+  lootMarks: Record<LootBand, number>;
   goldSinks: { buybacks: number; tomesUsed: number; respecs: number; gambleRolls: number; salvages: number };
   essence: number;
   loadouts: ArmoryLoadouts;

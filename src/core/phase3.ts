@@ -216,7 +216,7 @@ export type GameSaveV3 = Omit<GameSave, 'version' | 'settings' | 'reputation' | 
   journalSeen?: string[];
 };
 
-export function defaultPhase3SaveFields(): Pick<GameSave, 'difficulty' | 'inventoryStash' | 'raidProgress' | 'eliteFive' | 'factionChoices' | 'heldUniques' | 'neutralStash' | 'goldSinks'> {
+export function defaultPhase3SaveFields(): Pick<GameSave, 'difficulty' | 'inventoryStash' | 'raidProgress' | 'eliteFive' | 'factionChoices' | 'heldUniques' | 'neutralStash' | 'lootMarks' | 'goldSinks'> {
   return {
     difficulty: {},
     inventoryStash: [],
@@ -225,6 +225,7 @@ export function defaultPhase3SaveFields(): Pick<GameSave, 'difficulty' | 'invent
     factionChoices: {},
     heldUniques: [],
     neutralStash: [],
+    lootMarks: { early: 0, mid: 0, late: 0 },
     goldSinks: { buybacks: 0, tomesUsed: 0, respecs: 0, gambleRolls: 0, salvages: 0 }
   };
 }
@@ -244,6 +245,7 @@ export function migratePhase3Save(s: { version: number; [k: string]: unknown }):
     factionChoices: base.factionChoices ?? defaults.factionChoices,
     heldUniques: base.heldUniques ?? defaults.heldUniques,
     neutralStash: base.neutralStash ?? defaults.neutralStash,
+    lootMarks: { ...defaults.lootMarks, ...(base.lootMarks ?? {}) },
     goldSinks: { ...defaults.goldSinks, ...(base.goldSinks ?? {}) },
     settings: {
       ...settings,

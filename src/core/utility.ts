@@ -462,13 +462,14 @@ function scoreAbility(sim: Sim, u: Unit, slot: number, focus: Unit | null, profi
   const t = a.def.targeting;
   if (t === 'passive' || t === 'aura' || t === 'attack-modifier') return null;
   if (!u.abilityReady(slot, sim.time).ok) return null;
+  const manaCost = u.manaCostOf(slot);
 
   // toggle: switch on once enemies are close
   if (t === 'toggle') {
     if (a.toggled) return null;
     if (enemiesNear(sim, u, u.stats.attackRange + 320) === 0) return null;
     const order: Order = { kind: 'cast', slot };
-    return { score: finalAbilityScore(u, 0.7 * profile.weights.aggression, intentOf(a.def, a.level), order, focus), order, slot };
+    return { score: finalAbilityScore(u, 0.7 * profile.weights.aggression, intentOf(a.def, a.level), order, focus, manaCost), order, slot };
   }
 
   const intent = intentOf(a.def, a.level);
@@ -483,14 +484,14 @@ function scoreAbility(sim: Sim, u: Unit, slot: number, focus: Unit | null, profi
     let s = w.saveAllies * (0.5 + need);
     if (sim.time - ally.lastEnemyDamageAt < 1.5) s += 0.4; // actively under fire
     const order: Order = t === 'no-target' ? { kind: 'cast', slot } : { kind: 'cast', slot, uid: ally.uid };
-    return { score: finalAbilityScore(u, s, intent, order, focus), order, slot };
+    return { score: finalAbilityScore(u, s, intent, order, focus, manaCost), order, slot };
   }
 
   // self / no-target steroid (BKB-style, Warcry): cast when a fight is on
   if (t === 'no-target' && intent.buff && !intent.offensive) {
     if (enemiesNear(sim, u, u.stats.attackRange + 320) === 0) return null;
     const order: Order = { kind: 'cast', slot };
-    return { score: finalAbilityScore(u, 0.75 * w.aggression, intent, order, focus), order, slot };
+    return { score: finalAbilityScore(u, 0.75 * w.aggression, intent, order, focus, manaCost), order, slot };
   }
 
   if (!intent.offensive && !intent.hardControl && !intent.softControl) return null;
@@ -504,7 +505,7 @@ function scoreAbility(sim: Sim, u: Unit, slot: number, focus: Unit | null, profi
       if (count === 0) return null;
       const s = (w.aoe * (0.4 + count)) + controlW * 0.4 * count;
       const order: Order = { kind: 'cast', slot };
-      return { score: finalAbilityScore(u, s, intent, order, focus), order, slot };
+      return { score: finalAbilityScore(u, s, intent, order, focus, manaCost, count, !!a.def.ult), order, slot };
     }
     const cluster = bestCluster(sim, u, range, intent.radius || 300);
     if (!cluster || cluster.count === 0) return null;
@@ -513,10 +514,10 @@ function scoreAbility(sim: Sim, u: Unit, slot: number, focus: Unit | null, profi
       const tgt = bestOffensiveTarget(sim, u, focus, range);
       if (!tgt) return null;
       const order: Order = { kind: 'cast', slot, uid: tgt.uid };
-      return { score: finalAbilityScore(u, s, intent, order, focus), order, slot };
+      return { score: finalAbilityScore(u, s, intent, order, focus, manaCost, cluster.count, !!a.def.ult), order, slot };
     }
     const order: Order = { kind: 'cast', slot, point: cluster.point };
-    return { score: finalAbilityScore(u, s, intent, order, focus), order, slot };
+    return { score: finalAbilityScore(u, s, intent, order, focus, manaCost, cluster.count, !!a.def.ult), order, slot };
   }
 
   // single-target nuke / disable
@@ -529,16 +530,85 @@ function scoreAbility(sim: Sim, u: Unit, slot: number, focus: Unit | null, profi
   if (interrupting) s += 0.8;
   if (t === 'unit-target') {
     const order: Order = { kind: 'cast', slot, uid: target.uid };
-    return { score: finalAbilityScore(u, s, intent, order, focus), order, slot };
+    return { score: finalAbilityScore(u, s, intent, order, focus, manaCost), order, slot };
   }
   const order: Order = { kind: 'cast', slot, point: { ...target.pos } };
-  return { score: finalAbilityScore(u, s, intent, order, focus), order, slot };
+  return { score: finalAbilityScore(u, s, intent, order, focus, manaCost), order, slot };
 }
 
 // ---------- item actives (AI_OVERHAUL §2) ----------
-// Consider functions for the active items the AI knows how to value, mirroring
-// the per-item desire functions a Dota bot runs. Unknown actives are left to
-// authored use-item rules.
+// Hand-tuned considers cover high-risk defensive items first. Everything else
+// falls back to the ability intent classifier so new active items get sane use
+// without bespoke gambit rules.
+
+function scoreItemByIntent(sim: Sim, u: Unit, slot: number, focus: Unit | null, profile: CombatProfile, bossBias = 1): Scored | null {
+  if (!TUNING.ai.itemIntentFallback) return null;
+  const def = REG.items.get(u.items[slot]?.defId ?? '');
+  const active = def?.active;
+  if (!active) return null;
+  const intent = intentOf(active, 1);
+  const t = active.targeting;
+  const w = profile.weights;
+  const ITEM = 1000 + slot;
+  const range = castRangeOf(active, u, 1) * 1.1;
+  const manaCost = active.manaCost?.[0] ?? 0;
+
+  if (intent.escape) {
+    const pressured = u.hp / Math.max(1, u.stats.maxHp) < profile.retreatHpPct || enemiesNear(sim, u, 420) > 0;
+    if (!pressured) return null;
+    const awayFrom = focus && focus.team !== u.team ? focus.pos : u.pos;
+    const dir = norm(sub(u.pos, awayFrom));
+    const point = t === 'point-target' ? add(u.pos, scale(dir.x === 0 && dir.y === 0 ? v2(1, 0) : dir, 650)) : undefined;
+    const order: Order = t === 'point-target' ? { kind: 'item', invSlot: slot, point } : { kind: 'item', invSlot: slot, uid: u.uid };
+    return { score: finalAbilityScore(u, bossBias * 1.15 * Math.max(0.8, w.survival), intent, order, focus, manaCost), order, slot: ITEM };
+  }
+
+  if (intent.affectsAlly && (intent.heal || intent.buff)) {
+    const ally = lowestWoundedAlly(sim, u, range, TUNING.ai.saveAllyHpPct);
+    if (!ally) return null;
+    const need = 1 - ally.hp / Math.max(1, ally.stats.maxHp);
+    const order: Order = t === 'no-target' ? { kind: 'item', invSlot: slot } : { kind: 'item', invSlot: slot, uid: ally.uid };
+    return { score: finalAbilityScore(u, bossBias * w.saveAllies * (0.55 + need), intent, order, focus, manaCost), order, slot: ITEM };
+  }
+
+  if (t === 'no-target' && intent.buff && !intent.offensive) {
+    if (enemiesNear(sim, u, u.stats.attackRange + 320) === 0) return null;
+    const order: Order = { kind: 'item', invSlot: slot };
+    return { score: finalAbilityScore(u, bossBias * 0.7 * w.aggression, intent, order, focus, manaCost), order, slot: ITEM };
+  }
+
+  if (!intent.offensive && !intent.hardControl && !intent.softControl) return null;
+  const controlW = intent.hardControl ? w.control : intent.softControl ? w.control * 0.6 : 0;
+
+  if (intent.aoe || t === 'ground-aoe') {
+    if (t === 'no-target') {
+      const count = enemiesNear(sim, u, intent.radius || 300);
+      if (count === 0) return null;
+      const order: Order = { kind: 'item', invSlot: slot };
+      const s = bossBias * ((w.aoe * (0.35 + count)) + controlW * 0.35 * count);
+      return { score: finalAbilityScore(u, s, intent, order, focus, manaCost, count, !!active.ult), order, slot: ITEM };
+    }
+    const cluster = bestCluster(sim, u, range, intent.radius || 300);
+    if (!cluster || cluster.count === 0) return null;
+    const s = bossBias * ((w.aoe * (0.35 + cluster.count)) + controlW * 0.35 * cluster.count);
+    if (t === 'unit-target') {
+      const target = bestOffensiveTarget(sim, u, focus, range);
+      if (!target) return null;
+      const order: Order = { kind: 'item', invSlot: slot, uid: target.uid };
+      return { score: finalAbilityScore(u, s, intent, order, focus, manaCost, cluster.count, !!active.ult), order, slot: ITEM };
+    }
+    const order: Order = { kind: 'item', invSlot: slot, point: cluster.point };
+    return { score: finalAbilityScore(u, s, intent, order, focus, manaCost, cluster.count, !!active.ult), order, slot: ITEM };
+  }
+
+  const target = bestOffensiveTarget(sim, u, focus, range);
+  if (!target) return null;
+  const value = targetValue(target);
+  let s = bossBias * ((intent.offensive ? w.burst * value : 0) + controlW * (0.6 + dangerNorm(target)));
+  if ((intent.hardControl || active.piercesImmunity) && (target.castingUntil > sim.time || (target.channel && target.channel.until > sim.time))) s += 0.8;
+  const order: Order = t === 'unit-target' ? { kind: 'item', invSlot: slot, uid: target.uid } : { kind: 'item', invSlot: slot, point: { ...target.pos } };
+  return { score: finalAbilityScore(u, s, intent, order, focus, manaCost), order, slot: ITEM };
+}
 
 function scoreItemActive(sim: Sim, u: Unit, slot: number, focus: Unit | null, profile: CombatProfile): Scored | null {
   const it = u.items[slot];
@@ -586,7 +656,7 @@ function scoreItemActive(sim: Sim, u: Unit, slot: number, focus: Unit | null, pr
       return { score: s, order: { kind: 'item', invSlot: slot, uid: target.uid }, slot: ITEM };
     }
   }
-  return null;
+  return scoreItemByIntent(sim, u, slot, focus, profile);
 }
 
 function scoreBossItemActive(sim: Sim, u: Unit, slot: number, focus: Unit | null, profile: CombatProfile): Scored | null {
@@ -623,7 +693,7 @@ function scoreBossItemActive(sim: Sim, u: Unit, slot: number, focus: Unit | null
       return { score: 1.7 * Math.max(0.8, profile.weights.survival), order: { kind: 'item', invSlot: slot, uid: u.uid }, slot: ITEM };
     }
   }
-  return null;
+  return scoreItemByIntent(sim, u, slot, focus, profile, 1.2);
 }
 
 /**

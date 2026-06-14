@@ -253,12 +253,17 @@ describe('neutral-items-live (test 11)', () => {
     expect(hero.items.every((it) => !it || REG.items.has(it.defId))).toBe(true);
     expect([...REG.neutralItems.keys()].some((nid) => hero.items.some((it) => it?.defId === nid))).toBe(false);
 
-    // reclaim returns it to the stash (never gold)
+    // reclaim returns it to the stash for the configured bench fee (never sells for gold)
     const goldBefore = g.gold;
     expect(g.reclaimNeutral(0)).toBe(true);
     expect(g.party[0].neutralSlot).toBeNull();
     expect(g.neutralStash.find((s) => s.id === 'trusty-shovel')?.count).toBe(1);
-    expect(g.gold).toBe(goldBefore);
+    expect(g.gold).toBe(goldBefore - TUNING.tinkersBench.reclaimCost);
+
+    expect(g.equipNeutral(0, 'trusty-shovel')).toBe(true);
+    g.gold = TUNING.tinkersBench.reclaimCost - 1;
+    expect(g.reclaimNeutral(0)).toBe(false);
+    expect(g.party[0].neutralSlot?.id).toBe('trusty-shovel');
   });
 
   it('rerolls within tier and enchants three duplicates up a tier at the Tinker\u2019s Bench', () => {
@@ -526,6 +531,7 @@ describe('loot overhaul curated chase and black-market sinks', () => {
     save.gold = 20000;
     const g = Game.headless(save);
     g.activeUnit()!.pos = { ...g.region.town.pos };
+    const marksBefore = { ...g.lootMarks };
 
     const goldBeforeRecipe = g.gold;
     const recipe = g.blackMarketRecipeWheel('rare');
@@ -544,6 +550,30 @@ describe('loot overhaul curated chase and black-market sinks', () => {
     expect(relicDef.rarity).not.toBe('arcana');
     expect(GATED_TOP_TIER.has(relic!.id)).toBe(false);
     expect(g.inventoryStash.find((it) => it.id === relic!.id)?.bound).toBe(true);
+    expect(g.lootMarks).toEqual(marksBefore);
+  });
+
+  it('Loot Marks accrue from earned progress drops and boss clears, then redeem for a bound Legendary', () => {
+    const save = fullPartySave(30);
+    save.gold = 20000;
+    const g = Game.headless(save);
+    g.activeUnit()!.pos = { ...g.region.town.pos };
+
+    const before = g.lootMarks.early;
+    const boss = g.runBossFight('boss-phantom-assassin', 'normal');
+    expect(boss.won).toBe(true);
+    expect(g.lootMarks.early).toBeGreaterThan(before);
+
+    g.lootMarks.early = TUNING.loot.bandMarkQuota.early;
+    const redeemed = g.blackMarketRedeemLootMark('early');
+    expect(redeemed).not.toBeNull();
+    expect(redeemed!.bound).toBe(true);
+    expect(REG.item(redeemed!.id).tier).toBe('core');
+    expect(REG.item(redeemed!.id).rarity).toBe('legendary');
+    expect(GATED_TOP_TIER.has(redeemed!.id)).toBe(false);
+    expect(g.lootMarks.early).toBe(0);
+    expect(g.inventoryStash.find((it) => it.id === redeemed!.id)?.bound).toBe(true);
+    expect(g.buildSave().lootMarks.early).toBe(0);
   });
 
   it('salvages bound Armory dupes into essence without minting gold', () => {

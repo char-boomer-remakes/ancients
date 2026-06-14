@@ -2,7 +2,7 @@ import { TUNING } from '../data/tuning';
 import { add, closestOnSeg, dist, dist2, norm, pointSegDist, scale, sub, v2 } from './math2d';
 import { nearestEnemy } from './actions';
 import { REG } from './registry';
-import { chooseUtilityOrder, enemyCastSeen, incomingDisable, pickUtilityFocus } from './utility';
+import { chooseUtilityOrder, dangerousScore, enemyCastSeen, incomingDisable, pickUtilityFocus } from './utility';
 import { dominantRole } from './combat-profile';
 import { tauntToTop } from './threat';
 import { pickBossFocus } from './boss-brain';
@@ -191,14 +191,6 @@ function enemyCandidate(sim: Sim, u: Unit, o: Unit): boolean {
   return o.alive && o.team !== u.team && o.kind !== 'npc' && !o.summary.untargetable && o.isVisibleTo(u.team, sim.time) && withinLeash(u, o);
 }
 
-function dangerousScore(o: Unit): number {
-  const attackDps = o.stats.damage / Math.max(0.2, o.stats.attackInterval);
-  const casterBias = o.abilities.some((a) => a.level > 0 && a.cooldownUntil <= 0 && a.def.targeting !== 'passive' && a.def.targeting !== 'aura') ? 120 : 0;
-  const heroBias = o.kind === 'hero' ? 150 : 0;
-  const lowHpPenalty = (1 - o.hp / Math.max(1, o.stats.maxHp)) * 80;
-  return attackDps + casterBias + heroBias - lowHpPenalty;
-}
-
 function zoneContainsUnit(z: Zone, u: Unit): boolean {
   if (z.shape === 'circle') {
     if (!z.pos) return false;
@@ -259,7 +251,7 @@ function evalCondition(sim: Sim, u: Unit, cond: GambitCondition, focus: Unit | u
     case 'target-attribute':
       return focus?.attribute === cond.attribute;
     case 'enemies-within':
-      return sim.unitsInRadius(u.pos, cond.radius, (o) => o.team !== u.team && o.kind !== 'npc').length >= cond.count;
+      return sim.unitsInRadius(u.pos, cond.radius, (o) => enemyCandidate(sim, u, o)).length >= cond.count;
     case 'allies-alive':
       return sim.unitsArr.filter((o) => o.alive && o.team === u.team && o.kind === 'hero').length >= cond.count;
     case 'ability-ready':

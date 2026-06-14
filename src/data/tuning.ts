@@ -151,6 +151,7 @@ export const TUNING = {
     // Small chance a gambled relic copy comes upgraded; Unusual stays reserved to
     // raids/special battles, so the wheel tops out at the collectible grades.
     relicQualityOdds: { inscribed: 0.06, frozen: 0.05, genuine: 0.04 },
+    assemblyEssence: 10,
     // Essence + gold to raise a bound copy one quality grade (LOOT L5). Keyed by target grade.
     qualityUpgrade: {
       essence: { genuine: 2, frozen: 3, inscribed: 5, corrupted: 8, unusual: 14, standard: 0 },
@@ -213,8 +214,12 @@ export const TUNING = {
     explorationThresholdRewardGold: 175
   },
   resin: {
+    enabled: false,
     max: 180,
     regenPerSec: 180 / (8 * 60 * 60),
+    bossCost: 20,
+    raidCost: 30,
+    dungeonGuardianCost: 35,
     dryLootGoldPct: 0.25
   },
 

@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "hash": "ba33d73faafb",
-  "generatedAt": "2026-06-14T01:51:45.296Z",
+  "hash": "ed9a5c70cf7f",
+  "generatedAt": "2026-06-14T02:00:27.203Z",
   "assetRoot": "/assets/",
-  "totalBytes": 10835194,
+  "totalBytes": 19316310,
   "groups": {
     "creep": {
       "count": 20,
@@ -12,6 +12,10 @@
     "env": {
       "count": 2,
       "bytes": 3180251
+    },
+    "hero": {
+      "count": 6,
+      "bytes": 8481116
     },
     "terrain": {
       "count": 26,
@@ -242,6 +246,66 @@
       "preloadGroup": "env",
       "sourceSpec": null,
       "source": null
+    },
+    {
+      "path": "heroes/crystal-maiden.glb",
+      "url": "/assets/heroes/crystal-maiden.glb",
+      "bytes": 1407132,
+      "type": "model",
+      "group": "hero",
+      "preloadGroup": "hero",
+      "sourceSpec": "scripts/assets/specs/heroes.json",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0"
+    },
+    {
+      "path": "heroes/earthshaker.glb",
+      "url": "/assets/heroes/earthshaker.glb",
+      "bytes": 1417312,
+      "type": "model",
+      "group": "hero",
+      "preloadGroup": "hero",
+      "sourceSpec": "scripts/assets/specs/heroes.json",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0"
+    },
+    {
+      "path": "heroes/juggernaut.glb",
+      "url": "/assets/heroes/juggernaut.glb",
+      "bytes": 1426924,
+      "type": "model",
+      "group": "hero",
+      "preloadGroup": "hero",
+      "sourceSpec": "scripts/assets/specs/heroes.json",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0"
+    },
+    {
+      "path": "heroes/lich.glb",
+      "url": "/assets/heroes/lich.glb",
+      "bytes": 1407132,
+      "type": "model",
+      "group": "hero",
+      "preloadGroup": "hero",
+      "sourceSpec": "scripts/assets/specs/heroes.json",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0"
+    },
+    {
+      "path": "heroes/pudge.glb",
+      "url": "/assets/heroes/pudge.glb",
+      "bytes": 1417312,
+      "type": "model",
+      "group": "hero",
+      "preloadGroup": "hero",
+      "sourceSpec": "scripts/assets/specs/heroes.json",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0"
+    },
+    {
+      "path": "heroes/sniper.glb",
+      "url": "/assets/heroes/sniper.glb",
+      "bytes": 1405304,
+      "type": "model",
+      "group": "hero",
+      "preloadGroup": "hero",
+      "sourceSpec": "scripts/assets/specs/heroes.json",
+      "source": "KayKit Adventurers (Kay Lousberg) base, retextured by us — CC0"
     },
     {
       "path": "props/foliage/bush.glb",

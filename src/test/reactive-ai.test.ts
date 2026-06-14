@@ -149,4 +149,22 @@ describe('item-active considers', () => {
     expect(order?.kind).toBe('item');
     if (order?.kind === 'item') expect(hero.items[order.invSlot]?.defId).toBe('black-king-bar');
   });
+
+  it('uses non-whitelisted offensive item actives via intent fallback', () => {
+    const sim = macro([{ heroId: 'crystal-maiden', level: 18, items: ['rod-of-atos'] }], [{ heroId: 'sniper', level: 18 }]);
+    const hero = sim.unitsArr.find((u) => u.team === 0)!;
+    const enemy = sim.unitsArr.find((u) => u.team === 1)!;
+    hero.abilities.forEach((a) => (a.level = 0)); // isolate item scoring
+    hero.mana = hero.stats.maxMana;
+    hero.pos = { x: 2000, y: 2000 };
+    enemy.pos = { x: 2500, y: 2000 };
+    sim.rebuildSpatial();
+
+    const order = chooseUtilityOrder(sim, hero, enemy);
+    expect(order?.kind).toBe('item');
+    if (order?.kind === 'item') {
+      expect(hero.items[order.invSlot]?.defId).toBe('rod-of-atos');
+      expect(order.uid).toBe(enemy.uid);
+    }
+  });
 });

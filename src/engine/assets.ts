@@ -32,11 +32,20 @@ export const PHASE5_STARTER_ASSETS: HeroAssetManifestEntry[] = [
 
 /**
  * Heroes whose authored glTF is actually shipped in /public/assets/heroes.
- * Empty until an original or CC0/CC-BY model is dropped in — gating here keeps the
- * runtime from firing 404s (clean console) while the whole pipeline + fallback stays
- * wired and tested. Asset policy: original + generated + CC0/CC-BY only, never Valve.
+ * Gating here keeps the runtime from firing 404s (clean console) for heroes whose
+ * GLB hasn't shipped yet, while the whole pipeline + fallback stays wired and tested.
+ * The six starters ship as CC0 KayKit Adventurers bases retextured to each hero's
+ * palette (VFX_OVERHAUL WS-J batch 13; see scripts/assets/specs/heroes.json + ASSETS.md).
+ * Asset policy: original + generated + CC0/CC-BY only, never Valve.
  */
-export const ENABLED_HERO_MODELS: ReadonlySet<string> = new Set<string>();
+export const ENABLED_HERO_MODELS: ReadonlySet<string> = new Set<string>([
+  'juggernaut',
+  'crystal-maiden',
+  'pudge',
+  'earthshaker',
+  'sniper',
+  'lich'
+]);
 
 /** The manifest entry for a hero, but only when its model is actually available. */
 export function heroAssetEntry(heroId: string | undefined): HeroAssetManifestEntry | null {

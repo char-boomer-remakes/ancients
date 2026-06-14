@@ -1140,8 +1140,10 @@ export class Hud {
           <span class="svc-main"><b>${mod.name}</b><div class="rr-sub">${mod.description}</div></span>
           <span class="svc-actions"><input type="checkbox" data-dungeon-mod="${mod.id}"></span>
         </label>`).join('');
+    const bestEndless = progress?.bestEndlessLevel;
+    const nextEndless = (bestEndless ?? -1) + 1;
     const progressText = progress
-      ? `Clears ${progress.clears} · wipes ${progress.wipes} · best depth ${progress.bestDepth} · best tier ${progress.bestTier}`
+      ? `Clears ${progress.clears} · wipes ${progress.wipes} · best depth ${progress.bestDepth} · best tier ${progress.bestTier}${bestEndless !== undefined ? ` · endless L${bestEndless + 1}` : ''}`
       : 'No clears recorded yet.';
 
     this.modalShell(
@@ -1152,18 +1154,31 @@ export class Hud {
         <section><h3>Progress</h3><p class="rr-sub">${progressText}</p></section>
         <div class="pf-foot">
           <button class="btn accent big" data-dungeon-start="1">Open Descent</button>
+          <button class="btn big" data-dungeon-endless="1">Endless L${nextEndless + 1}</button>
+          <button class="btn" data-dungeon-daily="1">Daily</button>
           <button class="btn" data-dungeon-cancel="1">Back</button>
         </div>
       </div>`
     );
+    const readTierMods = (): { tier: DifficultyTier; selected: string[] } => ({
+      tier: (this.modal.querySelector<HTMLInputElement>('input[name="dungeon-tier"]:checked')?.value ?? 'normal') as DifficultyTier,
+      selected: [...this.modal.querySelectorAll<HTMLInputElement>('[data-dungeon-mod]:checked')].map((el) => el.dataset.dungeonMod!).filter(Boolean)
+    });
     this.modal.querySelector<HTMLElement>('[data-dungeon-cancel]')?.addEventListener('click', () => this.closeModal());
     this.modal.querySelector<HTMLElement>('[data-dungeon-start]')?.addEventListener('click', () => {
-      const tier = (this.modal.querySelector<HTMLInputElement>('input[name="dungeon-tier"]:checked')?.value ?? 'normal') as DifficultyTier;
-      const selected = [...this.modal.querySelectorAll<HTMLInputElement>('[data-dungeon-mod]:checked')]
-        .map((el) => el.dataset.dungeonMod!)
-        .filter(Boolean);
+      const { tier, selected } = readTierMods();
       this.closeModal();
       this.game.startDungeon(dungeonId, tier, { modifiers: selected });
+    });
+    this.modal.querySelector<HTMLElement>('[data-dungeon-endless]')?.addEventListener('click', () => {
+      const { tier, selected } = readTierMods();
+      this.closeModal();
+      this.game.startDungeon(dungeonId, tier, { modifiers: selected, endless: true, endlessLevel: nextEndless });
+    });
+    this.modal.querySelector<HTMLElement>('[data-dungeon-daily]')?.addEventListener('click', () => {
+      const { tier, selected } = readTierMods();
+      this.closeModal();
+      this.game.startDungeon(dungeonId, tier, { modifiers: selected, seedMode: 'daily' });
     });
   }
 
@@ -1277,7 +1292,7 @@ export class Hud {
       const n = rec.neutralSlot ? REG.neutralItem(rec.neutralSlot.id).name : '—';
       return `<div class="svc-row">
         <div class="svc-main"><b>${REG.hero(rec.heroId).name}</b> <div class="rr-sub">neutral: ${n}</div></div>
-        <div class="svc-actions">${rec.neutralSlot ? `<button class="btn small" data-nrec="${i}">Reclaim</button>` : ''}</div>
+        <div class="svc-actions">${rec.neutralSlot ? `<button class="btn small" data-nrec="${i}">Reclaim ${TUNING.tinkersBench.reclaimCost}g</button>` : ''}</div>
       </div>`;
     }).join('');
 
@@ -1311,6 +1326,21 @@ export class Hud {
             </div>
           </div>`;
         }).join('');
+    const assembly = g.legendaryAssemblyOptions();
+    const assemblyHtml = assembly.length === 0
+      ? `<p class="dim">No Legendary assembly recipes are available.</p>`
+      : assembly.map((opt) => {
+          const missing = opt.missing.length > 0
+            ? `missing ${[...new Set(opt.missing)].map((id) => REG.item(id).name).join(', ')}`
+            : 'ready';
+          const components = opt.components.map((id) => REG.item(id).name).join(' + ');
+          return `<div class="svc-row">
+            <div class="svc-main"><b>${opt.name}</b> <em>${opt.essenceCost} essence</em>
+              <div class="rr-sub">${components} · ${missing}</div>
+            </div>
+            <div class="svc-actions"><button class="btn small" data-arm-assemble="${opt.itemId}" ${opt.canCraft ? '' : 'disabled'}>Assemble</button></div>
+          </div>`;
+        }).join('');
     const armorySlotsHtml = armory.heroes.map((hero) => {
       const bound = hero.items
         .map((it, slot) => (it?.bound ? { it, slot } : null))
@@ -1340,7 +1370,16 @@ export class Hud {
     const recipeBtns = bm.recipeRarities
       .map((r) => `<button class="btn small" data-bm-recipe="${r}" ${bm.inTown && bm.gold >= bm.recipeCost ? '' : 'disabled'} style="color:${rarityColor(r)}">${cap(r)}</button>`)
       .join('');
+    const markBtns = bm.lootMarks
+      .map((m) => `<button class="btn small" data-bm-mark="${m.band}" ${m.canRedeem ? '' : 'disabled'}>${cap(m.band)} ${m.marks}/${m.quota}</button>`)
+      .join('');
     const bmHtml = `
+      <div class="svc-row">
+        <div class="svc-main"><b>Loot Marks</b>
+          <div class="rr-sub">Cross-activity pity: Progress+ drops and boss/raid clears convert into a bound Legendary pick.</div>
+        </div>
+        <div class="svc-actions">${markBtns}</div>
+      </div>
       <div class="svc-row">
         <div class="svc-main"><b>Recipe Wheel</b> <em>${bm.recipeCost}g</em>
           <div class="rr-sub">One roll for a component/basic piece of the chosen band — the steady gold that finishes the builds your drops start.</div>
@@ -1416,6 +1455,7 @@ export class Hud {
           ${conflictHtml}
           <div class="svc-actions"><button class="btn small accent" data-arm-gear-field="1">Gear Fielded Loadouts</button></div>
           ${armoryHtml}
+          <div class="svc-sub">Assembly Bench</div>${assemblyHtml}
           <div class="svc-sub">Bound items</div>${armorySlotsHtml}
         </section>
         <section><h3>Black Market <span class="gold">${Math.floor(g.gold)} g</span></h3>${bmHtml}</section>
@@ -1460,6 +1500,7 @@ export class Hud {
     }));
     this.modal.querySelectorAll<HTMLElement>('[data-arm-salvage]').forEach((el) => el.addEventListener('click', () => { g.salvageArmoryItem(Number(el.dataset.armSalvage)); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-arm-upgrade]').forEach((el) => el.addEventListener('click', () => { g.upgradeArmoryItemQuality(Number(el.dataset.armUpgrade)); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-assemble]').forEach((el) => el.addEventListener('click', () => { g.assembleLegendary(el.dataset.armAssemble!); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-arm-rec-hero]').forEach((el) => el.addEventListener('click', () => {
       const [heroId, slotRaw] = el.dataset.armRecHero!.split(':');
       g.reclaimArmoryItemForHero(heroId, Number(slotRaw));
@@ -1471,6 +1512,7 @@ export class Hud {
     this.modal.querySelector<HTMLElement>('[data-arm-gear-field]')?.addEventListener('click', () => { g.gearFieldLoadouts(); rerender(); });
     this.modal.querySelectorAll<HTMLElement>('[data-bm-recipe]').forEach((el) => el.addEventListener('click', () => { g.blackMarketRecipeWheel(el.dataset.bmRecipe as ItemRarity); rerender(); }));
     this.modal.querySelector<HTMLElement>('[data-bm-relic]')?.addEventListener('click', () => { g.blackMarketRelicWheel(); rerender(); });
+    this.modal.querySelectorAll<HTMLElement>('[data-bm-mark]').forEach((el) => el.addEventListener('click', () => { g.blackMarketRedeemLootMark(el.dataset.bmMark as 'early' | 'mid' | 'late'); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-tome]').forEach((el) => el.addEventListener('click', () => { g.buyTome(Number(el.dataset.tome)); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-respec]').forEach((el) => el.addEventListener('click', () => { g.respec(Number(el.dataset.respec)); rerender(); }));
     this.modal.querySelector<HTMLElement>('[data-heal]')?.addEventListener('click', () => { g.healParty(); rerender(); });
@@ -1490,7 +1532,9 @@ export class Hud {
       const exitKey = exitRooms.map((r) => `${r.index}:${r.type}:${r.reward.kind}:${r.reward.rarity ?? ''}`).join(',');
       const pacing = dungeon.pacingInfo();
       const mods = dungeon.selectedModifiers();
-      const key = `dungeon|${dungeon.def.id}|${room.index}|${room.type}|${dungeon.enemyUids.length}|${dungeon.exitsUnlocked()}|${pacing.phase}:${pacing.spawnedPacks}:${pacing.remainingPacks}:${Math.ceil(pacing.nextPackIn)}|${exitKey}|${this.game.scene.selectedUid}`;
+      const endless = dungeon.endlessInfo();
+      const endlessPct = Math.round(endless.progress * 100);
+      const key = `dungeon|${dungeon.def.id}|${room.index}|${room.type}|${dungeon.enemyUids.length}|${dungeon.exitsUnlocked()}|${pacing.phase}:${pacing.spawnedPacks}:${pacing.remainingPacks}:${Math.ceil(pacing.nextPackIn)}|${exitKey}|${this.game.scene.selectedUid}|${endless.active ? endlessPct : ''}`;
       if (key === this.lastLiveGymKey) return;
       this.lastLiveGymKey = key;
       const enemies = dungeon.enemyUids.filter((uid) => dungeon.sim.unit(uid)?.alive).length;
@@ -1515,10 +1559,15 @@ export class Hud {
             ? `Director ${pacing.phase}; next pack in ${pacing.nextPackIn.toFixed(1)}s`
             : 'The room settles...';
       const modNames = mods.map((id) => dungeon.def.modifiers?.find((m) => m.id === id)?.name ?? id);
+      const titleSuffix = endless.active ? ` · Endless L${endless.level + 1}` : '';
+      const endlessLine = endless.active
+        ? `<div class="lg-calls">Greater progress ${endlessPct}% ${endlessPct >= 100 ? '· guardian!' : ''}</div>`
+        : '';
       this.liveGymBar.innerHTML = `
-        <div class="lg-score"><b>${dungeon.def.name}</b> · ${dungeon.tier} · Room ${room.index + 1}/${dungeon.layout.depth} · ${roomType}</div>
+        <div class="lg-score"><b>${dungeon.def.name}</b> · ${dungeon.tier}${titleSuffix} · Room ${room.index + 1}/${dungeon.layout.depth} · ${roomType}</div>
         <div class="lg-calls">Selected <b>${selectedName}</b></div>
         <div class="lg-calls">Packs ${pacing.spawnedPacks}/${pacing.plannedPacks}${modNames.length > 0 ? ` · ${modNames.join(', ')}` : ''}</div>
+        ${endlessLine}
         <div class="lg-calls">${exitLine}</div>`;
       this.liveGymBar.querySelectorAll<HTMLElement>('[data-dungeon-exit]').forEach((el) => {
         el.addEventListener('click', () => this.game.chooseDungeonExit(Number(el.dataset.dungeonExit)));
