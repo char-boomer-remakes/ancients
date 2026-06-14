@@ -217,6 +217,14 @@ Tests (`src/test/combo-planner.test.ts`): a hero with Blink and Black King Bar b
 
 The planner moves onto the team-mind so five heroes share one plan, and the boss reads the same machinery through its posture.
 
+Status (landed):
+
+- **Three-step chains.** `planUnitCombo` builds full enabler→amplifier→payoff chains, not just one setup and one payoff. Chain length scales with ai-depth (`TUNING.ai.combo.tripleChainMinDepth`): normal tier plays two steps, hell tier assembles all three.
+- **Multiple simultaneous team chains.** `planTeamCombos` ranks every cross-unit chain and greedily commits the best non-overlapping ones (up to `TUNING.ai.combo.maxTeamChains`), so two wombos can run at once and no unit is committed twice. Role assignments (save-holder, initiator, lockdown source) prefer a committed chain's owner, broken by uid.
+- **Element setups are first-class nodes.** An offensive spell or item that lays an element soak is promoted to an enabler when its element reacts with a different-element payoff, and a live reacting soak on the focus lifts the payoff's value (`TUNING.ai.combo.reactionBonus`). A soak never reacts with itself.
+- **Boss combo planner.** The boss runs the same `planUnitCombo`, and its posture biases the chain it reaches for: item nodes inside a boss chain are scored through `bossArchetypeBias`, so a pressured boss reaches harder for a lockdown-and-burst chain than a neutral one.
+- **Plan persistence.** Settled as rebuild-each-tick: the next step is recomputed from focus state every decision tick, with no per-unit chain memory. The opening (control, slow, or soak on the focus) is read live, so a chain advances on its own once a setup lands.
+
 New and changed code:
 
 - `src/core/combo-planner.ts`. Add `planTeamCombos(sim, team)`: role assignments (one save-holder, one primary initiator, one lockdown source per shared focus, broken by uid), cross-unit chains (the disabler's lockdown is the enabler, the nuker's nuke is the payoff, aimed at the shared focus), and field awareness keyed off aura radii.

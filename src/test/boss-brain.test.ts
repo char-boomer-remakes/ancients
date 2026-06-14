@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllContent } from '../data';
 import { setupRaidSim } from '../core/macro';
 import { bossArchetypeBias, bossPhaseOf, pickBossFocus, pickBossMechanic, type BossMechanicCandidate } from '../core/boss-brain';
+import { planUnitCombo } from '../core/combo-planner';
+import { makeItemState, sortInventory } from '../core/items';
 import { REG } from '../core/registry';
 import type { Unit } from '../core/unit';
 
@@ -157,6 +159,33 @@ describe('boss posture archetype reach (Phase 3 §5)', () => {
     const b = bossArchetypeBias(boss, item('shivas-guard'));
     expect(a).toBe(b);
     expect(a).toBeLessThanOrEqual(1.5);
+  });
+});
+
+describe('boss combo planner (Phase 3 §5)', () => {
+  it('sequences a lockdown into a nuke and reaches harder for the chain under posture', () => {
+    const { sim, boss, get } = raid(['sniper', 'crystal-maiden']);
+    const focus = get('sniper');
+    boss.items = sortInventory([
+      makeItemState(REG.item('rod-of-atos')), // lockdown enabler
+      makeItemState(REG.item('dagon'))         // nuke payoff
+    ]);
+    boss.mana = boss.stats.maxMana;
+    focus.pos = { x: boss.pos.x - 300, y: boss.pos.y };
+    sim.rebuildSpatial();
+
+    // depth 0: no posture rolled yet, so the planner runs on neutral archetype reach.
+    boss.ctrl.boss = { depth: 0 };
+    const neutral = planUnitCombo(sim, boss, focus);
+    expect(neutral).not.toBeNull();
+    expect(neutral!.steps.map((s) => s.role)).toContain('enabler');
+    expect(neutral!.steps.map((s) => s.role)).toContain('payoff');
+
+    // pressure on the healer biases the lockdown archetype up, lifting the chain's score.
+    boss.ctrl.boss = { depth: 1, phase: 'pressure', pref: 'healer' };
+    const posture = planUnitCombo(sim, boss, focus);
+    expect(posture).not.toBeNull();
+    expect(posture!.score).toBeGreaterThan(neutral!.score);
   });
 });
 

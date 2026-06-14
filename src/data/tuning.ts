@@ -89,7 +89,16 @@ export const TUNING = {
       minScore: 1.05,
       // §4 depth: shallow AI plays two-step combos; at/above this ai-depth the
       // planner assembles the full enabler→amplifier→payoff chain (nightmare+ tiers).
-      tripleChainMinDepth: 0.7
+      tripleChainMinDepth: 0.7,
+      // §4 chain scoring: a setup step is worth this fraction of its own score
+      // (an amplifier multiplies the payoff, so it counts for more than an enabler).
+      enablerValue: 0.18,
+      amplifierValue: 0.28,
+      // §4 element nodes: a setup whose element reacts with the payoff — or a live
+      // elemental soak on the focus — raises the payoff value by this much.
+      reactionBonus: 0.35,
+      // §5 cross-unit coordination: how many simultaneous team chains to commit to.
+      maxTeamChains: 3
     },
     ultHoldDiscount: 0.45,      // AoE-ult discount slope below holdClusterMin (scaled by depth)
     ultHoldFloor: 0.4,          // ult-hold never discounts an ult below this multiplier
@@ -98,15 +107,28 @@ export const TUNING = {
     abilityArchetype: {
       // teamfight-ult / cluster-nuke held below the cluster threshold, at ALL depths
       // (not just nightmare+). Discount = max(floor, 1 - slope * effectiveDepth).
-      holdSlope: 0.4,            // discount slope below holdClusterMin
-      teamfightUltFloor: 0.45,   // a teamfight ult is never discounted below this
-      clusterNukeFloor: 0.6,     // a cluster nuke holds more softly than an arena ult
+      holdSlope: 0.45,           // discount slope below holdClusterMin
+      teamfightUltFloor: 0.4,    // a teamfight ult is never discounted below this
+      clusterNukeFloor: 0.5,     // a cluster nuke holds more softly than an arena ult
+      skillshotWidth: 220,       // default rake width for a skillshot-line with no aoe radius
       // single-lockdown / interrupt: redirect a hard disable onto an enemy that is
       // mid-channel (a `channel` archetype paying out), and reward the interrupt.
       channelInterruptBonus: 0.9,
       channelInterruptRange: 1100,
       // a friendly channeler is a higher-priority save target (protect the channel).
-      friendlyChannelSaveBonus: 0.5
+      friendlyChannelSaveBonus: 0.5,
+      // §6.3: a single-lockdown prefers the enemy whose death collapses the line
+      // (the team-mind flank target) over the nearest body.
+      collapseTargetBonus: 0.5,
+      // §6.2: movement-with-purpose. Out of combat, value drifting back to the
+      // authored anchor (homePos) so the formation re-forms instead of smearing.
+      anchorGravity: 0.7,
+      anchorReformRadius: 360     // only pull back when this far off the anchor
+    },
+    // §6.1 formation consumption: how a peeler/diver reads the team-mind posture.
+    formation: {
+      peelRadius: 800,            // an assigned peeler intercepts threats this close to its backliner
+      flankRange: 1600            // a committed diver routes onto a flank target within this range
     },
     depthRefAiDepth: 0.45,      // baseline (normal-tier) depth for depth-scaled behaviors
     // §5.7: how strongly extra ai-depth past the baseline sharpens mana discipline and combos.
