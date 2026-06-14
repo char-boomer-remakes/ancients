@@ -12,6 +12,7 @@ import { PHASE2_HEROES } from './heroes/phase2';
 import { PHASE3_HEROES } from './heroes/phase3';
 import { STANDARD_MISSING_HEROES } from './heroes/roster-standard';
 import { COMPLEX_MISSING_HEROES } from './heroes/roster-complex';
+import { HERO_BLURBS } from './heroes/blurbs';
 import { ALL_ITEMS } from './items/index';
 import { ALL_CREEPS } from './creeps/index';
 import { TRANQUIL_VALE } from './regions/tranquil-vale';
@@ -109,7 +110,7 @@ function inferComboRules(hero: HeroDef): HeroComboRule[] {
 
 function withElementTags(hero: HeroDef): HeroDef {
   const element = elementForHero(hero);
-  const tagged = { ...hero, element };
+  const tagged = { ...hero, element, blurb: hero.blurb ?? HERO_BLURBS[hero.id] };
   const withTags = {
     ...tagged,
     abilities: hero.abilities.map((ability) => ({

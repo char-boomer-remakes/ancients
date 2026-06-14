@@ -505,6 +505,8 @@ export interface HeroDef {
   roles: string[];             // 'carry' | 'support' | 'nuker' | 'disabler' | 'durable' | 'escape' | 'pusher' | 'initiator'
   region: string;
   lore: string;
+  /** Short hero-card intro (1-2 sentences). Falls back to lore when absent. */
+  blurb?: string;
   baseStats: HeroBaseStats;
   abilities: AbilityDef[];     // exactly 4 for roster heroes
   skillOrder?: number[];       // ability slot leveling priority, default [0,1,2]

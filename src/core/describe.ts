@@ -8,7 +8,7 @@
 // ============================================================
 
 import type {
-  AbilityDef, AttackModSpec, AuraSpec, EffectNode, ItemDef, NeutralItemDef,
+  AbilityDef, AttackModSpec, AuraSpec, EffectNode, HeroDef, ItemDef, NeutralItemDef,
   StatModMap, StatusId, TriggerEvent, TriggerSpec, ValueRef, ZoneSpec
 } from './types';
 
@@ -548,6 +548,47 @@ export function buildItemCard(def: ItemDef, opts: ItemCardOpts = {}): TooltipCar
     effect.push(def.tier === 'component' ? 'A crafting component, built into stronger items.' : 'No inherent bonuses.');
   }
   return { name: def.name, kind, blurb: def.lore, effect, stats, meta: itemMeta(def) };
+}
+
+export interface HeroCardOpts {
+  /** Owned-hero level, shown as a meta chip when present. */
+  level?: number | null;
+  /** Limit how many abilities to list (Compendium can show all; hover can trim). */
+  abilityLimit?: number;
+}
+
+function heroStatLines(hero: HeroDef): string[] {
+  const s = hero.baseStats;
+  const primary = hero.attribute;
+  const star = (attr: 'str' | 'agi' | 'int') => (primary === attr ? ' (primary)' : '');
+  return [
+    `STR ${s.str} +${s.strGain}${star('str')}`,
+    `AGI ${s.agi} +${s.agiGain}${star('agi')}`,
+    `INT ${s.int} +${s.intGain}${star('int')}`,
+    `Damage ${s.baseDamage}`,
+    `Armor ${s.baseArmor}`,
+    `Move ${s.moveSpeed}`,
+    `Attack ${s.attackRange <= 150 ? 'melee' : `${s.attackRange} range`}`
+  ];
+}
+
+export function buildHeroCard(hero: HeroDef, opts: HeroCardOpts = {}): TooltipCard {
+  const roles = hero.roles.slice(0, 4).join(' / ');
+  const abilities = (opts.abilityLimit ? hero.abilities.slice(0, opts.abilityLimit) : hero.abilities)
+    .map((a) => `${a.ult ? '\u2605 ' : ''}${a.name} \u2014 ${abilityKind(a)}`);
+  const meta = [
+    `${hero.attribute.toUpperCase()}${hero.attribute === 'uni' ? '' : ' core'}`,
+    hero.baseStats.attackRange <= 150 ? 'Melee' : 'Ranged'
+  ];
+  if (opts.level != null) meta.push(`Lv ${opts.level}`);
+  return {
+    name: hero.name,
+    kind: roles || 'Hero',
+    blurb: hero.blurb ?? hero.lore,
+    effect: abilities,
+    stats: heroStatLines(hero),
+    meta
+  };
 }
 
 export function buildNeutralItemCard(def: NeutralItemDef): TooltipCard {

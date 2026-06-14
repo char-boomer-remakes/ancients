@@ -92,19 +92,23 @@ export async function skipActiveCinematic(page: Page): Promise<void> {
   await page.waitForFunction(() => Boolean((window as any).__game), null, { timeout: 30_000 });
   await page.evaluate(() => {
     const g = (window as any).__game;
-    let guard = 0;
-    while (g?.cinematic?.active && guard++ < 100) g.cinematicSkip();
-    const director = g?.cinematic as { current?: unknown; queue?: unknown[] } | undefined;
-    if (director) {
-      director.current = null;
-      director.queue = [];
-    }
-    const layer = document.getElementById('cinematic-layer');
-    if (layer) {
-      layer.classList.add('hidden');
-      layer.innerHTML = '';
-    }
+    const clear = () => {
+      let guard = 0;
+      while (g?.cinematic?.active && guard++ < 100) g.cinematicSkip();
+      const director = g?.cinematic as { current?: unknown; queue?: unknown[] } | undefined;
+      if (director) {
+        director.current = null;
+        director.queue = [];
+      }
+      const layer = document.getElementById('cinematic-layer');
+      if (layer) {
+        layer.classList.add('hidden');
+        layer.innerHTML = '';
+      }
+    };
+    clear();
     (window as any).__test.step();
+    clear();
   });
   await page.waitForFunction(() => !(window as any).__game?.cinematic?.active, null, {
     timeout: 10_000
