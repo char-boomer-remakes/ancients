@@ -2694,6 +2694,20 @@ export function attachHeroWeaponModel(rig: UnitRig, weapon: THREE.Object3D): voi
   restoreDefaultWeapon(rig);
 }
 
+export function attachHoldoutSignatureModel(rig: UnitRig, signature: THREE.Object3D): void {
+  const previous = rig.body.children.find((c) => c.userData.holdoutSignatureModel);
+  if (previous?.parent) previous.parent.remove(previous);
+  signature.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    m.castShadow = true;
+    m.receiveShadow = true;
+  });
+  signature.userData.holdoutSignatureModel = true;
+  signature.scale.setScalar(rig.scale);
+  rig.body.add(signature);
+}
+
 function replaceWeapon(rig: UnitRig, weapon: ItemAppearanceSpec['weapon'] | undefined): void {
   if (!weapon) {
     restoreDefaultWeapon(rig);

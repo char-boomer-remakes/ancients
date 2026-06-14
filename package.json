@@ -16,6 +16,7 @@
     "test:e2e:headed": "playwright test --headed",
     "typecheck": "tsc --noEmit",
     "generate:hero-weapons": "node scripts/assets/generate_hero_weapons.mjs",
+    "generate:holdout-signatures": "node scripts/assets/generate_holdout_signatures.mjs",
     "build:assets": "node scripts/assets/build_assets.mjs",
     "assets:manifest": "node scripts/assets/build_assets.mjs --manifest --report",
     "assets:check": "node scripts/assets/build_assets.mjs --manifest --report --check-budgets"

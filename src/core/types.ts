@@ -334,7 +334,7 @@ export interface CutsceneSettings {
   tieIns: boolean;                   // seasonal/legend homages can be fully suppressed
 }
 
-export type StingerId = 'capture' | 'merge' | 'levelup' | 'badge' | 'raid-clear';
+export type StingerId = 'capture' | 'merge' | 'levelup' | 'badge' | 'raid-clear' | 'loot';
 
 // ---------- Abilities ----------
 export interface AbilityDef {
@@ -529,7 +529,7 @@ export interface CreepDef {
 }
 
 // ---------- Items ----------
-export type ItemTier = 'consumable' | 'component' | 'basic' | 't1' | 't2' | 't3' | 't4' | 'special' | 'core';
+export type ItemTier = 'consumable' | 'component' | 'basic' | 't1' | 't2' | 't3' | 't4' | 'special';
 export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'mythical' | 'legendary' | 'immortal' | 'arcana';
 export type ItemQuality = 'standard' | 'inscribed' | 'genuine' | 'frozen' | 'corrupted' | 'unusual';
 export type ItemGrade = 'broken' | 'worn' | 'standard' | 'sharp' | 'refined' | 'pristine';

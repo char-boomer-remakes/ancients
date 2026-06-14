@@ -18,7 +18,7 @@ import type { ItemQuality, MacroHeroSetup } from '../core/types';
 
 beforeAll(() => registerAllContent());
 
-const MARQUEE_RAID_IDS = ['renegade-marshal', 'void-prelate', 'forsaken-queen', 'prime-evil', 'lord-of-hatred', 'last-eldwurm'];
+const MARQUEE_RAID_IDS = ['renegade-marshal', 'void-prelate', 'forsaken-queen', 'sundered-betrayer', 'prime-evil', 'lord-of-hatred', 'last-eldwurm'];
 
 const AGI_LANE = new Set(['eaglesong', 'butterfly', 'eye-of-skadi', 'abyssal-blade', 'bloodthorn', 'diffusal-blade', 'maelstrom']);
 const STR_LANE = new Set(['reaver', 'heart-of-tarrasque', 'satanic', 'radiance', 'assault-cuirass', 'black-king-bar']);
@@ -33,6 +33,7 @@ const RAID_LANE: Record<string, Set<string>> = {
   'renegade-marshal': AGI_LANE,
   'void-prelate': AGI_LANE,
   'forsaken-queen': AGI_LANE,
+  'sundered-betrayer': AGI_LANE,
   'prime-evil': STR_LANE,
   'lord-of-hatred': INT_LANE,
   'last-eldwurm': STR_INT_LANE
@@ -47,8 +48,8 @@ const STRONG_PARTY: MacroHeroSetup[] = [
 ];
 
 describe('C1: marquee raid wave', () => {
-  it('registers all six marquee raids on top of the four shipped raids', () => {
-    expect(ALL_RAIDS.length).toBe(10);
+  it('registers all seven marquee raids on top of the four shipped raids', () => {
+    expect(ALL_RAIDS.length).toBe(11);
     for (const id of MARQUEE_RAID_IDS) {
       const def = REG.raids.get(id);
       expect(def, `marquee raid ${id}`).toBeDefined();

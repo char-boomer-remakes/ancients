@@ -178,6 +178,19 @@ export const ALL_RAIDS: RaidDef[] = [
     dialogue: ['My arrows do not thaw. Neither will the silence after them.', 'Death freed me of mercy. You will find that inconvenient.']
   },
   {
+    id: 'sundered-betrayer',
+    name: 'The Sundered Betrayer',
+    title: 'Brand of the Fel Eclipse',
+    location: 'Fel-Eclipse Scar, Mad Moon Crater',
+    unlockQuest: 'recruit-terrorblade',
+    boss: { heroId: 'terrorblade', level: 30, items: ['butterfly', 'black-king-bar'], hpScale: 2.45, damageScale: 1.08 },
+    addWaves: [{ atHpPct: 70, summon: swarm, count: 4 }, { atHpPct: 35, summon: fallen, count: 4 }],
+    zones: [{ atHpPct: 80, zone: { ...fireZone, radius: 340 } }, { atHpPct: 45, zone: { ...frostZone, radius: 360 } }],
+    enrageSec: 130,
+    loot: raidLoot(['eaglesong'], ['butterfly', 'abyssal-blade', 'bloodthorn', 'diffusal-blade']),
+    dialogue: ['I was not exiled. I became the door they feared to open.', 'Look into the fel eclipse and tell me which side of you answers.']
+  },
+  {
     id: 'prime-evil',
     name: 'The Lord of Destruction',
     title: 'Last of the Prime Evils',

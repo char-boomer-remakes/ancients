@@ -45,6 +45,7 @@ const TRAIL_LEN = 12;
 const BURST_SPARKS = 14;
 
 const geometryCache = new Map<string, THREE.BufferGeometry>();
+let beamRampTex: THREE.DataTexture | null = null;
 
 function sharedGeometry<T extends THREE.BufferGeometry>(geo: T): T {
   const key = `${geo.type}:${JSON.stringify((geo as T & { parameters?: unknown }).parameters ?? {})}`;
@@ -59,6 +60,31 @@ function sharedGeometry<T extends THREE.BufferGeometry>(geo: T): T {
 
 export function vfxGeometryCacheSize(): number {
   return geometryCache.size;
+}
+
+function beamRampTexture(): THREE.DataTexture {
+  if (beamRampTex) return beamRampTex;
+  const w = 32;
+  const h = 2;
+  const data = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const u = x / (w - 1);
+      const endFade = Math.sin(Math.PI * u);
+      const core = 0.28 + endFade * 0.72;
+      const i = (y * w + x) * 4;
+      // alphaMap reads luminance/green; keep RGB as the soft beam profile.
+      data[i] = data[i + 1] = data[i + 2] = Math.floor(255 * core);
+      data[i + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, w, h);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.magFilter = tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  beamRampTex = tex;
+  return tex;
 }
 
 // Numerically-built sprite textures (GRAPHICS_SPEC §7). DataTexture needs no DOM
@@ -945,22 +971,37 @@ export class VfxManager {
     });
   }
 
+  private beamMesh(from: THREE.Vector3, to: THREE.Vector3, color: string, radius: number, opacity: number, taper = 0.55): THREE.Mesh {
+    const len = Math.max(0.001, from.distanceTo(to));
+    const beam = new THREE.Mesh(
+      sharedGeometry(new THREE.CylinderGeometry(1, taper, 1, 8, 1, true)),
+      new THREE.MeshBasicMaterial({
+        color,
+        alphaMap: beamRampTexture(),
+        transparent: true,
+        opacity,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    beam.position.copy(from.clone().add(to).multiplyScalar(0.5));
+    beam.scale.set(radius, len, radius);
+    beam.lookAt(to);
+    beam.rotateX(Math.PI / 2);
+    return beam;
+  }
+
   private attackBeam(from: Vec2, to: Vec2, visual: AttackVisualSpec, width: number): void {
     const a = this.w(from.x, from.y, 1.2);
     const b = this.w(to.x, to.y, 1.0);
-    const len = a.distanceTo(b);
-    const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(width * (visual.scale ?? 1), width * 0.5 * (visual.scale ?? 1), len, 6, 1, true),
-      new THREE.MeshBasicMaterial({ color: visual.color, transparent: true, opacity: 0.72, depthWrite: false, blending: THREE.AdditiveBlending })
-    );
-    beam.position.copy(a.clone().add(b).multiplyScalar(0.5));
-    beam.lookAt(b);
-    beam.rotateX(Math.PI / 2);
+    const baseRadius = width * (visual.scale ?? 1);
+    const beam = this.beamMesh(a, b, visual.color, baseRadius, 0.72);
     const mat = beam.material as THREE.MeshBasicMaterial;
     this.push(beam, 0.18, (_t, lifeT) => {
       mat.opacity = 0.72 * (1 - lifeT);
-      beam.scale.x = 1 + lifeT * 0.8;
-      beam.scale.z = 1 + lifeT * 0.8;
+      beam.scale.x = baseRadius * (1 + lifeT * 0.8);
+      beam.scale.z = baseRadius * (1 + lifeT * 0.8);
     });
   }
 
@@ -1044,14 +1085,7 @@ export class VfxManager {
   private bindingBeam(a: { x: number; y: number; h: number }, b: { x: number; y: number; h: number }, dur: number): void {
     const from = this.w(a.x, a.y, 1.4);
     const to = this.w(b.x, b.y, 1.0);
-    const len = from.distanceTo(to);
-    const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.08, 0.08, len, 5, 1, true),
-      new THREE.MeshBasicMaterial({ color: '#7adfc4', transparent: true, opacity: 0.8, depthWrite: false })
-    );
-    beam.position.copy(from.clone().add(to).multiplyScalar(0.5));
-    beam.lookAt(to);
-    beam.rotateX(Math.PI / 2);
+    const beam = this.beamMesh(from, to, '#7adfc4', 0.08, 0.8, 1);
     const mat = beam.material as THREE.MeshBasicMaterial;
     this.push(beam, dur, (t) => {
       mat.opacity = 0.5 + Math.sin(t * 12) * 0.3;

@@ -65,8 +65,7 @@ const SOCKET_ADD_COSTS: Record<ItemTier, { gold: number; essence: number }> = {
   t2: { gold: 750, essence: 2 },
   t3: { gold: 1200, essence: 4 },
   t4: { gold: 1800, essence: 7 },
-  special: { gold: 0, essence: 0 },
-  core: { gold: 750, essence: 2 }
+  special: { gold: 0, essence: 0 }
 };
 
 export function socketAddCost(def: ItemDef): { gold: number; essence: number } {

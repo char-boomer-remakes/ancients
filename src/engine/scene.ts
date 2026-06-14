@@ -4,8 +4,8 @@ import type { Sim } from '../core/sim';
 import type { Unit } from '../core/unit';
 import { REG } from '../core/registry';
 import { buildTerrain, type TerrainInfo } from './terrain';
-import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, buildUnitRig, buildSelectionRing, mountHeroModel, recolorToPalette, type UnitRig } from './models';
-import { HeroAssetLoader, heroAssetEntry, creepCreatureUrl, heroBaseId } from './assets';
+import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, buildUnitRig, buildSelectionRing, mountHeroModel, recolorToPalette, type UnitRig } from './models';
+import { HeroAssetLoader, heroAssetEntry, creepCreatureUrl, heroBaseId, holdoutSignatureUrl } from './assets';
 import { animateRig, applyCinematicGesture, newAnimState, type AnimState } from './animator';
 import { loadVfxTextureAtlas, VfxManager } from './vfx';
 import type { CinematicView } from './cinematic';
@@ -989,6 +989,18 @@ export class GameScene {
       });
     } else {
       mountSharedBase();
+    }
+
+    // A6 holdout signatures: the abstract/no-legs heroes keep their animated
+    // procedural rigs, then optionally load a small bespoke GLB identity kit over
+    // the top. Missing files are harmless and never block the procedural floor.
+    const signatureUrl = u.kind === 'hero' ? holdoutSignatureUrl(u.heroId) : null;
+    if (signatureUrl) {
+      void loadModelAsset(signatureUrl).then((asset) => {
+        if (asset && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
+          attachHoldoutSignatureModel(rig, cloneModel(asset.scene));
+        }
+      });
     }
 
     // Phase 3 (GRAPHICS_SPEC §13): mount an authored Quaternius creature (CC0)

@@ -227,6 +227,20 @@ describe('STORY §3.4 cut-scene controls', () => {
     d.setFastForward(false); expect(d.view()?.speed).toBe(2);
   });
 
+  it('repeat set-pieces auto-fast-forward instead of collapsing to a toast', () => {
+    const d = new CinematicDirector();
+    d.play(setpiece, {}, true);
+    expect(d.view()?.speed).toBeGreaterThan(1);
+
+    const g = freshGame();
+    while (g.cinematic.active) g.cinematicSkip();
+    const toastCount = g.toasts.length;
+    expect(g.playCutscene('prologue-moon-breaks')).toBe(true);
+    expect(g.cinematic.active).toBe(true);
+    expect(g.cinematic.view()?.speed).toBeGreaterThan(1);
+    expect(g.toasts.length).toBe(toastCount);
+  });
+
   it('exposes reduced-motion and photosensitivity caps to presentation', () => {
     const d = new CinematicDirector();
     d.setSettings({ reducedMotion: true, photosensitive: true });
@@ -397,7 +411,22 @@ describe('STORY gallery, titles & content', () => {
       const status = g.seasonalEventStatus(event.id);
       expect(status.target, event.id).not.toBe('Unknown');
       expect(status.target, event.id).toMatch(/Raid|Dungeon|Endless dungeon/);
+      if (status.launchable) expect(status.detail, event.id).toContain('Mechanics:');
     }
+  });
+
+  it('surfaces bespoke mechanics for the flagship seasonal modes', () => {
+    const diretide = fullPartyGame('mad-moon-crater').seasonalEventStatus('diretide-roshan-candy');
+    expect(diretide.detail).toContain('candy tribute');
+    expect(diretide.detail).toContain('Roshling-style add waves');
+
+    const wraithNight = fullPartyGame('icewrack').seasonalEventStatus('wraith-night-altar');
+    expect(wraithNight.detail).toContain('altar defense');
+    expect(wraithNight.detail).toContain('packed waves');
+
+    const continuum = fullPartyGame('quoidge').seasonalEventStatus('continuum-descent');
+    expect(continuum.target).toContain('Endless dungeon');
+    expect(continuum.detail).toContain('choice exits');
   });
 
   it('starts a raid-backed festival when launch requirements are met', () => {
@@ -422,6 +451,14 @@ describe('STORY gallery, titles & content', () => {
     expect(REG.legends.size).toBeGreaterThanOrEqual(5);
     for (const event of REG.seasonalEvents.values()) expect(REG.cutscenes.has(event.cutsceneId)).toBe(true);
     for (const legend of REG.legends.values()) expect(REG.cutscenes.has(legend.cutsceneId)).toBe(true);
+  });
+
+  it('ships the Sundered Betrayer as an Outworld Claimant with a raid intro', () => {
+    const raid = REG.raid('sundered-betrayer');
+    expect(raid.boss.heroId).toBe('terrorblade');
+    expect(raid.dialogue.length).toBeGreaterThanOrEqual(2);
+    expect(REG.quests.has(raid.unlockQuest)).toBe(true);
+    expect(REG.cutscenes.has('raid-intro-sundered-betrayer')).toBe(true);
   });
 });
 

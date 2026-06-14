@@ -16,6 +16,7 @@ test.describe('items & loot', () => {
       const itemsBefore = u.items.filter((it: any) => it).length;
 
       (window as any).__test.addGold(2000);
+      (window as any).__test.addXp(5000);
       const goldBefore = g.gold;
       g.buyItem('boots-of-speed');
       // A sim tick would refresh dirtied stats; do it explicitly for the assertion.
@@ -44,6 +45,7 @@ test.describe('items & loot', () => {
     const result = await page.evaluate(() => {
       const g = (window as any).__game;
       (window as any).__test.addGold(3000);
+      (window as any).__test.addXp(50000);
       g.buyItem('broadsword');
       const u = g.activeUnit();
       const slot = u.items.findIndex((it: any) => it && it.defId === 'broadsword');

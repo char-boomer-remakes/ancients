@@ -76,7 +76,7 @@ describe('codex/journal state (test 24)', () => {
     const view = g.cinematic.view();
     expect(view?.title).toBe('Lich Joins');
     expect(view?.text).toBe('The cold remembers.');
-    expect(g.buildSave().journalSeen).toContain('cinematic:bind-stinger');
+    expect(g.buildSave().journalSeen).toContain('cinematic:bind-stinger:Lich');
 
     // §3.4: the first tap completes the typewriter, the next advances past the last beat.
     g.cinematicAdvance();

@@ -122,7 +122,7 @@ export class CinematicDirector {
     const baseSpeed = replay
       ? 1
       : seen
-        ? (def.tier === 'setpiece' ? this.settings.defaultSpeed : 4)
+        ? (def.tier === 'setpiece' ? Math.max(2, this.settings.defaultSpeed) : 4)
         : this.settings.defaultSpeed;
     const playback: Playback = {
       def,

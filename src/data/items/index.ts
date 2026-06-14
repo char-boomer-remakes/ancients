@@ -182,15 +182,18 @@ export const COMPONENTS: ItemDef[] = [
     appearance: { parts: ['boot-trail'], aura: { archetype: 'storm', color: '#f1d58a', color2: '#ffffff' } }
   },
   { id: 'gloves-of-haste', name: 'Gloves of Haste', tier: 'component', cost: 450, passiveMods: { attackSpeed: 20 }, lore: 'They twitch when you hesitate.', glyph: 'fist' },
-  { id: 'sages-mask', name: 'Sage\u2019s Mask', tier: 'component', cost: 175, passiveMods: { manaRegen: 1 }, lore: 'Breathe in. The mana follows.', glyph: 'mask' },
-  { id: 'ring-of-regen', name: 'Ring of Regeneration', tier: 'component', cost: 175, passiveMods: { hpRegen: 1.75 }, lore: 'A modest loop of troll-bone.', glyph: 'ring' },
-  { id: 'void-stone', name: 'Void Stone', tier: 'component', cost: 800, passiveMods: { manaRegen: 2.25 }, lore: 'A pebble from nowhere, full of everything.', glyph: 'gem' },
+  { id: 'sages-mask', name: 'Sage\u2019s Mask', tier: 'component', cost: 175, passiveMods: { manaRegen: 2 }, lore: 'Breathe in. The mana follows.', glyph: 'mask' },
+  { id: 'ring-of-regen', name: 'Ring of Regeneration', tier: 'component', cost: 175, passiveMods: { hpRegen: 3.5 }, lore: 'A modest loop of troll-bone.', glyph: 'ring' },
+  { id: 'void-stone', name: 'Void Stone', tier: 'component', cost: 800, passiveMods: { manaRegen: 3.5 }, lore: 'A pebble from nowhere, full of everything.', glyph: 'gem' },
   { id: 'energy-booster', name: 'Energy Booster', tier: 'component', cost: 800, passiveMods: { maxMana: 250 }, lore: 'A crystal that forgot how to be empty.', glyph: 'gem' },
   { id: 'vitality-booster', name: 'Vitality Booster', tier: 'component', cost: 1000, passiveMods: { maxHp: 250 }, lore: 'Warm to the touch, like a second heartbeat.', glyph: 'gem' },
   { id: 'chainmail', name: 'Chainmail', tier: 'component', cost: 550, passiveMods: { armor: 5 }, lore: 'A thousand small refusals.', glyph: 'armor' },
   { id: 'cloak', name: 'Cloak', tier: 'component', cost: 550, passiveMods: { magicResistPct: 20 }, lore: 'Woven against weather and worse.', glyph: 'cloak' },
   { id: 'shadow-amulet', name: 'Shadow Amulet', tier: 'component', cost: 1000, passiveMods: {}, lore: 'It dims the light\u2019s opinion of you.', glyph: 'gem' },
   { id: 'morbid-mask', name: 'Morbid Mask', tier: 'component', cost: 900, passiveMods: { lifestealPct: 18 }, lore: 'A hungry little face, worn in the hand.', glyph: 'mask' },
+  { id: 'quickstep-cord', name: 'Quickstep Cord', tier: 'component', cost: 350, passiveMods: { swapCdReductionPct: 12 }, lore: 'A braided cord for heroes who live between entrances.', glyph: 'belt' },
+  { id: 'wanderer-wraps', name: 'Wanderer Wraps', tier: 'component', cost: 300, passiveMods: { staminaBonus: 60 }, lore: 'Light leg-wraps for long roads and one more dash.', glyph: 'boot' },
+  { id: 'prismatic-shard', name: 'Prismatic Shard', tier: 'component', cost: 400, passiveMods: { reactionAmpPct: 10 }, lore: 'A small prism that makes elements answer louder.', glyph: 'shard' },
   { id: 'hyperstone', name: 'Hyperstone', tier: 'component', cost: 2000, passiveMods: { attackSpeed: 60 }, lore: 'It vibrates faster than fear.', glyph: 'gem' },
   {
     id: 'platemail', name: 'Platemail', tier: 'component', cost: 1400,
@@ -334,12 +337,12 @@ export const ASSEMBLED: ItemDef[] = [
   {
     id: 'kaya', name: 'Kaya', tier: 'basic', cost: 2100,
     components: ['staff-of-wizardry', 'robe-of-the-magi'], recipeCost: 650,
-    passiveMods: { int: 16, spellAmpPct: 12, manaRegen: 1.5 },
+    passiveMods: { int: 16, spellAmpPct: 12, manaRegen: 2.5 },
     lore: "A scholar's blade: sharpest where the hand is not.",
     glyph: 'blade'
   },
   {
-    id: 'dragon-lance', name: 'Dragon Lance', tier: 'core', cost: 1900,
+    id: 'dragon-lance', name: 'Dragon Lance', tier: 't1', cost: 1900,
     components: ['blade-of-alacrity', 'belt-of-strength'], recipeCost: 450,
     passiveMods: { agi: 10, str: 6, attackRange: 140 },
     lore: 'A long answer to a short-ranged problem.',
@@ -348,7 +351,7 @@ export const ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'ranged-conversion', color: '#ffb35c', scale: 1.05 }]
   },
   {
-    id: 'mask-of-madness', name: 'Mask of Madness', tier: 'core', cost: 1900,
+    id: 'mask-of-madness', name: 'Mask of Madness', tier: 't1', cost: 1900,
     components: ['morbid-mask', 'quarterstaff'], recipeCost: 125,
     passiveMods: { damage: 10, lifestealPct: 20 },
     lore: 'It screams advice. The advice is always attack.',
@@ -374,7 +377,7 @@ export const ASSEMBLED: ItemDef[] = [
     appearance: { tint: '#ff3c38', aura: { archetype: 'shield', color: '#ff3c38', color2: '#ffd27f' } }
   },
   {
-    id: 'blink-dagger', name: 'Blink Dagger', tier: 'core', cost: 2250,
+    id: 'blink-dagger', name: 'Blink Dagger', tier: 't1', cost: 2250,
     lore: 'A dagger that cuts distance instead of flesh. It sulks when you bleed.',
     glyph: 'dagger',
     damageLockoutSec: 3,
@@ -392,7 +395,7 @@ export const ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'black-king-bar', name: 'Black King Bar', tier: 'core', cost: 3975,
+    id: 'black-king-bar', name: 'Black King Bar', tier: 't2', cost: 3975,
     components: ['ogre-axe', 'mithril-hammer'], recipeCost: 1375,
     passiveMods: { str: 10, damage: 24 },
     lore: 'A bar of dead king\u2019s gold. Spells slide off royalty.',
@@ -412,9 +415,9 @@ export const ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'euls-scepter', name: 'Eul\u2019s Scepter of Divinity', tier: 'core', cost: 2725,
+    id: 'euls-scepter', name: 'Eul\u2019s Scepter of Divinity', tier: 't2', cost: 2725,
     components: ['staff-of-wizardry', 'void-stone', 'sages-mask'], recipeCost: 750,
-    passiveMods: { int: 10, manaRegen: 2.5, moveSpeed: 20 },
+    passiveMods: { int: 10, manaRegen: 3.5, moveSpeed: 20 },
     lore: 'The wind obeys whoever holds the scepter, and mocks everyone else.',
     glyph: 'cyclone',
     appearance: { weapon: { kind: 'staff', color: '#9fe8e8', emissive: '#2a5a5a' }, aura: { archetype: 'cyclone', color: '#9fe8e8', color2: '#e8fbff' } },
@@ -433,9 +436,9 @@ export const ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'force-staff', name: 'Force Staff', tier: 'core', cost: 2200,
+    id: 'force-staff', name: 'Force Staff', tier: 't1', cost: 2200,
     components: ['staff-of-wizardry', 'ring-of-regen'], recipeCost: 1025,
-    passiveMods: { int: 10, hpRegen: 2.5 },
+    passiveMods: { int: 10, hpRegen: 4 },
     lore: 'It pushes. Friend, foe, self \u2014 physics does not take sides.',
     glyph: 'staff',
     appearance: { parts: ['boot-trail', 'cloak'], tint: '#9fd0ec' },
@@ -453,7 +456,7 @@ export const ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'glimmer-cape', name: 'Glimmer Cape', tier: 'core', cost: 1950,
+    id: 'glimmer-cape', name: 'Glimmer Cape', tier: 't1', cost: 1950,
     components: ['cloak', 'shadow-amulet'], recipeCost: 400,
     passiveMods: { magicResistPct: 20 },
     lore: 'Woven from dusk. Wrap a friend in it and watch them stop existing.',
@@ -476,10 +479,10 @@ export const ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'mekansm', name: 'Mekansm', tier: 'core', cost: 1875,
+    id: 'mekansm', name: 'Mekansm', tier: 't1', cost: 1875,
     components: ['chainmail', 'ring-of-regen', 'ring-of-regen'], recipeCost: 975,
-    passiveMods: { armor: 5, hpRegen: 3.5 },
-    aura: { radius: 1200, affects: 'allies', mods: { hpRegen: 2 } },
+    passiveMods: { armor: 5, hpRegen: 6.5 },
+    aura: { radius: 1200, affects: 'allies', mods: { hpRegen: 3.5 } },
     lore: 'A whirring heart of brass that believes in the whole party.',
     glyph: 'gear',
     appearance: { parts: ['heart-core'], tint: '#7dffb5', aura: { archetype: 'ground-aoe', color: '#7dffb5', color2: '#e7d9a8' } },
@@ -495,9 +498,9 @@ export const ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'battlefury', name: 'Battlefury', tier: 'core', cost: 3975,
+    id: 'battlefury', name: 'Battlefury', tier: 't2', cost: 3975,
     components: ['broadsword', 'claymore', 'quarterstaff'], recipeCost: 750,
-    passiveMods: { damage: 50, hpRegen: 7.5, manaRegen: 3 },
+    passiveMods: { damage: 50, hpRegen: 9, manaRegen: 4 },
     attackMod: { cleave: { pct: 60, radius: 600 } },
     lore: 'An axe with opinions about crowds.',
     glyph: 'axe',
@@ -505,7 +508,7 @@ export const ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'cleave-sweep', color: '#d8dde8', scale: 1.25 }]
   },
   {
-    id: 'crystalys', name: 'Crystalys', tier: 'core', cost: 1900,
+    id: 'crystalys', name: 'Crystalys', tier: 't1', cost: 1900,
     components: ['broadsword', 'blades-of-attack'], recipeCost: 450,
     passiveMods: { damage: 32 },
     attackMod: { critChance: 20, critMult: 160 },
@@ -515,7 +518,7 @@ export const ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'crit-lunge', color: '#ff5f5f', color2: '#ffffff', scale: 0.85 }]
   },
   {
-    id: 'diffusal-blade', name: 'Diffusal Blade', tier: 'core', cost: 2500,
+    id: 'diffusal-blade', name: 'Diffusal Blade', tier: 't2', cost: 2500,
     components: ['blade-of-alacrity', 'blade-of-alacrity'], recipeCost: 500,
     passiveMods: { agi: 20 },
     attackMod: { manaBurnPerHit: 40, manaBurnAsDamagePct: 100 },
@@ -540,7 +543,7 @@ export const ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'maelstrom', name: 'Maelstrom', tier: 'core', cost: 2950,
+    id: 'maelstrom', name: 'Maelstrom', tier: 't2', cost: 2950,
     components: ['mithril-hammer', 'gloves-of-haste'], recipeCost: 900,
     passiveMods: { damage: 24, attackSpeed: 20 },
     attackMod: { procChance: 30, procDamage: 140 },
@@ -571,16 +574,16 @@ export const ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'vladmirs-offering', name: 'Vladmir\u2019s Offering', tier: 'core', cost: 2175,
+    id: 'vladmirs-offering', name: 'Vladmir\u2019s Offering', tier: 't1', cost: 2175,
     components: ['ring-of-regen', 'sages-mask', 'blades-of-attack'], recipeCost: 1375,
-    passiveMods: { hpRegen: 1.75, manaRegen: 1 },
+    passiveMods: { hpRegen: 3.5, manaRegen: 2 },
     aura: { radius: 1200, affects: 'allies', mods: { lifestealPct: 15, damagePct: 12, armor: 3 } },
     lore: 'A fanged chalice that tithes every wound.',
     glyph: 'fang',
     appearance: { parts: ['heart-core'], tint: '#b01818', aura: { archetype: 'shield', color: '#b01818', color2: '#ffb08a' } }
   },
   {
-    id: 'assault-cuirass', name: 'Assault Cuirass', tier: 'core', cost: 5500,
+    id: 'assault-cuirass', name: 'Assault Cuirass', tier: 't4', cost: 5500,
     components: ['hyperstone', 'platemail', 'chainmail'], recipeCost: 1550,
     passiveMods: { armor: 10, attackSpeed: 30 },
     aura: { radius: 1200, affects: 'allies', mods: { armor: 5, attackSpeed: 25 } },
@@ -589,7 +592,7 @@ export const ASSEMBLED: ItemDef[] = [
     appearance: { parts: ['pauldrons'], tint: '#d4d9e6', aura: { archetype: 'shield', color: '#d4d9e6', color2: '#ffd86a' } }
   },
   {
-    id: 'divine-rapier', name: 'Divine Rapier', tier: 'core', cost: 6200,
+    id: 'divine-rapier', name: 'Divine Rapier', tier: 'special', cost: 6200,
     components: ['sacred-relic', 'demon-edge'], recipeCost: 600,
     passiveMods: { damage: 350 },
     lore: 'A victory condition with a handle. It drops when pride dies.',
@@ -598,7 +601,7 @@ export const ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'tinted-impact', color: '#ffe27d', color2: '#ffffff', scale: 1.35 }]
   },
   {
-    id: 'butterfly', name: 'Butterfly', tier: 'core', cost: 5375,
+    id: 'butterfly', name: 'Butterfly', tier: 't4', cost: 5375,
     components: ['eaglesong', 'quarterstaff', 'quarterstaff'], recipeCost: 825,
     passiveMods: { agi: 35, damage: 25, attackSpeed: 35, evasionPct: 35 },
     lore: 'The blade misses because you have already left.',
@@ -607,7 +610,7 @@ export const ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'crit-lunge', color: '#95ffbc', color2: '#ffffff', scale: 1.15 }]
   },
   {
-    id: 'scythe-of-vyse', name: 'Scythe of Vyse', tier: 'core', cost: 7075,
+    id: 'scythe-of-vyse', name: 'Scythe of Vyse', tier: 't4', cost: 7075,
     components: ['mystic-staff', 'ultimate-orb', 'void-stone'], recipeCost: 675,
     passiveMods: { int: 30, str: 15, agi: 15, manaRegen: 5 },
     lore: 'Scholarship, sharpened into livestock.',
@@ -629,7 +632,7 @@ export const ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'heart-of-tarrasque', name: 'Heart of Tarrasque', tier: 'core', cost: 5175,
+    id: 'heart-of-tarrasque', name: 'Heart of Tarrasque', tier: 't4', cost: 5175,
     components: ['reaver', 'vitality-booster', 'ring-of-regen'], recipeCost: 1200,
     passiveMods: { str: 40, maxHp: 250, hpRegenPctMax: 1.6 },
     lore: 'The old beast is dead. Its stubbornness is not.',
@@ -637,7 +640,7 @@ export const ASSEMBLED: ItemDef[] = [
     appearance: { parts: ['heart-core'], aura: { archetype: 'shield', color: '#c83a3a', color2: '#ffb08a' } }
   },
   {
-    id: 'eye-of-skadi', name: 'Eye of Skadi', tier: 'core', cost: 7475,
+    id: 'eye-of-skadi', name: 'Eye of Skadi', tier: 't4', cost: 7475,
     components: ['ultimate-orb', 'ultimate-orb', 'point-booster'], recipeCost: 675,
     passiveMods: { str: 22, agi: 22, int: 22, maxHp: 220, maxMana: 220 },
     attackMod: { procChance: 100, procStatus: { status: 'slow', duration: 2.5, params: { moveSlowPct: 35, attackSlowPct: 35, tag: 'skadi-cold' } } },
@@ -648,7 +651,7 @@ export const ASSEMBLED: ItemDef[] = [
     elementOnHit: 'cryo'
   },
   {
-    id: 'refresher-orb', name: 'Refresher Orb', tier: 'core', cost: 6275,
+    id: 'refresher-orb', name: 'Refresher Orb', tier: 't4', cost: 6275,
     components: ['mystic-staff', 'void-stone', 'void-stone'], recipeCost: 1875,
     passiveMods: { int: 25, manaRegen: 6 },
     lore: 'A second chance for every cooldown.',
@@ -668,7 +671,7 @@ export const ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'aghanims-scepter', name: "Aghanim's Scepter", tier: 'core', cost: 5800,
+    id: 'aghanims-scepter', name: "Aghanim's Scepter", tier: 'special', cost: 5800,
     components: ['point-booster', 'ogre-axe', 'staff-of-wizardry', 'blade-of-alacrity'], recipeCost: 1600,
     passiveMods: { str: 10, agi: 10, int: 10, maxHp: 175, maxMana: 175 },
     lore: 'A blue invitation for a hero to become more themselves.',
@@ -676,7 +679,7 @@ export const ASSEMBLED: ItemDef[] = [
     appearance: { parts: ['mana-orb'], tint: '#73d9ff', aura: { archetype: 'global-mark', color: '#73d9ff', color2: '#ffffff' } }
   },
   {
-    id: 'aegis-of-the-immortal', name: 'Aegis of the Immortal', tier: 'core', cost: 0,
+    id: 'aegis-of-the-immortal', name: 'Aegis of the Immortal', tier: 'special', cost: 0,
     lore: 'A held promise: die once, stand once. Its rim is inscribed with the line of champions who carried it before — and a blank space, waiting for the next.',
     glyph: 'shield'
   },
@@ -707,18 +710,18 @@ export const ASSEMBLED: ItemDef[] = [
 
 export const EXTENDED_COMPONENTS: ItemDef[] = [
   { id: 'ring-of-protection', name: 'Ring of Protection', tier: 'component', cost: 175, passiveMods: { armor: 1 }, lore: 'A small brass circle that says no to the first chip of steel.', glyph: 'ring' },
-  { id: 'ring-of-health', name: 'Ring of Health', tier: 'component', cost: 700, passiveMods: { hpRegen: 6.5 }, lore: 'Warm metal, steady pulse.', glyph: 'ring' },
+  { id: 'ring-of-health', name: 'Ring of Health', tier: 'component', cost: 700, passiveMods: { hpRegen: 9 }, lore: 'Warm metal, steady pulse.', glyph: 'ring' },
   { id: 'gem-of-true-sight', name: 'Gem of True Sight', tier: 'component', cost: 900, passiveMods: { visionPct: 15 }, lore: 'It sees what the map would rather keep secret.', glyph: 'eye' },
   {
     id: 'helm-of-iron-will', name: 'Helm of Iron Will', tier: 'component', cost: 925,
     components: ['chainmail', 'ring-of-regen'], recipeCost: 200,
-    passiveMods: { armor: 5, hpRegen: 5 },
+    passiveMods: { armor: 5, hpRegen: 6.5 },
     lore: 'A helmet for people who intend to keep walking forward.', glyph: 'helm'
   },
   {
     id: 'oblivion-staff', name: 'Oblivion Staff', tier: 'basic', cost: 1625,
     components: ['quarterstaff', 'robe-of-the-magi', 'sages-mask'], recipeCost: 125,
-    passiveMods: { damage: 10, attackSpeed: 10, int: 6, manaRegen: 1 },
+    passiveMods: { damage: 10, attackSpeed: 10, int: 6, manaRegen: 2 },
     lore: 'A staff that turns concentration into tempo.', glyph: 'staff'
   },
   { id: 'talisman-of-evasion', name: 'Talisman of Evasion', tier: 'component', cost: 1300, passiveMods: { evasionPct: 16 }, lore: 'Hold it right and blades choose someone else.', glyph: 'wing' },
@@ -733,14 +736,14 @@ export const EXTENDED_COMPONENTS: ItemDef[] = [
   {
     id: 'perseverance', name: 'Perseverance', tier: 'basic', cost: 1650,
     components: ['ring-of-health', 'void-stone'], recipeCost: 150,
-    passiveMods: { hpRegen: 6.5, manaRegen: 2.25 },
+    passiveMods: { hpRegen: 9, manaRegen: 3.5 },
     lore: 'Health and mana, both taught to come back.', glyph: 'ring'
   },
   {
     id: 'headdress', name: 'Headdress', tier: 'basic', cost: 425,
     components: ['ring-of-regen'], recipeCost: 250,
-    passiveMods: { hpRegen: 1.75 },
-    aura: { radius: 1200, affects: 'allies', mods: { hpRegen: 2 } },
+    passiveMods: { hpRegen: 3.5 },
+    aura: { radius: 1200, affects: 'allies', mods: { hpRegen: 3 } },
     lore: 'A little team medicine stitched into a circlet.', glyph: 'helm'
   },
   {
@@ -753,13 +756,34 @@ export const EXTENDED_COMPONENTS: ItemDef[] = [
   {
     id: 'ring-of-basilius', name: 'Ring of Basilius', tier: 'basic', cost: 425,
     components: ['sages-mask', 'ring-of-protection'], recipeCost: 75,
-    passiveMods: { manaRegen: 1, armor: 1 },
-    aura: { radius: 1200, affects: 'allies', mods: { manaRegen: 1 } },
+    passiveMods: { manaRegen: 2, armor: 1 },
+    aura: { radius: 1200, affects: 'allies', mods: { manaRegen: 1.5 } },
     lore: 'A modest aura for lanes that plan to last.', glyph: 'ring'
   }
 ];
 
 export const EXTENDED_ASSEMBLED: ItemDef[] = [
+  {
+    id: 'breacher-cloak', name: 'Breacher Cloak', tier: 't1', cost: 1800,
+    components: ['quickstep-cord', 'blades-of-attack', 'chainmail'], recipeCost: 450,
+    passiveMods: { swapCdReductionPct: 28, swapInDamagePct: 18, agi: 10, moveSpeed: 15 },
+    lore: 'A cloak for arriving already mid-swing.', glyph: 'cloak',
+    appearance: { parts: ['cloak'], tint: '#8fd8ff' }
+  },
+  {
+    id: 'exchange-mark', name: 'Exchange Mark', tier: 't1', cost: 1475,
+    components: ['quickstep-cord', 'belt-of-strength', 'ring-of-regen'], recipeCost: 500,
+    passiveMods: { swapCdReductionPct: 18, swapInHealPct: 8, str: 8, hpRegen: 3.5 },
+    lore: 'A stamped token: step in, take the hit, come back breathing.', glyph: 'band',
+    appearance: { tint: '#d05a42' }
+  },
+  {
+    id: 'resonance-catalyst', name: 'Resonance Catalyst', tier: 't1', cost: 2100,
+    components: ['prismatic-shard', 'staff-of-wizardry', 'sages-mask'], recipeCost: 525,
+    passiveMods: { reactionAmpPct: 25, elementalGaugeSec: 1, spellAmpPct: 10, int: 10, manaRegen: 2.5 },
+    lore: 'A tuning fork for elemental openings.', glyph: 'orb',
+    appearance: { parts: ['mana-orb'], tint: '#c8a0ff', aura: { archetype: 'shield', color: '#c8a0ff', color2: '#ffffff' } }
+  },
   {
     id: 'power-treads', name: 'Power Treads', tier: 'basic', cost: 1400,
     components: ['boots-of-speed', 'gloves-of-haste', 'belt-of-strength'], recipeCost: 0,
@@ -782,13 +806,13 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
   {
     id: 'tranquil-boots', name: 'Tranquil Boots', tier: 'basic', cost: 1100,
     components: ['boots-of-speed', 'ring-of-regen', 'ring-of-protection'], recipeCost: 250,
-    passiveMods: { moveSpeed: 55, hpRegen: 12, armor: 1 },
+    passiveMods: { moveSpeed: 55, hpRegen: 14, armor: 1 },
     lore: 'Quiet feet, quick recovery.', glyph: 'boot',
     damageLockoutSec: 3,
     appearance: { parts: ['boot-trail'], tint: '#9ff0b0' }
   },
   {
-    id: 'boots-of-travel', name: 'Boots of Travel', tier: 'core', cost: 2500,
+    id: 'boots-of-travel', name: 'Boots of Travel', tier: 't2', cost: 2500,
     components: ['boots-of-speed'], recipeCost: 2000,
     passiveMods: { moveSpeed: 90 },
     lore: 'The map folds under your heel.', glyph: 'boot',
@@ -800,10 +824,10 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     appearance: { parts: ['boot-trail'], tint: '#73d9ff' }
   },
   {
-    id: 'guardian-greaves', name: 'Guardian Greaves', tier: 'core', cost: 5050,
+    id: 'guardian-greaves', name: 'Guardian Greaves', tier: 't3', cost: 5050,
     components: ['arcane-boots', 'mekansm', 'headdress'], recipeCost: 1450,
-    passiveMods: { moveSpeed: 45, maxMana: 250, armor: 5, hpRegen: 5 },
-    aura: { radius: 1200, affects: 'allies', mods: { hpRegen: 3, armor: 3 } },
+    passiveMods: { moveSpeed: 45, maxMana: 250, armor: 5, hpRegen: 7 },
+    aura: { radius: 1200, affects: 'allies', mods: { hpRegen: 4.5, armor: 3 } },
     lore: 'A full-party reset strapped to a pair of boots.', glyph: 'boot',
     active: {
       id: 'guardian-greaves-active', name: 'Mend', targeting: 'no-target', castPoint: 0, cooldown: [65], manaCost: [100],
@@ -817,16 +841,16 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     appearance: { parts: ['boot-trail', 'pauldrons', 'halo'], tint: '#7dffb5' }
   },
   {
-    id: 'vanguard', name: 'Vanguard', tier: 'core', cost: 1825,
+    id: 'vanguard', name: 'Vanguard', tier: 't1', cost: 1825,
     components: ['ring-of-health', 'vitality-booster'], recipeCost: 125,
-    passiveMods: { maxHp: 250, hpRegen: 6.5, attackDamageTakenReductionPct: 12 },
+    passiveMods: { maxHp: 250, hpRegen: 9, attackDamageTakenReductionPct: 12 },
     lore: 'It turns chip damage into background noise.', glyph: 'shield',
     appearance: { parts: ['pauldrons'], tint: '#b46a3c' }
   },
   {
-    id: 'hood-of-defiance', name: 'Hood of Defiance', tier: 'core', cost: 1700,
+    id: 'hood-of-defiance', name: 'Hood of Defiance', tier: 't1', cost: 1700,
     components: ['ring-of-regen', 'cloak', 'helm-of-iron-will'], recipeCost: 50,
-    passiveMods: { hpRegen: 6.75, armor: 5, magicResistPct: 20 },
+    passiveMods: { hpRegen: 9, armor: 5, magicResistPct: 20 },
     lore: 'A hood for walking into spellfire first.', glyph: 'cloak',
     appearance: { parts: ['pauldrons'], tint: '#8ee8ff', aura: { archetype: 'shield', color: '#8ee8ff', color2: '#ffffff' } },
     active: {
@@ -836,10 +860,10 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'pipe-of-insight', name: 'Pipe of Insight', tier: 'core', cost: 3475,
+    id: 'pipe-of-insight', name: 'Pipe of Insight', tier: 't2', cost: 3475,
     components: ['hood-of-defiance', 'headdress'], recipeCost: 1350,
-    passiveMods: { hpRegen: 8, magicResistPct: 25 },
-    aura: { radius: 1200, affects: 'allies', mods: { magicResistPct: 10, hpRegen: 2 } },
+    passiveMods: { hpRegen: 11, magicResistPct: 25 },
+    aura: { radius: 1200, affects: 'allies', mods: { magicResistPct: 10, hpRegen: 3 } },
     lore: 'The team breathes in, and the next spell breaks softer.', glyph: 'pipe',
     appearance: { parts: ['pauldrons'], tint: '#8ee8ff', aura: { archetype: 'shield', color: '#8ee8ff', color2: '#ffffff' } },
     active: {
@@ -849,9 +873,9 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'crimson-guard', name: 'Crimson Guard', tier: 'core', cost: 3675,
+    id: 'crimson-guard', name: 'Crimson Guard', tier: 't2', cost: 3675,
     components: ['vanguard', 'buckler'], recipeCost: 1425,
-    passiveMods: { maxHp: 250, hpRegen: 6.5, armor: 3, attackDamageTakenReductionPct: 12 },
+    passiveMods: { maxHp: 250, hpRegen: 9, armor: 3, attackDamageTakenReductionPct: 12 },
     aura: { radius: 1200, affects: 'allies', mods: { armor: 2 } },
     lore: 'A shield wall condensed into one press.', glyph: 'shield',
     appearance: { parts: ['pauldrons'], tint: '#d84a42' },
@@ -862,7 +886,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'shivas-guard', name: "Shiva's Guard", tier: 'core', cost: 4950,
+    id: 'shivas-guard', name: "Shiva's Guard", tier: 't3', cost: 4950,
     components: ['platemail', 'mystic-staff'], recipeCost: 750,
     passiveMods: { armor: 15, int: 25 },
     aura: { radius: 900, affects: 'enemies', mods: { attackSpeed: -35 } },
@@ -879,9 +903,9 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     elementOnHit: 'cryo'
   },
   {
-    id: 'lotus-orb', name: 'Lotus Orb', tier: 'core', cost: 5200,
+    id: 'lotus-orb', name: 'Lotus Orb', tier: 't4', cost: 5200,
     components: ['platemail', 'mystic-staff'], recipeCost: 1000,
-    passiveMods: { armor: 10, int: 25, manaRegen: 2 },
+    passiveMods: { armor: 10, int: 25, manaRegen: 3.5 },
     lore: 'A mirrored flower. Until reflect scripting lands, it gives the dispel-and-shield half of the promise.', glyph: 'orb',
     appearance: { parts: ['mana-orb'], tint: '#ff86d8', aura: { archetype: 'shield', color: '#5ad8c8', color2: '#ffffff' } },
     active: {
@@ -894,9 +918,9 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'linkens-sphere', name: "Linken's Sphere", tier: 'core', cost: 5800,
+    id: 'linkens-sphere', name: "Linken's Sphere", tier: 't4', cost: 5800,
     components: ['perseverance', 'ultimate-orb'], recipeCost: 1350,
-    passiveMods: { str: 15, agi: 15, int: 15, hpRegen: 6.5, manaRegen: 2.25 },
+    passiveMods: { str: 15, agi: 15, int: 15, hpRegen: 8, manaRegen: 3.5 },
     lore: 'A private answer to the next spell aimed at you.', glyph: 'orb',
     appearance: { parts: ['mana-orb'], tint: '#b7a0ff' },
     active: {
@@ -906,7 +930,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'aeon-disk', name: 'Aeon Disk', tier: 'core', cost: 3000,
+    id: 'aeon-disk', name: 'Aeon Disk', tier: 't2', cost: 3000,
     components: ['vitality-booster', 'platemail'], recipeCost: 600,
     passiveMods: { maxHp: 250, armor: 10, statusResistPct: 20 },
     lore: 'A panic button with a philosopher inside.', glyph: 'disc',
@@ -921,19 +945,19 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'eternal-shroud', name: 'Eternal Shroud', tier: 'core', cost: 3200,
+    id: 'eternal-shroud', name: 'Eternal Shroud', tier: 't2', cost: 3200,
     components: ['hood-of-defiance', 'vitality-booster'], recipeCost: 500,
-    passiveMods: { maxHp: 250, hpRegen: 6.75, armor: 5, magicResistPct: 30, manaRegen: 1.5 },
+    passiveMods: { maxHp: 250, hpRegen: 9, armor: 5, magicResistPct: 30, manaRegen: 1.5 },
     lore: 'Spellfire goes in. Stamina comes out.', glyph: 'cloak',
     appearance: { parts: ['heart-core'], tint: '#5fe0c0', aura: { archetype: 'shield', color: '#5fe0c0', color2: '#ffffff' } },
     active: {
       id: 'eternal-shroud-active', name: 'Shroud', targeting: 'no-target', castPoint: 0, cooldown: [45],
-      effects: [{ kind: 'statmod', mods: { magicResistPct: 45, manaRegen: 8 }, duration: 8, target: 'self' }],
+      effects: [{ kind: 'statmod', mods: { magicResistPct: 45, manaRegen: 10 }, duration: 8, target: 'self' }],
       vfx: { archetype: 'shield', color: '#5fe0c0', color2: '#ffffff', scale: 0.8 }
     }
   },
   {
-    id: 'manta-style', name: 'Manta Style', tier: 'core', cost: 5750,
+    id: 'manta-style', name: 'Manta Style', tier: 't4', cost: 5750,
     components: ['yasha', 'ultimate-orb'], recipeCost: 850,
     passiveMods: { agi: 26, str: 10, int: 10, attackSpeed: 12, moveSpeedPct: 8 },
     lore: 'Step sideways out of yourself and make the enemy count wrong.', glyph: 'mirror',
@@ -947,11 +971,11 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
       vfx: { archetype: 'summon-pop', color: '#87d8ff', color2: '#ffffff', scale: 0.9 }
     }
   },
-  { id: 'sange-and-yasha', name: 'Sange and Yasha', tier: 'core', cost: 4800, components: ['sange', 'yasha'], recipeCost: 600, passiveMods: { str: 16, agi: 16, attackSpeed: 18, moveSpeedPct: 10, statusResistPct: 15, lifestealPct: 12 }, lore: 'Red edge, quick edge, one rhythm.', glyph: 'blade', appearance: { weapon: { kind: 'glowing-blade', color: '#ff6b4a', emissive: '#5a1f18' }, tint: '#8fd8ff' }, attackVisual: [{ kind: 'crit-lunge', color: '#ff6b4a', color2: '#8fd8ff', scale: 0.9 }] },
-  { id: 'kaya-and-sange', name: 'Kaya and Sange', tier: 'core', cost: 4800, components: ['kaya', 'sange'], recipeCost: 600, passiveMods: { int: 16, str: 16, spellAmpPct: 16, manaRegen: 1.5, statusResistPct: 15, lifestealPct: 12 }, lore: 'One blade for the spell, one for surviving the reply.', glyph: 'blade', appearance: { weapon: { kind: 'glowing-blade', color: '#b08cff', emissive: '#32185a' }, tint: '#ff6b4a' }, attackVisual: [{ kind: 'tinted-impact', color: '#b08cff', color2: '#ff6b4a', scale: 0.9 }] },
-  { id: 'yasha-and-kaya', name: 'Yasha and Kaya', tier: 'core', cost: 4800, components: ['yasha', 'kaya'], recipeCost: 600, passiveMods: { agi: 16, int: 16, attackSpeed: 18, moveSpeedPct: 10, spellAmpPct: 16, manaRegen: 1.5 }, lore: 'A caster-carry compromise that refuses to be slow.', glyph: 'blade', appearance: { weapon: { kind: 'glowing-blade', color: '#8fd8ff', emissive: '#18445a' }, tint: '#b08cff' }, attackVisual: [{ kind: 'tinted-impact', color: '#8fd8ff', color2: '#b08cff', scale: 0.9 }] },
+  { id: 'sange-and-yasha', name: 'Sange and Yasha', tier: 't3', cost: 4800, components: ['sange', 'yasha'], recipeCost: 600, passiveMods: { str: 16, agi: 16, attackSpeed: 18, moveSpeedPct: 10, statusResistPct: 15, lifestealPct: 12 }, lore: 'Red edge, quick edge, one rhythm.', glyph: 'blade', appearance: { weapon: { kind: 'glowing-blade', color: '#ff6b4a', emissive: '#5a1f18' }, tint: '#8fd8ff' }, attackVisual: [{ kind: 'crit-lunge', color: '#ff6b4a', color2: '#8fd8ff', scale: 0.9 }] },
+  { id: 'kaya-and-sange', name: 'Kaya and Sange', tier: 't3', cost: 4800, components: ['kaya', 'sange'], recipeCost: 600, passiveMods: { int: 16, str: 16, spellAmpPct: 16, manaRegen: 2.5, statusResistPct: 15, lifestealPct: 12 }, lore: 'One blade for the spell, one for surviving the reply.', glyph: 'blade', appearance: { weapon: { kind: 'glowing-blade', color: '#b08cff', emissive: '#32185a' }, tint: '#ff6b4a' }, attackVisual: [{ kind: 'tinted-impact', color: '#b08cff', color2: '#ff6b4a', scale: 0.9 }] },
+  { id: 'yasha-and-kaya', name: 'Yasha and Kaya', tier: 't3', cost: 4800, components: ['yasha', 'kaya'], recipeCost: 600, passiveMods: { agi: 16, int: 16, attackSpeed: 18, moveSpeedPct: 10, spellAmpPct: 16, manaRegen: 2.5 }, lore: 'A caster-carry compromise that refuses to be slow.', glyph: 'blade', appearance: { weapon: { kind: 'glowing-blade', color: '#8fd8ff', emissive: '#18445a' }, tint: '#b08cff' }, attackVisual: [{ kind: 'tinted-impact', color: '#8fd8ff', color2: '#b08cff', scale: 0.9 }] },
   {
-    id: 'desolator', name: 'Desolator', tier: 'core', cost: 4500,
+    id: 'desolator', name: 'Desolator', tier: 't2', cost: 4500,
     components: ['demon-edge', 'blitz-knuckles'], recipeCost: 1300,
     passiveMods: { damage: 50, attackSpeed: 15 },
     attackMod: { procChance: 100, procStatus: { status: 'buff', duration: 7, params: { mods: { armor: -6 }, tag: 'desolator-armor' } } },
@@ -960,7 +984,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'armor-shred-flash', color: '#d92727', color2: '#ffb0a0', scale: 1.05 }]
   },
   {
-    id: 'daedalus', name: 'Daedalus', tier: 'core', cost: 5300,
+    id: 'daedalus', name: 'Daedalus', tier: 't4', cost: 5300,
     components: ['crystalys', 'demon-edge'], recipeCost: 1200,
     passiveMods: { damage: 88 },
     attackMod: { critChance: 30, critMult: 225 },
@@ -969,7 +993,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'crit-lunge', color: '#ff4f6f', color2: '#ffffff', scale: 1.35 }]
   },
   {
-    id: 'monkey-king-bar', name: 'Monkey King Bar', tier: 'core', cost: 5300,
+    id: 'monkey-king-bar', name: 'Monkey King Bar', tier: 't4', cost: 5300,
     components: ['javelin', 'javelin', 'demon-edge'], recipeCost: 900,
     passiveMods: { damage: 52, attackSpeed: 35 },
     attackMod: { procChance: 80, procDamage: 70 },
@@ -978,7 +1002,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'tinted-impact', color: '#f0d36a', color2: '#ffffff', scale: 0.95 }]
   },
   {
-    id: 'skull-basher', name: 'Skull Basher', tier: 'core', cost: 2300,
+    id: 'skull-basher', name: 'Skull Basher', tier: 't1', cost: 2300,
     components: ['javelin', 'belt-of-strength'], recipeCost: 750,
     passiveMods: { damage: 25, str: 10 },
     attackMod: { procChance: 25, procDamage: 70, procStatus: { status: 'stun', duration: 1.1 } },
@@ -986,7 +1010,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'tinted-impact', color: '#d8c0a0', scale: 1 }]
   },
   {
-    id: 'abyssal-blade', name: 'Abyssal Blade', tier: 'core', cost: 6650,
+    id: 'abyssal-blade', name: 'Abyssal Blade', tier: 't4', cost: 6650,
     components: ['skull-basher', 'reaver', 'vitality-booster'], recipeCost: 550,
     passiveMods: { damage: 35, str: 35, maxHp: 250 },
     attackMod: { procChance: 25, procDamage: 90, procStatus: { status: 'stun', duration: 1.2 } },
@@ -1000,7 +1024,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'tinted-impact', color: '#8a3cff', color2: '#ffffff', scale: 1.2 }]
   },
   {
-    id: 'mjollnir', name: 'Mjollnir', tier: 'core', cost: 5600,
+    id: 'mjollnir', name: 'Mjollnir', tier: 't4', cost: 5600,
     components: ['maelstrom', 'hyperstone'], recipeCost: 650,
     passiveMods: { damage: 24, attackSpeed: 80 },
     attackMod: { procChance: 35, procDamage: 180 },
@@ -1017,7 +1041,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     elementOnHit: 'electro'
   },
   {
-    id: 'satanic', name: 'Satanic', tier: 'core', cost: 6200,
+    id: 'satanic', name: 'Satanic', tier: 't4', cost: 6200,
     components: ['sange', 'morbid-mask', 'reaver'], recipeCost: 400,
     passiveMods: { str: 41, statusResistPct: 15, lifestealPct: 25 },
     lore: 'Survive by taking back every wound.', glyph: 'mask',
@@ -1030,7 +1054,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'silver-edge', name: 'Silver Edge', tier: 'core', cost: 4600,
+    id: 'silver-edge', name: 'Silver Edge', tier: 't2', cost: 4600,
     components: ['shadow-amulet', 'crystalys', 'blitz-knuckles'], recipeCost: 700,
     passiveMods: { damage: 32, attackSpeed: 35 },
     attackMod: { critChance: 20, critMult: 160, procStatus: { status: 'break', duration: 4 } },
@@ -1044,18 +1068,18 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'crit-lunge', color: '#cfd8ff', color2: '#ffffff', scale: 1 }]
   },
   {
-    id: 'echo-sabre', name: 'Echo Sabre', tier: 'core', cost: 3500,
+    id: 'echo-sabre', name: 'Echo Sabre', tier: 't2', cost: 3500,
     components: ['oblivion-staff', 'ogre-axe'], recipeCost: 875,
-    passiveMods: { str: 10, int: 6, damage: 15, attackSpeed: 10, manaRegen: 1 },
+    passiveMods: { str: 10, int: 6, damage: 15, attackSpeed: 10, manaRegen: 2 },
     attackMod: { procChance: 100, bonusDamage: 35, procStatus: { status: 'slow', duration: 0.8, params: { moveSlowPct: 80 } } },
     lore: 'The second hit arrives before the first one has finished explaining.', glyph: 'blade',
     appearance: { weapon: { kind: 'long-pole', color: '#86c8ff', emissive: '#24405f' }, tint: '#86c8ff' },
     attackVisual: [{ kind: 'tinted-impact', color: '#86c8ff', color2: '#ffffff', scale: 0.9 }]
   },
   {
-    id: 'orchid-malevolence', name: 'Orchid Malevolence', tier: 'core', cost: 3500,
+    id: 'orchid-malevolence', name: 'Orchid Malevolence', tier: 't2', cost: 3500,
     components: ['oblivion-staff', 'oblivion-staff'], recipeCost: 250,
-    passiveMods: { int: 12, damage: 20, attackSpeed: 20, manaRegen: 2 },
+    passiveMods: { int: 12, damage: 20, attackSpeed: 20, manaRegen: 3 },
     lore: 'A quiet flower for loud casters.', glyph: 'flower',
     appearance: { parts: ['mana-orb'], tint: '#d88cff', aura: { archetype: 'global-mark', color: '#d88cff', color2: '#ffffff' } },
     active: {
@@ -1065,9 +1089,9 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'bloodthorn', name: 'Bloodthorn', tier: 'core', cost: 6500,
+    id: 'bloodthorn', name: 'Bloodthorn', tier: 't4', cost: 6500,
     components: ['orchid-malevolence', 'crystalys'], recipeCost: 1100,
-    passiveMods: { int: 12, damage: 52, attackSpeed: 20, manaRegen: 2 },
+    passiveMods: { int: 12, damage: 52, attackSpeed: 20, manaRegen: 3 },
     attackMod: { critChance: 20, critMult: 160 },
     lore: 'Silence first. Then the knives agree.', glyph: 'flower',
     appearance: { parts: ['crystal-edge'], tint: '#ff4f86', aura: { archetype: 'beam', color: '#ff4f86', color2: '#ffffff' } },
@@ -1079,9 +1103,9 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'crit-lunge', color: '#ff4f86', color2: '#ffffff', scale: 1.15 }]
   },
   {
-    id: 'nullifier', name: 'Nullifier', tier: 'core', cost: 5300,
+    id: 'nullifier', name: 'Nullifier', tier: 't4', cost: 5300,
     components: ['sacred-relic', 'helm-of-iron-will'], recipeCost: 975,
-    passiveMods: { damage: 55, armor: 5, hpRegen: 5 },
+    passiveMods: { damage: 55, armor: 5, hpRegen: 7 },
     lore: 'A blunt answer to tricks, buffs, and excuses.', glyph: 'relic',
     active: {
       id: 'nullifier-active', name: 'Nullify', targeting: 'unit-target', affects: 'enemy', castRange: 600, castPoint: 0, cooldown: [10], manaCost: [75],
@@ -1091,10 +1115,10 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     attackVisual: [{ kind: 'armor-shred-flash', color: '#d8d8d8', color2: '#ffffff', scale: 1 }]
   },
   {
-    id: 'radiance', name: 'Radiance', tier: 'core', cost: 4700,
+    id: 'radiance', name: 'Radiance', tier: 't2', cost: 4700,
     components: ['sacred-relic'], recipeCost: 1300,
     passiveMods: { damage: 55 },
-    aura: { radius: 700, affects: 'enemies', mods: { damageTakenReductionPct: -4 } },
+    aura: { radius: 700, affects: 'enemies', mods: { damageTakenReductionPct: -10 } },
     lore: 'A holy burn that makes standing near you a mistake.', glyph: 'sun',
     attackVisual: [{ kind: 'tinted-impact', color: '#ffb13b', color2: '#ffffff', scale: 1.05 }],
     appearance: { parts: ['mana-orb'], tint: '#ffb13b', aura: { archetype: 'global-mark', color: '#ffb13b', color2: '#ffffff' } },
@@ -1114,7 +1138,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'solar-crest', name: 'Solar Crest', tier: 'core', cost: 2950,
+    id: 'solar-crest', name: 'Solar Crest', tier: 't2', cost: 2950,
     components: ['medallion-of-courage', 'crown', 'talisman-of-evasion'], recipeCost: 125,
     passiveMods: { str: 4, agi: 4, int: 4, armor: 6, manaRegen: 1, evasionPct: 16 },
     lore: 'A medallion promoted into a whole sun.', glyph: 'sun',
@@ -1141,7 +1165,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'spirit-vessel', name: 'Spirit Vessel', tier: 'core', cost: 2780,
+    id: 'spirit-vessel', name: 'Spirit Vessel', tier: 't2', cost: 2780,
     components: ['urn-of-shadows', 'vitality-booster'], recipeCost: 900,
     passiveMods: { str: 3, maxHp: 250, manaRegen: 1, armor: 1 },
     charges: 0, maxCharges: 12,
@@ -1155,7 +1179,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'holy-locket', name: 'Holy Locket', tier: 'core', cost: 2400,
+    id: 'holy-locket', name: 'Holy Locket', tier: 't1', cost: 2400,
     components: ['headdress', 'magic-wand', 'energy-booster'], recipeCost: 725,
     passiveMods: { maxMana: 250, hpRegen: 2.5 },
     charges: 0, maxCharges: 20,
@@ -1170,9 +1194,9 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'helm-of-the-dominator', name: 'Helm of the Dominator', tier: 'core', cost: 2400,
+    id: 'helm-of-the-dominator', name: 'Helm of the Dominator', tier: 't1', cost: 2400,
     components: ['helm-of-iron-will', 'morbid-mask'], recipeCost: 575,
-    passiveMods: { armor: 5, hpRegen: 5, lifestealPct: 18 },
+    passiveMods: { armor: 5, hpRegen: 6.5, lifestealPct: 18 },
     aura: { radius: 1200, affects: 'allies', mods: { damagePct: 8 } },
     lore: 'Leadership, but with a very heavy helmet.', glyph: 'helm',
     appearance: { parts: ['pauldrons'], tint: '#d8b080', aura: { archetype: 'summon-pop', color: '#d8b080', color2: '#ffffff' } },
@@ -1183,9 +1207,9 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'helm-of-the-overlord', name: 'Helm of the Overlord', tier: 'core', cost: 5600,
+    id: 'helm-of-the-overlord', name: 'Helm of the Overlord', tier: 't4', cost: 5600,
     components: ['helm-of-the-dominator', 'ultimate-orb'], recipeCost: 400,
-    passiveMods: { str: 15, agi: 15, int: 15, armor: 8, hpRegen: 6, lifestealPct: 20 },
+    passiveMods: { str: 15, agi: 15, int: 15, armor: 8, hpRegen: 8, lifestealPct: 20 },
     aura: { radius: 1200, affects: 'allies', mods: { damagePct: 15, armor: 3 } },
     lore: 'The dominated thing gets bigger. So does the problem.', glyph: 'helm',
     appearance: { parts: ['pauldrons'], tint: '#d8c080', aura: { archetype: 'summon-pop', color: '#d8c080', color2: '#ffffff' } },
@@ -1196,7 +1220,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'veil-of-discord', name: 'Veil of Discord', tier: 'core', cost: 1500,
+    id: 'veil-of-discord', name: 'Veil of Discord', tier: 't1', cost: 1500,
     components: ['robe-of-the-magi', 'robe-of-the-magi', 'headdress'], recipeCost: 175,
     passiveMods: { int: 12, hpRegen: 2 },
     lore: 'A cheap argument that makes every spell louder.', glyph: 'veil',
@@ -1208,7 +1232,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'rod-of-atos', name: 'Rod of Atos', tier: 'core', cost: 2750,
+    id: 'rod-of-atos', name: 'Rod of Atos', tier: 't2', cost: 2750,
     components: ['staff-of-wizardry', 'crown', 'crown'], recipeCost: 850,
     passiveMods: { int: 18, str: 8, agi: 8 },
     lore: 'Point, root, punish.', glyph: 'staff',
@@ -1220,7 +1244,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'gleipnir', name: 'Gleipnir', tier: 'core', cost: 6500,
+    id: 'gleipnir', name: 'Gleipnir', tier: 't4', cost: 6500,
     components: ['rod-of-atos', 'maelstrom'], recipeCost: 800,
     passiveMods: { int: 18, str: 8, agi: 8, damage: 24, attackSpeed: 20 },
     attackMod: { procChance: 30, procDamage: 140 },
@@ -1235,7 +1259,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     elementOnHit: 'electro'
   },
   {
-    id: 'dagon', name: 'Dagon', tier: 'core', cost: 2300,
+    id: 'dagon', name: 'Dagon', tier: 't1', cost: 2300,
     components: ['null-talisman', 'staff-of-wizardry'], recipeCost: 795,
     passiveMods: { int: 16, str: 2, agi: 2, maxMana: 60 },
     lore: 'A wand for people who think subtle damage is a waste of time.', glyph: 'wand',
@@ -1257,7 +1281,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'ethereal-blade', name: 'Ethereal Blade', tier: 'core', cost: 5000,
+    id: 'ethereal-blade', name: 'Ethereal Blade', tier: 't3', cost: 5000,
     components: ['eaglesong', 'ghost-scepter'], recipeCost: 700,
     passiveMods: { agi: 30, str: 5, int: 5 },
     lore: 'Make them untouchable, then make magic matter.', glyph: 'blade',
@@ -1273,9 +1297,9 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     appearance: { weapon: { kind: 'glowing-blade', color: '#9fd8ff', emissive: '#1c4a6e' } }
   },
   {
-    id: 'wind-waker', name: 'Wind Waker', tier: 'core', cost: 6025,
+    id: 'wind-waker', name: 'Wind Waker', tier: 't4', cost: 6025,
     components: ['euls-scepter', 'force-staff'], recipeCost: 1100,
-    passiveMods: { int: 20, manaRegen: 4, moveSpeed: 40, hpRegen: 2.5 },
+    passiveMods: { int: 20, manaRegen: 5, moveSpeed: 40, hpRegen: 4 },
     lore: 'A cyclone with travel plans.', glyph: 'cyclone',
     appearance: { weapon: { kind: 'staff', color: '#c8ffff', emissive: '#245a5a' }, aura: { archetype: 'cyclone', color: '#c8ffff', color2: '#ffffff' } },
     active: {
@@ -1286,7 +1310,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'hand-of-midas', name: 'Hand of Midas', tier: 'core', cost: 2200,
+    id: 'hand-of-midas', name: 'Hand of Midas', tier: 't1', cost: 2200,
     components: ['gloves-of-haste'], recipeCost: 1750,
     passiveMods: { attackSpeed: 35 },
     lore: 'A gold sink that dreams of becoming a gold faucet.', glyph: 'hand',
@@ -1298,23 +1322,23 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'octarine-core', name: 'Octarine Core', tier: 'core', cost: 5200,
+    id: 'octarine-core', name: 'Octarine Core', tier: 't4', cost: 5200,
     components: ['mystic-staff', 'vitality-booster', 'point-booster'], recipeCost: 200,
-    passiveMods: { int: 25, maxHp: 425, maxMana: 175, spellAmpPct: 12, manaRegen: 3 },
+    passiveMods: { int: 25, maxHp: 425, maxMana: 175, spellAmpPct: 12, manaRegen: 4 },
     lore: 'A spellcaster heart that beats between cooldowns.', glyph: 'orb',
     appearance: { parts: ['mana-orb'], tint: '#b08cff', aura: { archetype: 'global-mark', color: '#b08cff', color2: '#ffffff' } }
   },
   {
-    id: 'aether-lens', name: 'Aether Lens', tier: 'core', cost: 2250,
+    id: 'aether-lens', name: 'Aether Lens', tier: 't1', cost: 2250,
     components: ['energy-booster', 'void-stone'], recipeCost: 650,
-    passiveMods: { maxMana: 250, manaRegen: 2.25, castRange: 225 },
+    passiveMods: { maxMana: 250, manaRegen: 3.5, castRange: 225 },
     lore: 'Stand farther away from your decisions.', glyph: 'lens',
     appearance: { parts: ['mana-orb'], tint: '#9fd8ff', aura: { archetype: 'global-mark', color: '#9fd8ff', color2: '#ffffff' } }
   },
   {
-    id: 'meteor-hammer', name: 'Meteor Hammer', tier: 'core', cost: 2850,
+    id: 'meteor-hammer', name: 'Meteor Hammer', tier: 't2', cost: 2850,
     components: ['staff-of-wizardry', 'ring-of-health', 'crown'], recipeCost: 700,
-    passiveMods: { int: 14, str: 4, agi: 4, hpRegen: 6.5 },
+    passiveMods: { int: 14, str: 4, agi: 4, hpRegen: 9 },
     lore: 'A channel, a warning, then a crater.', glyph: 'hammer',
     active: {
       id: 'meteor-active', name: 'Meteor Hammer', targeting: 'ground-aoe', castRange: 600, castPoint: 0, cooldown: [24], manaCost: [100],
@@ -1323,7 +1347,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     }
   },
   {
-    id: 'heavens-halberd', name: "Heaven's Halberd", tier: 'core', cost: 3650,
+    id: 'heavens-halberd', name: "Heaven's Halberd", tier: 't2', cost: 3650,
     components: ['sange', 'talisman-of-evasion'], recipeCost: 250,
     passiveMods: { str: 16, statusResistPct: 15, lifestealPct: 12, evasionPct: 20 },
     lore: 'A carry item for making another carry stop.', glyph: 'spear',
@@ -1334,13 +1358,13 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     },
     appearance: { weapon: { kind: 'long-pole', color: '#ffd66b' } }
   },
-  { id: 'aghanims-blessing', name: "Aghanim's Blessing", tier: 'core', cost: 5800, passiveMods: { str: 10, agi: 10, int: 10, maxHp: 175, maxMana: 175 }, lore: 'The scepter lesson, learned permanently.', glyph: 'staff', appearance: { parts: ['mana-orb'], tint: '#73d9ff', aura: { archetype: 'global-mark', color: '#73d9ff', color2: '#ffffff' } } },
-  { id: 'aghanims-shard', name: "Aghanim's Shard", tier: 'core', cost: 1400, passiveMods: { str: 3, agi: 3, int: 3, spellAmpPct: 4 }, lore: 'A small blue permission slip for future hero upgrades.', glyph: 'shard', appearance: { parts: ['mana-orb'], tint: '#73d9ff' } },
-  { id: 'moon-shard', name: 'Moon Shard', tier: 'core', cost: 4400, components: ['hyperstone', 'hyperstone'], recipeCost: 400, passiveMods: { attackSpeed: 140 }, lore: 'A piece of the moon that makes the hands frantic.', glyph: 'shard', attackVisual: [{ kind: 'tinted-impact', color: '#d8e8ff', color2: '#ffffff', scale: 0.8 }] },
+  { id: 'aghanims-blessing', name: "Aghanim's Blessing", tier: 'special', cost: 5800, passiveMods: { str: 10, agi: 10, int: 10, maxHp: 175, maxMana: 175 }, lore: 'The scepter lesson, learned permanently.', glyph: 'staff', appearance: { parts: ['mana-orb'], tint: '#73d9ff', aura: { archetype: 'global-mark', color: '#73d9ff', color2: '#ffffff' } } },
+  { id: 'aghanims-shard', name: "Aghanim's Shard", tier: 'special', cost: 1400, passiveMods: { str: 3, agi: 3, int: 3, spellAmpPct: 4 }, lore: 'A small blue permission slip for future hero upgrades.', glyph: 'shard', appearance: { parts: ['mana-orb'], tint: '#73d9ff' } },
+  { id: 'moon-shard', name: 'Moon Shard', tier: 't2', cost: 4400, components: ['hyperstone', 'hyperstone'], recipeCost: 400, passiveMods: { attackSpeed: 140 }, lore: 'A piece of the moon that makes the hands frantic.', glyph: 'shard', attackVisual: [{ kind: 'tinted-impact', color: '#d8e8ff', color2: '#ffffff', scale: 0.8 }] },
   {
-    id: 'bloodstone', name: 'Bloodstone', tier: 'core', cost: 4000,
+    id: 'bloodstone', name: 'Bloodstone', tier: 't2', cost: 4000,
     components: ['perseverance', 'point-booster'], recipeCost: 1150,
-    passiveMods: { maxHp: 175, maxMana: 175, hpRegen: 6.5, manaRegen: 2.25, spellAmpPct: 10 },
+    passiveMods: { maxHp: 175, maxMana: 175, hpRegen: 8, manaRegen: 3.5, spellAmpPct: 10 },
     lore: 'A caster battery that pays you back when the fight gets ugly.', glyph: 'gem',
     active: {
       id: 'bloodstone-active', name: 'Bloodpact', targeting: 'no-target', castPoint: 0, cooldown: [30],
@@ -1352,7 +1376,7 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
   {
     id: 'soul-ring', name: 'Soul Ring', tier: 'basic', cost: 805,
     components: ['ring-of-regen', 'sages-mask'], recipeCost: 455,
-    passiveMods: { hpRegen: 1.75, manaRegen: 1 },
+    passiveMods: { hpRegen: 3.5, manaRegen: 2 },
     lore: 'Borrow mana from your future bruises.', glyph: 'ring',
     active: {
       id: 'soul-ring-active', name: 'Sacrifice', targeting: 'no-target', castPoint: 0, cooldown: [25],
@@ -1440,16 +1464,6 @@ const SOURCE_OVERRIDES: Record<string, DropSource[]> = {
   cheese: ['raid']
 };
 
-const TIER_OVERRIDES: Partial<Record<string, ItemTier>> = {
-  'divine-rapier': 'special',
-  'aegis-of-the-immortal': 'special',
-  cheese: 'special',
-  'refresher-shard': 'special',
-  'aghanims-scepter': 'special',
-  'aghanims-blessing': 'special',
-  'aghanims-shard': 'special'
-};
-
 const SET_OVERRIDES: Partial<Record<string, string>> = {
   'shivas-guard': 'frostforged',
   'eye-of-skadi': 'frostforged',
@@ -1458,17 +1472,6 @@ const SET_OVERRIDES: Partial<Record<string, string>> = {
   bloodthorn: 'bloodbound',
   'heart-of-tarrasque': 'bloodbound'
 };
-
-function coreTierByCost(cost: number): ItemTier {
-  if (cost >= 5175) return 't4';
-  if (cost >= 4800) return 't3';
-  if (cost >= 2500) return 't2';
-  return 't1';
-}
-
-function normalizeItemTier(item: ItemDef): ItemTier {
-  return TIER_OVERRIDES[item.id] ?? (item.tier === 'core' ? coreTierByCost(item.cost) : item.tier);
-}
 
 function socketCapFor(item: ItemDef, tier: ItemTier): number | undefined {
   if (tier === 'consumable' || tier === 'special') return undefined;
@@ -1479,7 +1482,7 @@ function socketCapFor(item: ItemDef, tier: ItemTier): number | undefined {
 }
 
 function defaultRarity(item: ItemDef): ItemRarity {
-  const tier = normalizeItemTier(item);
+  const tier = item.tier;
   if (tier === 'consumable') return 'common';
   if (tier === 'component') {
     if (item.cost >= 2200) return 'mythical';
@@ -1495,14 +1498,12 @@ function defaultRarity(item: ItemDef): ItemRarity {
 }
 
 function normalizeLootMetadata(item: ItemDef): ItemDef {
-  const tier = normalizeItemTier(item);
   return {
     ...item,
-    tier,
     rarity: item.rarity ?? RARITY_OVERRIDES[item.id] ?? defaultRarity(item),
     exclusiveTo: item.exclusiveTo ?? SOURCE_OVERRIDES[item.id],
     set: item.set ?? SET_OVERRIDES[item.id],
-    socketCap: item.socketCap ?? socketCapFor(item, tier)
+    socketCap: item.socketCap ?? socketCapFor(item, item.tier)
   };
 }
 

@@ -49,6 +49,7 @@ const DEFAULT_BUDGETS = {
     terrain: 1 * GB,
     town: 1 * GB,
     hero: 2 * GB,
+    holdout: 128 * 1024 * 1024,
     weapon: 512 * 1024 * 1024,
     env: 1 * GB,
     audio: 512 * 1024 * 1024,
@@ -59,6 +60,7 @@ const DEFAULT_BUDGETS = {
     terrain: 64 * 1024 * 1024,
     town: 64 * 1024 * 1024,
     hero: 64 * 1024 * 1024,
+    holdout: 16 * 1024 * 1024,
     weapon: 16 * 1024 * 1024,
     env: 128 * 1024 * 1024,
     audio: 32 * 1024 * 1024,
@@ -81,6 +83,7 @@ function assetUrl(rel) {
 function assetGroup(rel) {
   if (rel.startsWith('creeps/')) return 'creep';
   if (rel.startsWith('heroes/')) return 'hero';
+  if (rel.startsWith('holdouts/')) return 'holdout';
   if (rel.startsWith('weapons/')) return 'weapon';
   if (rel.startsWith('env/')) return 'env';
   if (rel.startsWith('audio/')) return 'audio';

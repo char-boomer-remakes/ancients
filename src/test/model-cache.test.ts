@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, buildUnitRig, modelGeometryCacheSize, mountHeroModel, recolorToPalette } from '../engine/models';
-import { ENABLED_HERO_MODELS, ENABLED_HERO_BASES, HERO_BASE, heroAssetEntry, heroBaseId, heroBaseUrl, PHASE5_STARTER_ASSETS } from '../engine/assets';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, buildUnitRig, heroProportions, modelGeometryCacheSize, mountHeroModel, recolorToPalette } from '../engine/models';
+import { ENABLED_HERO_MODELS, ENABLED_HERO_BASES, ENABLED_HOLDOUT_SIGNATURES, HERO_BASE, heroAssetEntry, heroBaseId, heroBaseUrl, holdoutSignatureUrl, PHASE5_STARTER_ASSETS } from '../engine/assets';
 import { ALL_HEROES } from '../data/index';
+
+/** A stand-in mounted base: a 2×6×2 box the loader would normally fit + seat. */
+function mountStandIn(heroId: string): { rig: ReturnType<typeof buildUnitRig>; model: THREE.Mesh } {
+  const hero = ALL_HEROES.find((h) => h.id === heroId)!;
+  const rig = buildUnitRig(hero.silhouette, hero.palette);
+  const model = new THREE.Mesh(new THREE.BoxGeometry(2, 6, 2), new THREE.MeshStandardMaterial());
+  mountHeroModel(rig, model);
+  return { rig, model };
+}
 
 describe('procedural model cache', () => {
   it('shares canonical geometry across repeated rigs', () => {
@@ -134,6 +145,28 @@ describe('pluggable hero rig (Phase 5)', () => {
     expect(rig.weapon).toBe(heroWeapon);
     expect(heroWeapon.parent).toBe(hand);
   });
+
+  it('attaches holdout signature GLBs additively without hiding the procedural rig (A6)', () => {
+    const rig = buildUnitRig({ build: 'blob', scale: 1.25 }, ['#88aaff', '#446688', '#ffffff']);
+    const proceduralCount = rig.body.children.length;
+    const signatureA = new THREE.Group();
+    signatureA.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshStandardMaterial()));
+
+    attachHoldoutSignatureModel(rig, signatureA);
+
+    expect(rig.body.children.slice(0, proceduralCount).every((child) => child.visible)).toBe(true);
+    expect(signatureA.parent).toBe(rig.body);
+    expect(signatureA.userData.holdoutSignatureModel).toBe(true);
+    expect(signatureA.scale.x).toBeCloseTo(1.25, 4);
+
+    const signatureB = new THREE.Group();
+    signatureB.add(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshStandardMaterial()));
+    attachHoldoutSignatureModel(rig, signatureB);
+
+    expect(signatureA.parent).toBeNull();
+    expect(signatureB.parent).toBe(rig.body);
+    expect(rig.body.children.filter((c) => c.userData.holdoutSignatureModel)).toHaveLength(1);
+  });
 });
 
 describe('shared hero bases (WS-A0)', () => {
@@ -155,6 +188,39 @@ describe('shared hero bases (WS-A0)', () => {
     expect(heroBaseUrl(heroBaseId('io'))).toBeNull(); // holdouts stay procedural.
   });
 
+  it('resolves additive signature URLs for exactly the procedural holdouts (A6)', () => {
+    expect(ENABLED_HOLDOUT_SIGNATURES.size).toBe(11);
+    expect(holdoutSignatureUrl('io')).toBe('/assets/holdouts/io.glb');
+    expect(holdoutSignatureUrl('phoenix')).toBe('/assets/holdouts/phoenix.glb');
+    expect(holdoutSignatureUrl('juggernaut')).toBeNull(); // humanoids have full GLBs
+    expect(holdoutSignatureUrl('broodmother')).toBeNull(); // creature-base heroes use shared creatures
+    expect(holdoutSignatureUrl(undefined)).toBeNull();
+    for (const hero of ALL_HEROES) {
+      if (heroBaseId(hero.id) === 'procedural') {
+        expect(holdoutSignatureUrl(hero.id), `${hero.id} signature`).toBe(`/assets/holdouts/${hero.id}.glb`);
+      }
+    }
+  });
+
+  it('ships every generated holdout signature file and tracks them in the manifest', () => {
+    const manifest = JSON.parse(readFileSync(path.join(process.cwd(), 'public', 'assets', 'manifest.json'), 'utf8')) as {
+      groups?: Record<string, { count: number; bytes: number }>;
+      files?: { path: string; group: string; type: string }[];
+    };
+    expect(manifest.groups?.holdout?.count).toBe(ENABLED_HOLDOUT_SIGNATURES.size);
+    for (const heroId of ENABLED_HOLDOUT_SIGNATURES) {
+      const url = holdoutSignatureUrl(heroId)!;
+      const rel = url.replace('/assets/', '');
+      const file = path.join(process.cwd(), 'public', 'assets', rel);
+      expect(existsSync(file), `${heroId} signature file`).toBe(true);
+      expect(statSync(file).size, `${heroId} signature size`).toBeGreaterThan(0);
+      expect(
+        manifest.files?.some((entry) => entry.path === rel && entry.group === 'holdout' && entry.type === 'model'),
+        `${heroId} manifest entry`
+      ).toBe(true);
+    }
+  });
+
   it('recolors a cloned base to a palette without sharing tint across clones', () => {
     const make = (): THREE.Mesh => {
       const mesh = new THREE.Mesh(
@@ -174,5 +240,81 @@ describe('shared hero bases (WS-A0)', () => {
     expect(colorA).toBe('00ff00');
     expect(colorB).toBe('00aaff');
     expect(colorA).not.toBe(colorB); // materials cloned, not shared
+  });
+});
+
+describe('within-cohort silhouette variation (WS-A / marquee)', () => {
+  it('gives same-base marquee heroes distinct proportions instead of one body', () => {
+    // Juggernaut and Sven are both Knight-base; they must not share a silhouette.
+    const jug = heroProportions('juggernaut');
+    const sven = heroProportions('sven');
+    expect(sven.broad).toBeGreaterThan(jug.broad);
+    expect(sven.height).toBeGreaterThan(jug.height);
+
+    // Body classes read by cohort: a barbarian brute is broader than a slim mage,
+    // and a dwarf rogue is markedly shorter than a tall caster.
+    expect(heroProportions('pudge').broad).toBeGreaterThan(heroProportions('crystal-maiden').broad);
+    expect(heroProportions('sniper').height).toBeLessThan(heroProportions('invoker').height);
+
+    // Heroes with no explicit override still fall back to a finite cohort baseline.
+    for (const hero of ALL_HEROES) {
+      const p = heroProportions(hero.id);
+      expect(Number.isFinite(p.broad) && p.broad > 0, `${hero.id} broad`).toBe(true);
+      expect(Number.isFinite(p.height) && p.height > 0, `${hero.id} height`).toBe(true);
+    }
+  });
+
+  it('stretches the mounted model to the hero proportions and re-seats the feet', () => {
+    const { rig, model } = mountStandIn('pudge'); // broad 1.4, height 0.98
+    const k = model.scale.x; // uniform fit factor from mountHeroModel
+    const pudge = ALL_HEROES.find((h) => h.id === 'pudge')!;
+    applyAuthoredSilhouette(rig, 'pudge', pudge.palette);
+
+    const props = heroProportions('pudge');
+    expect(model.scale.x).toBeCloseTo(k * props.broad, 4);
+    expect(model.scale.z).toBeCloseTo(k * props.broad, 4);
+    expect(model.scale.y).toBeCloseTo(k * props.height, 4);
+    // Feet stay planted on the ground after the non-uniform stretch.
+    const boxed = new THREE.Box3().setFromObject(model);
+    expect(boxed.min.y).toBeCloseTo(0, 2);
+  });
+
+  it('layers innate identity gear over the authored body for marquee heroes', () => {
+    // Wraith King reads as a crowned, caped skeleton king — both should appear as a
+    // visible overlay group sitting over (not hidden behind) the mounted model.
+    const { rig } = mountStandIn('wraith-king');
+    applyAuthoredSilhouette(rig, 'wraith-king', ['#2f7d4f', '#13321f', '#9be3a0']);
+    const overlay = rig.body.children.find((c) => c.userData.authoredOverlay);
+    expect(overlay, 'wraith-king overlay').toBeDefined();
+    expect(overlay!.children.length).toBeGreaterThan(0);
+    expect(overlay!.visible).toBe(true);
+  });
+
+  it('is idempotent — a re-applied silhouette never stacks duplicate overlays', () => {
+    const { rig } = mountStandIn('doom');
+    const pal: [string, string, string] = ['#7a2222', '#2a0c0c', '#ffb14a'];
+    applyAuthoredSilhouette(rig, 'doom', pal);
+    const overlays1 = rig.body.children.filter((c) => c.userData.authoredOverlay);
+    const count1 = overlays1[0]?.children.length ?? 0;
+    applyAuthoredSilhouette(rig, 'doom', pal);
+    const overlays2 = rig.body.children.filter((c) => c.userData.authoredOverlay);
+    expect(overlays2.length).toBe(1); // single overlay group, not two
+    expect(overlays2[0].children.length).toBe(count1); // same parts, not doubled
+  });
+
+  it('does not throw and adds no model scale when there is no mounted model', () => {
+    const hero = ALL_HEROES.find((h) => h.id === 'invoker')!;
+    const rig = buildUnitRig(hero.silhouette, hero.palette);
+    expect(() => applyAuthoredSilhouette(rig, 'invoker', hero.palette)).not.toThrow();
+    // Overlay still derived from features even without an authored model.
+    expect(rig.body.children.some((c) => c.userData.authoredOverlay)).toBe(true);
+  });
+
+  it('never throws across the full authored humanoid cohort (render smoke)', () => {
+    for (const heroId of ENABLED_HERO_MODELS) {
+      const { rig } = mountStandIn(heroId);
+      const hero = ALL_HEROES.find((h) => h.id === heroId)!;
+      expect(() => applyAuthoredSilhouette(rig, heroId, hero.palette), heroId).not.toThrow();
+    }
   });
 });

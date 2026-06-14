@@ -1,14 +1,15 @@
 import { TUNING } from '../data/tuning';
 import { DEFAULT_CREEP_DROP_TABLES, qualityOddsByTier } from '../data/creep-drops';
 import { GRADE_UP_COSTS, IMPRINT_COSTS, MASTERWORK_COSTS, REFORGE_COSTS, REROLL_AFFIX_COSTS, addSocket, disenchant, gradeUp, imprintAffix, masterwork, reforge, refreshResolvedMods, rerollAffix, socketAddCost } from '../data/forge';
-import { fuseGems, gemDef, isGemId } from '../data/gems';
+import { rollAffixesFor } from '../data/affixes';
+import { fuseGems, gemDef, isGemId, socketsForDrop } from '../data/gems';
 import { ITEM_GRADES, levelReq, percentileForGrade, rollGrade, statMultiplier, type GradeFloorSource } from '../data/grade';
 import { QUALITY_GRADES, nextQuality, rarityColor } from '../data/quality';
 import { applyLootFilter, DEFAULT_LOOT_FILTER, type LootFilterRule } from './loot-filter';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { Unit } from '../core/unit';
-import { applyElementAura } from '../core/combat';
+import { applyElementAura, healUnit } from '../core/combat';
 import { autoPicksForLevel, buildHero } from '../core/hero-setup';
 import { spawnHeroEchoUnit } from '../core/echo-unit';
 import { TrialRunner, trialGateOpen, type TrialGateCtx, type TrialOutcome } from '../core/trials';
@@ -90,6 +91,8 @@ const RARITY_RANK: Record<ItemRarity, number> = {
   arcana: 6
 };
 const MAIN_ITEM_TIERS = new Set(['t1', 't2', 't3', 't4']);
+const MERCHANT_GRADES = ['worn', 'standard', 'sharp', 'refined'] as const;
+type MerchantGrade = typeof MERCHANT_GRADES[number];
 
 function isMainItemTier(tier: string): boolean {
   return MAIN_ITEM_TIERS.has(tier);
@@ -446,6 +449,7 @@ export class Game {
   private echoHeroes = new Map<number, string>();
   /** binding-duel sim uid -> heroId */
   private bindingHeroes = new Map<number, string>();
+  private heroDropVictims = new Set<number>();
   badges = new Set<string>();
   questProgress: Record<string, QuestProgress> = {};
   defeatedGyms = new Set<string>();
@@ -579,7 +583,7 @@ export class Game {
     this.reputation = save.reputation ?? 0;
     this.codexUnlocks = new Set(save.codexUnlocks ?? []);
     this.journalSeen = new Set(save.journalSeen ?? []);
-    this.stamina = Math.max(0, Math.min(TUNING.traversal.staminaMax, save.stamina ?? TUNING.traversal.staminaMax));
+    this.stamina = Math.max(0, Math.min(TUNING.traversal.staminaMax + 1000, save.stamina ?? TUNING.traversal.staminaMax));
     this.discovered = new Set(save.discovered ?? []);
     this.openedChests = new Set(save.openedChests ?? []);
     this.collectedShards = new Set(save.collectedShards ?? []);
@@ -667,6 +671,11 @@ export class Game {
 
   activeUnit(): Unit | null {
     return this.party[this.activeIdx]?.unit ?? null;
+  }
+
+  staminaMax(): number {
+    const bonus = Math.max(0, this.activeUnit()?.stats.staminaBonus ?? 0);
+    return TUNING.traversal.staminaMax + bonus;
   }
 
   /** Sim currently receiving player input: overworld by default, live sub-sim during live fights. */
@@ -957,6 +966,7 @@ export class Game {
 
   private cutsceneSeenKey(id: string, ctx: CutsceneContext): string {
     const scoped = (suffix: unknown) => `cinematic:${id}:${String(suffix)}`;
+    if (id === 'bind-stinger' && ctx.hero) return scoped(ctx.hero);
     if (id === 'echo-milestone-stinger' && ctx.hero) return scoped(ctx.hero);
     if (id === 'trial-dialogue-stinger' && ctx.trial) return scoped(ctx.trial);
     if ((id === 'boss-phase-stinger' || id === 'boss-clear-stinger') && ctx.boss) return scoped(ctx.boss);
@@ -978,12 +988,13 @@ export class Game {
     this.journalSeen.add(seenKey);
     // §4.3: a bark, or any tier fully suppressed by settings, routes its line as a toast so
     // the information still reaches the player; only the staging is withheld.
-    // §3.4 / §4.4: repeat views collapse to bark/toast; full-length replay lives in the gallery.
-    if (seen || def.tier === 'bark' || this.cinematic.routesToToast(def)) {
+    if (def.tier === 'bark' || this.cinematic.routesToToast(def)) {
       const line = this.cutsceneToastLine(def, ctx);
       if (line) this.msg(line, 'bark');
       return true;
     }
+    // §3.4: repeat views still play, but the director starts them at the repeat speed
+    // and Esc skips instantly. Full 1x replay remains available from the gallery.
     this.cinematic.play(def, ctx, seen);
     return true;
   }
@@ -1161,26 +1172,26 @@ export class Game {
   }
 
   private activeFestival: string | null = null;
-  private seasonalModeTarget(event: SeasonalEventDef): { kind: 'raid' | 'dungeon'; id: string; mode: SeasonalEventDef['mode']; rules: string; endless?: boolean; maxSec?: number; modifiers?: string[] } {
+  private seasonalModeTarget(event: SeasonalEventDef): { kind: 'raid' | 'dungeon'; id: string; mode: SeasonalEventDef['mode']; rules: string; mechanics: string[]; endless?: boolean; maxSec?: number; modifiers?: string[] } {
     switch (event.mode) {
       case 'roshan-candy':
-        return { kind: 'raid', id: 'roshan-pit', mode: event.mode, maxSec: 150, rules: 'Candy tribute: a timed Roshan rite with hungry-pit pacing.' };
+        return { kind: 'raid', id: 'roshan-pit', mode: event.mode, maxSec: 150, mechanics: ['candy tribute timer', 'Roshan pressure', 'Roshling-style add waves'], rules: 'Candy tribute: feed-or-flee pressure around Roshan, with the Pit treated as a hungry clock.' };
       case 'wave-defense':
         return event.id === 'dark-moon-hunt'
-          ? { kind: 'raid', id: 'forsaken-queen', mode: event.mode, maxSec: 150, rules: 'Night defense: survive the moonlit pressure window.' }
-          : { kind: 'dungeon', id: 'frost-hollow', mode: event.mode, maxSec: 210, modifiers: ['frozen-oath', 'packed-halls'], rules: 'Wave defense: packed halls, frozen oath, and a hard altar timer.' };
+          ? { kind: 'raid', id: 'forsaken-queen', mode: event.mode, maxSec: 150, mechanics: ['moonlit pressure timer', 'banshee lane hold'], rules: 'Night defense: survive the moonlit pressure window under a banshee-cold raid clock.' }
+          : { kind: 'dungeon', id: 'frost-hollow', mode: event.mode, maxSec: 210, modifiers: ['frozen-oath', 'packed-halls'], mechanics: ['altar timer', 'packed waves', 'forced frozen elites'], rules: 'Wraith-Night altar defense: packed halls, frozen oath, and a hard survival timer stand in for the thirteen-wave siege.' };
       case 'endless-descent':
-        return { kind: 'dungeon', id: 'severed-dark', mode: event.mode, endless: true, modifiers: ['deep-map'], rules: 'Continuum descent: endless map rules with deeper room routing.' };
+        return { kind: 'dungeon', id: 'severed-dark', mode: event.mode, endless: true, modifiers: ['deep-map'], mechanics: ['endless room chain', 'deeper routing', 'choice exits'], rules: 'Continuum descent: endless rooms and choice exits make the next room feel beside yesterday.' };
       case 'damage-race':
-        return { kind: 'raid', id: 'last-eldwurm', mode: event.mode, maxSec: 90, rules: 'Damage race: beat the boss before the cycle closes.' };
+        return { kind: 'raid', id: 'last-eldwurm', mode: event.mode, maxSec: 90, mechanics: ['short enrage clock', 'single boss burn'], rules: 'Damage race: beat the boss before the cycle closes.' };
       case 'linear-crawl':
-        return { kind: 'raid', id: 'renegade-marshal', mode: event.mode, rules: 'Linear crawl: one staged campaign fight, no repeat reward until clear.' };
+        return { kind: 'raid', id: 'renegade-marshal', mode: event.mode, mechanics: ['campaign route', 'single staged boss'], rules: 'Linear crawl: one staged campaign fight, no repeat reward until clear.' };
       case 'hazard-survival':
-        return { kind: 'dungeon', id: 'ember-caldera', mode: event.mode, maxSec: event.id === 'nemestice-fall' ? 210 : 180, modifiers: event.id === 'nemestice-fall' ? ['single-life', 'packed-halls'] : ['single-life'], rules: 'Hazard survival: single-life pressure with a collapsing clock.' };
+        return { kind: 'dungeon', id: 'ember-caldera', mode: event.mode, maxSec: event.id === 'nemestice-fall' ? 210 : 180, modifiers: event.id === 'nemestice-fall' ? ['single-life', 'packed-halls'] : ['single-life'], mechanics: event.id === 'nemestice-fall' ? ['falling-shard clock', 'single life', 'packed hazards'] : ['collapsing clock', 'single life'], rules: 'Hazard survival: single-life pressure with a collapsing clock.' };
       case 'act-trials':
-        return { kind: 'dungeon', id: 'worldstone-vault', mode: event.mode, modifiers: ['champion-sigil', 'deep-map'], rules: 'Act trials: deeper map and champion sigils frame the festival as a mini-arc.' };
+        return { kind: 'dungeon', id: 'worldstone-vault', mode: event.mode, modifiers: ['champion-sigil', 'deep-map'], mechanics: ['act-structured rooms', 'champion sigils', 'deeper map'], rules: 'Act trials: deeper map and champion sigils frame the festival as a mini-arc.' };
     }
-    return { kind: 'raid', id: 'roshan-pit', mode: event.mode, rules: 'Festival wrapper.' };
+    return { kind: 'raid', id: 'roshan-pit', mode: event.mode, mechanics: ['fallback rite'], rules: 'Festival rite.' };
   }
 
   /** True if this festival's underlying mode can launch right now (full party, in region, not busy). */
@@ -1206,7 +1217,7 @@ export class Game {
         const at = this.raidProgress[map.id]?.roshanRespawnAt ?? 0;
         if (at > this.playtime) return { launchable: false, target, detail: `Roshan returns in ${Math.ceil(at - this.playtime)}s.` };
       }
-      return { launchable: true, target, detail: `Ready. ${map.rules}` };
+      return { launchable: true, target, detail: `Ready. ${map.rules} Mechanics: ${map.mechanics.join(', ')}.` };
     }
     const dungeon = REG.dungeon(map.id);
     if (dungeon.regionId !== this.region.id) {
@@ -1215,7 +1226,7 @@ export class Game {
     const mods = map.modifiers?.length
       ? ` · ${map.modifiers.map((id) => dungeon.modifiers?.find((m) => m.id === id)?.name ?? id).join(', ')}`
       : '';
-    return { launchable: true, target, detail: `Ready${mods}. ${map.rules}` };
+    return { launchable: true, target, detail: `Ready${mods}. ${map.rules} Mechanics: ${map.mechanics.join(', ')}.` };
   }
 
   private grantFestivalReward(event: SeasonalEventDef): void {
@@ -1326,6 +1337,22 @@ export class Game {
       if (r && (!best || RARITY_RANK[r] > RARITY_RANK[best])) best = r;
     }
     return best ? rarityColor(best) : undefined;
+  }
+
+  private lootMoment(items: ItemSave[]): void {
+    const loud = items.some((it) => {
+      const gradeRank = ITEM_GRADES.indexOf(it.grade ?? 'standard');
+      const rarity = this.itemRarity(it.id);
+      return gradeRank >= ITEM_GRADES.indexOf('refined') ||
+        RARITY_RANK[rarity] >= RARITY_RANK.immortal ||
+        (it.affixes ?? []).length > 0 && (it.affixes ?? []).some((affix) =>
+          affix.affixId === 'stormcallers' ||
+          affix.affixId === 'glassbreaker' ||
+          affix.affixId === 'vampiric-surge' ||
+          affix.affixId === 'ancient-mind'
+        );
+    });
+    if (loud) this.playPresentationStinger('loot');
   }
 
   /** Warm the renderer behind a loading screen: build the first unit views and
@@ -1482,9 +1509,21 @@ export class Game {
     }
     this.openedChests.add(chest.id);
     if (chest.loot.gold) this.awardGold(chest.loot.gold, `chest:${chest.tier}`, chest.pos, true);
-    for (const itemId of chest.loot.items ?? []) {
-      this.inventoryStash.push({ id: itemId });
-      this.msg(`Chest found: ${REG.item(itemId).name}`, 'good');
+    const chestItems = (chest.loot.items ?? []).map((itemId, idx) => {
+      const source: GradeFloorSource = chest.tier === 'luxurious' ? 'boss' : 'normal';
+      return instantiateDroppedItem(
+        itemId,
+        creepCombatTier(this.region.id),
+        new Rng(stableContentSeed(`chest:${chest.id}:${itemId}`, idx)),
+        undefined,
+        source,
+        this.regionalGradeFloorBump()
+      );
+    });
+    const drops = chestItems.length > 0 ? this.addDroppedItems(chestItems) : [];
+    if (drops.length > 0) {
+      const names = drops.map((it) => REG.item(it.id).name).join(', ');
+      this.msg(`Cache found: ${names} (→ Armory)`, 'good', this.dropAccent(drops));
     }
     for (let i = 0; i < (chest.loot.shardCount ?? 0); i++) this.collectedShards.add(`${chest.id}:shard:${i}`);
     this.msg(`${chest.tier[0].toUpperCase()}${chest.tier.slice(1)} chest opened`, 'good');
@@ -1700,12 +1739,12 @@ export class Game {
     return gym ? this.badges.has(gym.badgeId) : this.badges.size > 0;
   }
 
-  /** Difficulty tiers currently selectable for a boss (§3.6). */
-  bossUnlockedTiers(bossId: string): DifficultyTier[] {
   private regionalGradeFloorBump(regionId = this.region.id): number {
     return this.badgeClearedFor(regionId) ? 1 : 0;
   }
 
+  /** Difficulty tiers currently selectable for a boss (§3.6). */
+  bossUnlockedTiers(bossId: string): DifficultyTier[] {
     const boss = REG.boss(bossId);
     const badge = this.badgeClearedFor(boss.region);
     const prog = this.difficulty[bossId];
@@ -2398,6 +2437,7 @@ export class Game {
       'void-prelate': 'Director note: withheld blade, dark-between-stars grade, and late reveal make the assassin readable before the name lands.',
       'queen-of-blades': 'Director note: swarm geometry and fallen-star purple turn the crater into a closing web.',
       'lord-of-terror': 'Director note: the hell-rift rises upward, one red accent in a black frame, so the room feels invaded from below.',
+      'sundered-betrayer': 'Director note: fel-eclipse green, horned silhouette, and mirror-side framing sell the betrayed metamorphosis without borrowing a line.',
       'prime-evil': 'Director note: worldstone ember and crown posture frame destruction as a claimant for the stone at the world heart.',
       'lord-of-hatred': 'Director note: the hall going lightless is the signature; the name is original, the beat is recognizable.',
       'forsaken-queen': 'Director note: banshee frost, a suspended arrow, and mercy lost to death carry the silhouette.'
@@ -2709,7 +2749,24 @@ export class Game {
       this.msg(`Loot filter disenchanted ${filtered.disenchanted.length} item${filtered.disenchanted.length === 1 ? '' : 's'} (+${essence} essence)`, 'info');
     }
     if (opts.awardMarks !== false) this.awardLootMarksForItems(drops);
+    this.lootMoment(drops);
     return drops;
+  }
+
+  private rollHeroLoadoutDrop(victim: Unit): void {
+    if (this.heroDropVictims.has(victim.uid)) return;
+    const equipped = victim.items
+      .map((it) => itemSaveOf(it, this.sim.time))
+      .filter((it): it is ItemSave => !!it && isMainItemTier(REG.item(it.id).tier));
+    if (equipped.length === 0) return;
+    this.heroDropVictims.add(victim.uid);
+    const rng = new Rng(stableContentSeed(`hero-loadout-drop:${victim.uid}`, Math.round(this.playtime)));
+    const picked = equipped[Math.floor(rng.next() * equipped.length)];
+    const gradeIdx = ITEM_GRADES.indexOf(picked.grade ?? 'standard');
+    const grade = ITEM_GRADES[Math.max(0, gradeIdx - 1)];
+    const item = refreshResolvedMods({ ...picked, grade, bound: true }, REG.item(picked.id));
+    const drops = this.addDroppedItems([item]);
+    if (drops.length > 0) this.msg(`Hero drop: ${REG.item(item.id).name} (${grade}, → Armory)`, 'good', this.dropAccent(drops));
   }
 
   /** The component pool an owned-hero echo can drop, by the hero's attribute. Single source of truth for the live table and the Atlas inversion. */
@@ -3077,6 +3134,22 @@ export class Game {
     return undefined;
   }
 
+  private roamingMerchantStock(): ItemDef[] {
+    const seeded = [...REG.items.values()]
+      .filter((item) => isMainItemTier(item.tier))
+      .filter((item) => itemAllowedFromSource(item.id, 'shop'))
+      .filter((item) => !GATED_TOP_TIER.has(item.id))
+      .map((item) => ({
+        item,
+        key: stableContentSeed(`roaming-merchant:${this.region.id}:${item.id}`, Math.floor(this.playtime / 600))
+      }));
+    return seeded.sort((a, b) => a.key - b.key).slice(0, 6).map((entry) => entry.item);
+  }
+
+  private merchantPrice(item: ItemDef, grade: MerchantGrade): number {
+    return Math.round(item.cost * TUNING.merchantGradeMultiplier[grade]);
+  }
+
   /** Town Black Market view-model: live wheel costs and the reserved relic ceiling. */
   blackMarketView(): {
     inTown: boolean;
@@ -3087,6 +3160,13 @@ export class Game {
     recipeRarities: ItemRarity[];
     relicCost: number;
     relicCeiling: ItemRarity;
+    roamingMerchant: {
+      id: string;
+      name: string;
+      tier: Extract<ItemTier, 't1' | 't2' | 't3' | 't4'>;
+      rarity: ItemRarity;
+      grades: { grade: MerchantGrade; price: number; canBuy: boolean }[];
+    }[];
     gambleVendor: { tier: Extract<ItemTier, 't1' | 't2' | 't3' | 't4'>; price: number; canRoll: boolean }[];
   } {
     const bands: LootBand[] = ['early', 'mid', 'late'];
@@ -3105,6 +3185,16 @@ export class Game {
       recipeRarities: ['uncommon', 'rare', 'mythical'],
       relicCost: this.blackMarketCost('relic'),
       relicCeiling: TUNING.blackMarket.relicRarityCeiling,
+      roamingMerchant: this.roamingMerchantStock().map((item) => ({
+        id: item.id,
+        name: item.name,
+        tier: item.tier as Extract<ItemTier, 't1' | 't2' | 't3' | 't4'>,
+        rarity: this.itemRarity(item.id),
+        grades: MERCHANT_GRADES.map((grade) => {
+          const price = this.merchantPrice(item, grade);
+          return { grade, price, canBuy: this.inTown() && this.gold >= price };
+        })
+      })),
       gambleVendor: gambleTiers.map((tier) => ({
         tier,
         price: TUNING.gambleVendor.tierPrice[tier],
@@ -3163,6 +3253,42 @@ export class Game {
       this.regionalGradeFloorBump()
     );
     if (opts.bound) item.bound = true;
+    return item;
+  }
+
+  private instantiateMerchantItem(id: string, grade: MerchantGrade, salt: string): ItemSave {
+    const def = REG.item(id);
+    const difficulty = creepCombatTier(this.region.id);
+    const rng = new Rng(stableContentSeed(`merchant-copy:${this.region.id}:${salt}:${id}:${grade}`, Math.round(this.playtime)));
+    const gradeRoll = rng.next();
+    const affixes = rollAffixesFor(def, grade, difficulty, rng);
+    const sockets = socketsForDrop(grade, def.socketCap ?? 0, rng.next());
+    return refreshResolvedMods({ id, grade, gradeRoll, affixes, sockets, bound: true }, def);
+  }
+
+  roamingMerchantBuy(itemId: string, grade: MerchantGrade): ItemSave | null {
+    if (!this.inTown()) {
+      this.msg('The roaming merchant trades from town', 'bad');
+      return null;
+    }
+    if (!MERCHANT_GRADES.includes(grade)) {
+      this.msg('The merchant only sells Worn through Refined grades', 'bad');
+      return null;
+    }
+    const def = this.roamingMerchantStock().find((item) => item.id === itemId);
+    if (!def) {
+      this.msg('That merchant offer is gone', 'bad');
+      return null;
+    }
+    const cost = this.merchantPrice(def, grade);
+    if (this.gold < cost) {
+      this.msg(`${def.name} (${grade}) costs ${cost}g`, 'bad');
+      return null;
+    }
+    this.gold -= cost;
+    const item = this.instantiateMerchantItem(def.id, grade, `buy:${this.inventoryStash.length}:${this.goldSinks.gambleRolls}`);
+    this.addDroppedItems([item], { awardMarks: false });
+    this.msg(`Roaming merchant: ${def.name} (${grade}, bound, → Armory)`, 'good', this.dropAccent([item]));
     return item;
   }
 
@@ -4158,7 +4284,24 @@ export class Game {
     rec.unit = u;
     rec.respawnAt = 0;
     this.activeIdx = idx;
-    this.swapReadyAt = this.sim.time + (this.settings.resonance ? TUNING.resonanceSwapCooldownSec : TUNING.swapCooldownSec);
+    const baseSwapCd = this.settings.resonance ? TUNING.resonanceSwapCooldownSec : TUNING.swapCooldownSec;
+    const swapCdReduction = Math.min(0.8, Math.max(0, u.stats.swapCdReductionPct) / 100);
+    this.swapReadyAt = this.sim.time + baseSwapCd * (1 - swapCdReduction);
+    const tagHealPct = Math.max(0, u.stats.swapInHealPct);
+    if (tagHealPct > 0) healUnit(this.sim, u, u.stats.maxHp * (tagHealPct / 100), u);
+    const tagBurstPct = Math.max(0, u.stats.swapInDamagePct);
+    if (tagBurstPct > 0) {
+      u.addStatus({
+        status: 'buff',
+        tag: 'swap-in-burst',
+        sourceUid: u.uid,
+        sourceTeam: u.team,
+        isDebuff: false,
+        until: this.sim.time + 3,
+        mods: { damagePct: tagBurstPct, spellAmpPct: tagBurstPct }
+      }, true);
+      this.sim.events.emit({ t: 'status-apply', uid: u.uid, status: 'buff', duration: 3 });
+    }
     this.sim.playerActiveUid = u.uid;
     this.scene.selectedUid = u.uid;
     this.retargetEntourage();
@@ -5039,7 +5182,7 @@ export class Game {
     if (typeof v.reputation !== 'number') return false;
     if (!Array.isArray(v.codexUnlocks) || !v.codexUnlocks.every((id) => typeof id === 'string')) return false;
     if (!Array.isArray(v.journalSeen) || !v.journalSeen.every((id) => typeof id === 'string')) return false;
-    if (typeof v.stamina !== 'number' || v.stamina < 0 || v.stamina > TUNING.traversal.staminaMax) return false;
+    if (typeof v.stamina !== 'number' || v.stamina < 0 || v.stamina > TUNING.traversal.staminaMax + 1000) return false;
     if (!Array.isArray(v.discovered) || !v.discovered.every((id) => typeof id === 'string')) return false;
     if (!Array.isArray(v.openedChests) || !v.openedChests.every((id) => typeof id === 'string')) return false;
     if (!Array.isArray(v.collectedShards) || !v.collectedShards.every((id) => typeof id === 'string')) return false;
@@ -5197,6 +5340,7 @@ export class Game {
       if (this.eliteCreepUids.delete(ev.victimUid)) this.rollEliteCreepDrop(victim.tier, ev.victimUid);
       this.rollNeutralFor(victim.tier, ev.victimUid);
     }
+    if (victim && victim.kind === 'hero' && victim.team !== 0) this.rollHeroLoadoutDrop(victim);
 
     // Inscribed copies bank the holder's kills into a capped, growing stack (LOOT L5).
     this.creditInscribedKills(killer);
@@ -5324,6 +5468,8 @@ export class Game {
       return;
     }
     if (this.sprintModUid !== -1 && this.sprintModUid !== u.uid) this.sprintModUid = -1;
+    const staminaMax = this.staminaMax();
+    if (this.stamina > staminaMax) this.stamina = staminaMax;
     const moving = u.order.kind === 'move' || u.order.kind === 'attack-move' || u.order.kind === 'attack-unit';
     const sprinting = this.sprintHeld && moving && this.stamina > 0 && !u.summary.rooted && !u.summary.stunned && !u.summary.cycloned && !u.summary.sleeping && !u.summary.frozen;
     this.setSprintMod(u, sprinting);
@@ -5335,7 +5481,7 @@ export class Game {
     }
     this.setSprintMod(u, false);
     if (this.sim.time >= this.staminaRegenReadyAt) {
-      this.stamina = Math.min(TUNING.traversal.staminaMax, this.stamina + TUNING.traversal.staminaRegenPerSec * dt);
+      this.stamina = Math.min(staminaMax, this.stamina + TUNING.traversal.staminaRegenPerSec * dt);
     }
   }
 

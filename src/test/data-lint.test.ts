@@ -42,9 +42,10 @@ const STATUS_IDS = [
 
 const ANIM_GESTURES: AnimGesture[] = ['melee-swing', 'ranged-shot', 'staff-cast', 'ground-slam', 'dash', 'channel-loop', 'summon-gesture', 'item-use', 'global-cast', 'toggle-stance'];
 const SOUND_ARCHETYPES: SoundArchetype[] = ['blade', 'bow', 'impact', 'frost', 'fire', 'storm', 'void', 'heal', 'summon', 'item', 'roar', 'lightning'];
-const STINGER_IDS = ['capture', 'merge', 'levelup', 'badge', 'raid-clear'];
+const STINGER_IDS = ['capture', 'merge', 'levelup', 'badge', 'raid-clear', 'loot'];
 const CUTSCENE_SHOT_ANGLES = ['wide', 'close', 'low', 'high', 'bird-eye', 'over-shoulder', 'through-objects', 'reflection', 'title-card'];
 const CUTSCENE_SHOT_MOVES = ['hold', 'push-in', 'pull-back', 'crane', 'snap', 'rack-focus', 'orbit'];
+const CUTSCENE_TEMPLATE_KEYS = new Set(['hero', 'heroId', 'bark', 'badge', 'boss', 'bossLine', 'raid', 'echoLine', 'trial', 'speaker', 'trialLine', 'closing', 'item', 'itemLore', 'claimant', 'event', 'legend']);
 const GATED_TOP_TIER = ['divine-rapier', 'butterfly', 'scythe-of-vyse', 'heart-of-tarrasque', 'eye-of-skadi', 'refresher-orb', 'aghanims-scepter', 'abyssal-blade', 'bloodthorn', 'radiance', 'satanic', 'octarine-core', 'aghanims-blessing', 'aghanims-shard', 'aegis-of-the-immortal', 'refresher-shard', 'cheese'];
 const RARITY_RANK = { common: 0, uncommon: 1, rare: 2, mythical: 3, legendary: 4, immortal: 5, arcana: 6 } as const;
 const RESERVED_DROP_SOURCES: DropSource[] = ['boss', 'raid', 'dungeon', 'special-battle'];
@@ -76,6 +77,14 @@ function dropHomesForItem(itemId: string): Set<DropSource> {
 
 function expectHex(color: string, where: string): void {
   expect(color, where).toMatch(/^#[0-9a-fA-F]{6}$/);
+}
+
+function lintCutsceneText(text: string | undefined, where: string): void {
+  if (!text) return;
+  expect(text.startsWith('ref:'), `${where}: unresolved ref`).toBe(false);
+  for (const match of text.matchAll(/\{([a-zA-Z0-9_-]+)\}/g)) {
+    expect(CUTSCENE_TEMPLATE_KEYS.has(match[1]), `${where}: template ${match[1]}`).toBe(true);
+  }
 }
 
 function checkValueRef(ref: ValueRef | undefined, def: AbilityDef, where: string): void {
@@ -587,7 +596,7 @@ describe('data lint: Phase 3 registries', () => {
       expect(boss.dialogue.length, `${boss.id}: dialogue`).toBeGreaterThanOrEqual(2);
       for (const id of [...boss.loot.guaranteed, ...boss.loot.assembledPool]) expect(REG.items.has(id), `${boss.id}: loot ${id}`).toBe(true);
     }
-    expect(ALL_RAIDS.length).toBe(10);
+    expect(ALL_RAIDS.length).toBe(11);
     for (const raid of ALL_RAIDS) {
       expect(REG.heroes.has(raid.boss.heroId), `${raid.id}: boss hero`).toBe(true);
       expect(REG.quests.has(raid.unlockQuest), `${raid.id}: unlock`).toBe(true);
@@ -646,6 +655,7 @@ describe('data lint: Phase 3 registries', () => {
       expect(['setpiece', 'stinger', 'bark'], `${scene.id}: tier`).toContain(scene.tier);
       expect(scene.skippable, `${scene.id}: skippable`).toBe(true);
       expect(scene.beats.length, `${scene.id}: beats`).toBeGreaterThan(0);
+      lintCutsceneText(scene.title, `${scene.id}: title`);
       if (scene.trigger.kind === 'region-arrival') expect(REG.regions.has(scene.trigger.regionId), `${scene.id}: region trigger`).toBe(true);
       if (scene.trigger.kind === 'badge') {
         const { badgeId } = scene.trigger;
@@ -668,6 +678,9 @@ describe('data lint: Phase 3 registries', () => {
         expect(CUTSCENE_SHOT_ANGLES, `${scene.id}: shot angle`).toContain(beat.shot.angle);
         expect(CUTSCENE_SHOT_MOVES, `${scene.id}: shot move`).toContain(beat.shot.move);
         if (beat.sound) expect([...SOUND_ARCHETYPES, ...STINGER_IDS], `${scene.id}: sound`).toContain(beat.sound);
+        lintCutsceneText(beat.line?.speaker, `${scene.id}: speaker`);
+        lintCutsceneText(beat.line?.text, `${scene.id}: line`);
+        lintCutsceneText(beat.line?.portraitHeroId, `${scene.id}: portrait token`);
         for (const action of beat.stage ?? []) {
           if (action.kind === 'vfx') {
             expect(VFX_ARCHETYPES, `${scene.id}: stage vfx`).toContain(action.archetype);
@@ -675,6 +688,8 @@ describe('data lint: Phase 3 registries', () => {
           }
           if (action.kind === 'gesture') expect(ANIM_GESTURES, `${scene.id}: stage gesture`).toContain(action.gesture);
           if (action.kind === 'develop-character' && action.gesture) expect(ANIM_GESTURES, `${scene.id}: stage develop-character gesture`).toContain(action.gesture);
+          if ('text' in action) lintCutsceneText(action.text, `${scene.id}: stage text`);
+          if (action.kind === 'title') lintCutsceneText(action.text, `${scene.id}: stage title`);
         }
         if (beat.line?.portraitHeroId && !beat.line.portraitHeroId.includes('{')) expect(REG.heroes.has(beat.line.portraitHeroId), `${scene.id}: portrait`).toBe(true);
       }

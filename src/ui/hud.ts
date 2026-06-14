@@ -399,7 +399,8 @@ export class Hud {
     const now = performance.now();
     const goldPop = now < this.goldPopUntil;
     const streakActive = now < this.goldStreakUntil && this.goldStreak > 1;
-    const staminaPct = Math.round((g.stamina / TUNING.traversal.staminaMax) * 100);
+    const staminaMax = g.staminaMax();
+    const staminaPct = Math.round((g.stamina / staminaMax) * 100);
     const resin = Math.floor(g.resin);
     const exploration = g.explorationFor();
     this.topBar.innerHTML = `
@@ -413,7 +414,7 @@ export class Hud {
         <span class="gold-amount">${Math.floor(this.displayGold)}</span><span class="gold-unit">g</span>
         ${streakActive ? `<span class="gold-streak">×${this.goldStreak}</span>` : ''}
       </span>
-      <span class="stamina-chip" title="Stamina: sprint and dash">
+      <span class="stamina-chip" title="Stamina: sprint and dash (${Math.round(g.stamina)}/${staminaMax})">
         <span>STA</span><b>${staminaPct}%</b><i><em style="width:${staminaPct}%"></em></i>
       </span>
       <span class="explore-chip" title="Region exploration">${exploration}% explored</span>
@@ -1700,6 +1701,17 @@ export class Hud {
     const gambleBtns = bm.gambleVendor
       .map((gbl) => `<button class="btn small" data-bm-gamble="${gbl.tier}" ${gbl.canRoll ? '' : 'disabled'}>${gbl.tier.toUpperCase()} ${gbl.price}g</button>`)
       .join('');
+    const merchantHtml = bm.roamingMerchant.map((offer) => {
+      const gradeBtns = offer.grades
+        .map((gOffer) => `<button class="btn small" data-bm-merchant="${offer.id}:${gOffer.grade}" ${gOffer.canBuy ? '' : 'disabled'}>${cap(gOffer.grade)} ${gOffer.price}g</button>`)
+        .join('');
+      return `<div class="svc-row">
+        <div class="svc-main"><b style="color:${rarityColor(offer.rarity)}">${offer.name}</b> <em>${offer.tier.toUpperCase()}</em>
+          <div class="rr-sub">Known base item, chosen grade, random affixes. Pristine stays drop-only.</div>
+        </div>
+        <div class="svc-actions">${gradeBtns}</div>
+      </div>`;
+    }).join('');
     const bmHtml = `
       <div class="svc-row">
         <div class="svc-main"><b>Loot Marks</b>
@@ -1724,7 +1736,8 @@ export class Hud {
           <div class="rr-sub">Pick a core tier; receive one random bound rolled copy with grade, affixes, and sockets.</div>
         </div>
         <div class="svc-actions">${gambleBtns}</div>
-      </div>`;
+      </div>
+      <div class="svc-sub">Roaming Merchant</div>${merchantHtml}`;
 
     // Raids, executed (§3.9): scripted 5v1 with mechanics firing in the sim
     const aegisTag = g.aegisReady() ? ` <span class="gold">Aegis held</span>` : '';
@@ -1916,6 +1929,11 @@ export class Hud {
     this.modal.querySelector<HTMLElement>('[data-bm-relic]')?.addEventListener('click', () => { g.blackMarketRelicWheel(); rerender(); });
     this.modal.querySelectorAll<HTMLElement>('[data-bm-mark]').forEach((el) => el.addEventListener('click', () => { g.blackMarketRedeemLootMark(el.dataset.bmMark as 'early' | 'mid' | 'late'); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-bm-gamble]').forEach((el) => el.addEventListener('click', () => { g.gambleVendorRoll(el.dataset.bmGamble as 't1' | 't2' | 't3' | 't4'); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-bm-merchant]').forEach((el) => el.addEventListener('click', () => {
+      const [itemId, grade] = el.dataset.bmMerchant!.split(':');
+      g.roamingMerchantBuy(itemId, grade as 'worn' | 'standard' | 'sharp' | 'refined');
+      rerender();
+    }));
     this.modal.querySelectorAll<HTMLElement>('[data-tome]').forEach((el) => el.addEventListener('click', () => { g.buyTome(Number(el.dataset.tome)); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-respec]').forEach((el) => el.addEventListener('click', () => { g.respec(Number(el.dataset.respec)); rerender(); }));
     this.modal.querySelector<HTMLElement>('[data-heal]')?.addEventListener('click', () => { g.healParty(); rerender(); });

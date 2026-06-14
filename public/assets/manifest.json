@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "hash": "93ce12b96b83",
-  "generatedAt": "2026-06-14T04:40:09.837Z",
+  "hash": "a399d647190c",
+  "generatedAt": "2026-06-14T05:08:24.178Z",
   "assetRoot": "/assets/",
-  "totalBytes": 126634424,
+  "totalBytes": 126786188,
   "groups": {
     "audio": {
       "count": 10,
@@ -20,6 +20,10 @@
     "hero": {
       "count": 80,
       "bytes": 113003068
+    },
+    "holdout": {
+      "count": 11,
+      "bytes": 151764
     },
     "terrain": {
       "count": 27,
@@ -1162,6 +1166,116 @@
       "preloadGroup": "hero",
       "sourceSpec": "scripts/assets/specs/heroes.json",
       "source": "KayKit Adventurers (Kay Lousberg) base, tri-tone palette retexture by us — CC0"
+    },
+    {
+      "path": "holdouts/ancient-apparition.glb",
+      "url": "/assets/holdouts/ancient-apparition.glb",
+      "bytes": 14972,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "holdouts/bane.glb",
+      "url": "/assets/holdouts/bane.glb",
+      "bytes": 16132,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "holdouts/batrider.glb",
+      "url": "/assets/holdouts/batrider.glb",
+      "bytes": 9476,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "holdouts/enigma.glb",
+      "url": "/assets/holdouts/enigma.glb",
+      "bytes": 21064,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "holdouts/io.glb",
+      "url": "/assets/holdouts/io.glb",
+      "bytes": 19700,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "holdouts/leshrac.glb",
+      "url": "/assets/holdouts/leshrac.glb",
+      "bytes": 11932,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "holdouts/lone-druid.glb",
+      "url": "/assets/holdouts/lone-druid.glb",
+      "bytes": 8524,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "holdouts/medusa.glb",
+      "url": "/assets/holdouts/medusa.glb",
+      "bytes": 20204,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "holdouts/morphling.glb",
+      "url": "/assets/holdouts/morphling.glb",
+      "bytes": 8728,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "holdouts/naga-siren.glb",
+      "url": "/assets/holdouts/naga-siren.glb",
+      "bytes": 12360,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "holdouts/phoenix.glb",
+      "url": "/assets/holdouts/phoenix.glb",
+      "bytes": 8672,
+      "type": "model",
+      "group": "holdout",
+      "preloadGroup": "holdout",
+      "sourceSpec": null,
+      "source": null
     },
     {
       "path": "props/foliage/bush.glb",

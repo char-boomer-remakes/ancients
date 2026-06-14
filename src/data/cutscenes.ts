@@ -13,12 +13,12 @@ export const OUTWORLD_CLAIMANT_RAID_IDS = [
   'void-prelate',
   'queen-of-blades',
   'lord-of-terror',
+  'sundered-betrayer',
   'prime-evil',
   'lord-of-hatred',
   'forsaken-queen'
 ];
 
-const setpieceShot = { angle: 'wide', move: 'push-in', palette: 'moonlit gold', mood: 'mythic' } as const;
 const stingerShot = { angle: 'title-card', move: 'hold', palette: 'biome grade', mood: 'revealing' } as const;
 
 const ACT_BREAKS: Record<string, { title: string; line: string; palette: string; mood: string }> = {
@@ -47,6 +47,7 @@ const RAID_GRADES: Record<string, { palette: string; mood: string; reveal: strin
   'void-prelate': { palette: 'dark between stars', mood: 'chosen blade', reveal: 'The blade appears only after it has already chosen the angle.', vfx: '#7c6bff' },
   'queen-of-blades': { palette: 'fallen-star purple', mood: 'swarm closing', reveal: 'The crater tightens like a web around the first footstep.', vfx: '#d882ff' },
   'lord-of-terror': { palette: 'hell-rift red', mood: 'abyss rising', reveal: 'The rift opens upward, as if the floor has learned to look back.', vfx: '#ff4c2f' },
+  'sundered-betrayer': { palette: 'fel eclipse green', mood: 'betrayer unbound', reveal: 'The scar opens like a second shadow, and a horned silhouette chooses the side you fear most.', vfx: '#7dff72' },
   'prime-evil': { palette: 'worldstone ember', mood: 'destruction crowned', reveal: 'The vault burns around the stone at the world\'s heart.', vfx: '#ff7a2c' },
   'lord-of-hatred': { palette: 'lightless black', mood: 'name withheld', reveal: 'The hall goes dark before the voice admits it has arrived.', vfx: '#d62f44' },
   'forsaken-queen': { palette: 'banshee frost', mood: 'mercy gone', reveal: 'A cold arrow hangs in the air without thawing.', vfx: '#9ed8ff' },
@@ -67,19 +68,37 @@ const PROLOGUE: CutsceneDef = {
   replayable: true,
   beats: [
     {
-      shot: { angle: 'high', move: 'hold', palette: 'cold moonlight', mood: 'held breath' },
-      stage: [{ kind: 'title', text: 'The Mad Moon hangs whole over the Radiant shelf.' }],
+      shot: { angle: 'bird-eye', move: 'hold', palette: 'cold moonlight', mood: 'held breath' },
+      stage: [
+        { kind: 'describe-environment', text: 'The Mad Moon hangs whole over the Radiant shelf.' },
+        { kind: 'focus', target: 'tower' }
+      ],
       hold: 2.2
     },
     {
       shot: { angle: 'close', move: 'snap', palette: 'white fracture', mood: 'sundering' },
-      stage: [{ kind: 'title', text: 'A single crack becomes a sky of falling shards.' }],
+      stage: [
+        { kind: 'reveal-mystery', text: 'A single crack becomes a sky of falling shards.', target: 'tower' },
+        { kind: 'vfx', archetype: 'dome', color: '#d8f4ff' }
+      ],
       line: { speaker: 'Narration', text: 'They sealed the war inside the Moon. The war broke the Moon.' },
       hold: 3.2
     },
     {
+      shot: { angle: 'high', move: 'pull-back', palette: 'shard rain blue', mood: 'world wounded' },
+      stage: [
+        { kind: 'establish-history', text: 'Shard-rain crosses every road the player will walk.' },
+        { kind: 'vfx', archetype: 'storm', color: '#9db8ff' }
+      ],
+      line: { speaker: 'Narration', text: 'The falling stones ring like bells, each one carrying a war that has already happened.' },
+      hold: 3.4
+    },
+    {
       shot: { angle: 'low', move: 'push-in', palette: 'dawn gold', mood: 'awakening' },
-      stage: [{ kind: 'title', text: 'At your feet, one shard remembers.' }],
+      stage: [
+        { kind: 'advance-plot', text: 'At your feet, one shard remembers.', target: 'player' },
+        { kind: 'vfx', archetype: 'channel', color: '#ffd86a' }
+      ],
       line: { speaker: 'Narration', text: 'Every shard still remembers it.' },
       sound: 'capture',
       hold: 2.8
@@ -98,17 +117,32 @@ const BIND_FIRST: CutsceneDef = {
   replayable: true,
   beats: [
     {
-      shot: { angle: 'over-shoulder', move: 'push-in', palette: 'shard white', mood: 'uncertain' },
-      stage: [{ kind: 'focus', target: 'ally' }],
+      shot: { angle: 'over-shoulder', move: 'rack-focus', palette: 'shard white', mood: 'uncertain' },
+      stage: [
+        { kind: 'develop-character', target: 'ally', text: 'The defeated Echo does not fall. It flickers between hero and shard-light.', gesture: 'channel-loop' },
+        { kind: 'focus', target: 'ally' }
+      ],
       line: { speaker: '{hero}', text: '{bark}', portraitHeroId: '{heroId}' },
       hold: 3
     },
     {
-      shot: setpieceShot,
-      stage: [{ kind: 'vfx', archetype: 'channel', color: '#d8f4ff' }],
+      shot: { angle: 'close', move: 'push-in', palette: 'shard white', mood: 'the bind' },
+      stage: [
+        { kind: 'advance-plot', text: 'The shard-light reaches into the binder instead of consuming them.', target: 'player' },
+        { kind: 'vfx', archetype: 'channel', color: '#d8f4ff' }
+      ],
       line: { speaker: 'Narration', text: 'It does not die. It remembers you now. The first war you will carry.' },
       sound: 'capture',
       hold: 3.6
+    },
+    {
+      shot: { angle: 'wide', move: 'pull-back', palette: 'two-shot gold', mood: 'ally gained' },
+      stage: [
+        { kind: 'develop-character', target: 'ally', text: 'The Echo settles behind the player as a companion, not a captive.', gesture: 'toggle-stance' },
+        { kind: 'vfx', archetype: 'global-mark', color: '#ffd86a' }
+      ],
+      line: { speaker: 'Narration', text: 'You do not recruit heroes. You recover the Moon, one remembered champion at a time.' },
+      hold: 3.4
     }
   ]
 };
@@ -208,19 +242,28 @@ function raidIntro(raid: (typeof ALL_RAIDS)[number]): CutsceneDef {
     beats: [
       {
         shot: { angle: 'wide', move: 'crane', palette: grade.palette, mood: 'withheld' },
-        stage: [{ kind: 'title', text: raid.location }],
+        stage: [
+          { kind: 'describe-environment', text: raid.location },
+          { kind: 'reveal-mystery', text: grade.reveal, target: 'region' }
+        ],
         line: { speaker: raid.location, text: grade.reveal },
         hold: 2.6
       },
       {
-        shot: { angle: 'low', move: 'push-in', palette: grade.palette, mood: grade.mood },
-        stage: [{ kind: 'focus', target: 'boss' }],
+        shot: { angle: 'through-objects', move: 'rack-focus', palette: grade.palette, mood: grade.mood },
+        stage: [
+          { kind: 'focus', target: 'boss' },
+          { kind: 'develop-character', target: 'boss', text: `${raid.name} steps through the wrong-world grade.`, gesture: 'toggle-stance' }
+        ],
         line: { speaker: raid.name, text: raid.dialogue[0] ?? raid.title },
         hold: 3.1
       },
       {
-        shot: { angle: 'close', move: 'push-in', palette: grade.palette, mood: 'claim named' },
-        stage: [{ kind: 'vfx', archetype: 'global-mark', color: grade.vfx }],
+        shot: { angle: 'low', move: 'push-in', palette: grade.palette, mood: 'claim named' },
+        stage: [
+          { kind: 'introduce-conflict', text: 'The claimant names the Ancient as the prize.', target: 'tower' },
+          { kind: 'vfx', archetype: 'global-mark', color: grade.vfx }
+        ],
         line: { speaker: raid.name, text: raid.dialogue[1] ?? raid.title },
         sound: 'raid-clear',
         hold: 3.2
@@ -413,9 +456,19 @@ const ELITE_OPEN: CutsceneDef = {
   beats: [
     {
       shot: { angle: 'wide', move: 'crane', palette: 'tower shadow', mood: 'final gate' },
-      stage: [{ kind: 'title', text: 'Five doors before the Tower.' }],
+      stage: [
+        { kind: 'describe-environment', text: 'Five doors stand in the Tower shadow.' },
+        { kind: 'focus', target: 'tower' }
+      ],
       line: { speaker: 'Elite Five', text: 'Five doors, one Champion, and the Tower above them all.' },
       hold: 4
+    },
+    {
+      shot: { angle: 'through-objects', move: 'rack-focus', palette: 'draft gold', mood: 'personas in shadow' },
+      stage: [{ kind: 'introduce-conflict', text: 'Each persona waits with a draft already sharpened.', target: 'boss' }],
+      line: { speaker: 'Journal', text: 'Behind the last door is the only binder who has already done what you have done.' },
+      sound: 'badge',
+      hold: 3.4
     }
   ]
 };

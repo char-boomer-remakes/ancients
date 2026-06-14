@@ -407,7 +407,7 @@ export class ProceduralAudio {
     if (!this.unlocked || this.settings.audio.muted) return;
     // Celebratory stingers get a sampled fanfare on medium+; the synth arpeggio
     // below still plays so the cue survives when the sample is absent.
-    if (id === 'levelup' || id === 'merge' || id === 'badge' || id === 'capture' || id === 'raid-clear') {
+    if (id === 'levelup' || id === 'merge' || id === 'badge' || id === 'capture' || id === 'raid-clear' || id === 'loot') {
       this.playSample('fanfare', id === 'raid-clear' || id === 'badge' ? 0.5 : 0.36, 'stinger');
     }
     switch (id) {
@@ -431,6 +431,10 @@ export class ProceduralAudio {
       case 'raid-clear': // big descending-then-rising motif
         this.arp([392, 523, 659, 784, 1047], 0.1, 0.18);
         setTimeout(() => this.thump(0.12, 0.14, 320), 120);
+        break;
+      case 'loot': // bright rising cue for pristine/signature drops
+        this.arp([587, 740, 988, 1319], 0.075, 0.16);
+        setTimeout(() => this.thump(0.08, 0.1, 220), 90);
         break;
       default:
         break;

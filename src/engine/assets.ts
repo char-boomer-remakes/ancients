@@ -137,6 +137,18 @@ export function heroAssetEntry(heroId: string | undefined): HeroAssetManifestEnt
 }
 
 /**
+ * A6: additive generated signature kits for the 11 procedural holdouts. These do
+ * not replace the animated procedural rigs; scene.ts mounts them as extra visible
+ * identity geometry over the rig, so missing files are harmless and no hero loses
+ * its animation.
+ */
+export const ENABLED_HOLDOUT_SIGNATURES: ReadonlySet<string> = new Set(PROCEDURAL_HOLDOUTS);
+
+export function holdoutSignatureUrl(heroId: string | undefined): string | null {
+  return heroId && ENABLED_HOLDOUT_SIGNATURES.has(heroId) ? `/assets/holdouts/${heroId}.glb` : null;
+}
+
+/**
  * Shared bases whose CC0 GLB has actually shipped. Humanoid cohorts use per-hero
  * GLBs above; creature-base heroes reuse the already-vendored Quaternius creature
  * files under /assets/creeps. Gating keeps the runtime from firing 404s.

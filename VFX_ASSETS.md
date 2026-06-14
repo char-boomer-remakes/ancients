@@ -22,7 +22,7 @@ never imports `three` or reads renderer-only fields.
 | Surface | State |
 |---------|-------|
 | Hero likeness profiles | **122 / 122** unique, no duplicates (`engine/models.ts`) |
-| Hero models enabled | **111 / 122** — 80 per-hero KayKit humanoid GLBs (`ENABLED_HERO_MODELS`), **all A4 tri-tone retextured** (texture-space palette gradient map, not a flat factor wash), plus 31 creature-base heroes through shared Quaternius GLBs (`ENABLED_HERO_BASES` → `/assets/creeps/<base>.glb`). Remaining 11 are intentional procedural holdouts. **No-budget policy** (DECISIONS 2026-06-13): one file per humanoid cohort hero, ~120MB total; creature heroes reuse the already-vendored creature GLBs |
+| Hero models enabled | **122 / 122 visually enhanced** — 80 per-hero KayKit humanoid GLBs (`ENABLED_HERO_MODELS`), **all A4 tri-tone retextured** (texture-space palette gradient map, not a flat factor wash) **+ A5 per-hero proportions and innate identity overlays** so cohort siblings no longer share a body (`applyAuthoredSilhouette`), plus 31 creature-base heroes through shared Quaternius GLBs (`ENABLED_HERO_BASES` → `/assets/creeps/<base>.glb`), plus **11 A6 generated holdout signature GLBs** (`/assets/holdouts/<id>.glb`) mounted additively over the animated procedural rig (`attachHoldoutSignatureModel`). **No-budget policy** (DECISIONS 2026-06-13): one file per humanoid cohort hero, ~120MB total; creature heroes reuse the already-vendored creature GLBs |
 | Hero weapons enabled | **80 / 80** authored humanoid heroes ship original generated held weapon GLBs (`/assets/weapons/heroes/<id>.glb`) attached through the resolved hand socket; item weapon visuals still override them |
 | Ability VFX coverage | **488 / 488** authored; archetypes incl. `vortex`/`dome`/`mine`/`cyclone` |
 | Attack animation | weapon-driven (`attackStyleFor`): 8 styles incl. `bird-dive`, `creature-lunge` |
@@ -32,7 +32,7 @@ never imports `three` or reads renderer-only fields.
 | Env assets | terrain PBR (ambientCG), 2 HDRIs (Poly Haven) **both wired** — day + night beds swap by the cycle (`scene.applyEnvPhase`); original tiling water normal (`textures/water/water_normal.webp`) layered into the water shader; OFL display font (Cinzel) vendored + wired via `@font-face`; foliage + town (Quaternius) |
 | VFX textures | original `/assets/vfx/vfx_atlas.webp` for sprites/telegraphs, preloaded on medium+ and backed by procedural `DataTexture` fallback |
 | Audio | synth floor (`SoundArchetype` ×12, including `lightning`) **+ sampled enhancement layer**: `engine/sampled-audio.ts` decodes original per-biome music beds + one-shot SFX (`/assets/audio/*`), layered over the synth on medium+; synth stays the guaranteed fallback (boot floor / headless / missing file) |
-| Pipeline | `build_assets.mjs` (resample/prune/dedup/meshopt/webp + **palette recolor: flat factor _and_ A4 `tritone` texture-space gradient map** + audio/font/vfx groups), generators (`generate_vfx_atlas`/`generate_water_normal`/`generate_audio`), `assets.ts` + `sampled-audio.ts` loaders + fallback, `ASSETS.md` ledger, `manifest.json` |
+| Pipeline | `build_assets.mjs` (resample/prune/dedup/meshopt/webp + **palette recolor: flat factor _and_ A4 `tritone` texture-space gradient map** + audio/font/vfx/holdout groups), generators (`generate_vfx_atlas`/`generate_water_normal`/`generate_audio`/`generate_holdout_signatures`), `assets.ts` + `sampled-audio.ts` loaders + fallback, `ASSETS.md` ledger, `manifest.json` |
 | Visual target | coherent stylized fantasy theme across heroes, regions, VFX, items, UI, and audio |
 
 ---
@@ -215,6 +215,32 @@ bespoke generated GLB is a later, optional upgrade per hero.
   gold/green/orange leads). The legacy uniform-factor path stays in the script as a
   fallback. A truly hand-painted atlas per marquee hero remains an optional further
   upgrade on top of this generated path.
+- **A5 — within-cohort silhouette variation + marquee identity. SHIPPED.** Tri-tone
+  retexture differentiates cohort siblings by color, but a Knight-base Juggernaut and
+  Sven still shared one mesh, one animation set, and one body. `applyAuthoredSilhouette`
+  (`engine/models.ts`, called from `scene.ts` after `mountHeroModel`, gated to the
+  humanoid GLB cohort) closes that gap with two fully procedural, headless-safe passes:
+  (1) **per-hero proportions** — a cohort baseline (knights broad, barbarians broadest,
+  mages slim, rogues short/lean) plus a hand-authored override table for every marquee
+  hero (raid chassis, Elite Five / Champion, gym aces) non-uniformly scales the mounted
+  model and re-seats the feet, so Pudge reads massive, Sniper dwarfen, Wraith-King towering;
+  (2) **innate identity overlays** — crown / horns / antlers / wings / cape / halo / tusks
+  re-derived from each hero's likeness `features` and parented **visible** over the authored
+  body (the head/back re-parent upgrade WS-B §4 reserved for GLB heroes). Marquee heroes
+  carry the richest feature lists, so they get the richest overlays for free. No new art,
+  no new files, palette-driven primitives only. Gate: `model-cache` proportions + overlay +
+  idempotency + no-model-safe + full-cohort render smoke — green.
+- **A6 — procedural holdout signature GLBs. SHIPPED.** io, enigma, morphling,
+  phoenix, etc. already ship hand-tuned **animated** procedural rigs; replacing them
+  with primitive static GLBs would regress motion. Instead,
+  `generate_holdout_signatures.mjs` writes 11 original low-poly signature kits under
+  `/assets/holdouts/<id>.glb` (148KB total), `main.ts` preloads that tiny `holdout`
+  group on enhanced tiers, and `scene.ts` loads them through the existing
+  fallback-safe `loadModelAsset` path, mounting them with
+  `attachHoldoutSignatureModel` **additively** over the animated rig. The result is
+  bespoke silhouette/identity art for all holdouts without losing animation or
+  blocking no-asset boot. A future commissioned/DCC-authored **rigged + animated**
+  replacement model can still supersede any individual holdout later.
 
 ---
 
@@ -460,17 +486,32 @@ are fine when they improve the theme and load safely.
 13. **Final vocabulary pass** — `cyclone` VFX, `lightning` sound, and
     `toggle-stance` gesture. **Shipped.** Eul's/Wind Waker, electric chain
     signatures, and held stance casts now use distinct closed-vocabulary entries.
+14. **A5** — within-cohort silhouette variation + marquee identity. **Shipped.**
+    `applyAuthoredSilhouette` gives every authored humanoid per-hero proportions
+    (cohort baseline + marquee override table) and re-derives innate identity gear
+    (crown/horns/wings/cape/halo) from each hero's likeness `features`, parented
+    visible over the GLB body. Pure procedural, no new files.
+15. **A6** — generated holdout signature GLBs. **Shipped.** The 11 animated
+    procedural holdouts keep their rig motion, but now mount original additive
+    signature GLBs from `/assets/holdouts/<id>.glb` (wisp tethers, void ring,
+    water crest, firebird wings, gorgon snakes, etc.) via `attachHoldoutSignatureModel`.
+    The manifest tracks a `holdout` group, medium+ preloads those 11 tiny files, and
+    no-asset boot remains intact.
 
 > **Status: every required workstream in this plan is shipped and green,
 > including the final vocabulary pass and the follow-up VFX polish pass.**
 > All 80 cohort heroes now ship a tri-tone texture-space retexture (their
-> three-color identity as shadow/body/trim), 31 creature-base heroes reuse the
-> Quaternius GLBs, and 11 abstract heroes stay procedural by design — 122/122
-> covered. The VFX atlas is preloaded on medium+, burst transients are pooled,
-> and `channel`/`cyclone` have distinct reads. Further upgrades are optional
-> custom art or cosmetics: hand-painted bespoke atlases for marquee heroes,
-> animated boot motion trails, trail/beam ramp textures if profiling asks for
-> them, or bespoke generated models for the 11 procedural holdouts. Rebuild any
+> three-color identity as shadow/body/trim) **plus A5 per-hero proportions and
+> innate identity overlays so cohort siblings read distinct**, 31 creature-base
+> heroes reuse the Quaternius GLBs, and 11 abstract heroes keep their animated
+> procedural rigs **plus A6 generated additive signature GLBs** — 122/122 visually
+> enhanced.
+> The VFX atlas is preloaded on medium+, burst transients are pooled, and
+> `channel`/`cyclone` have distinct reads. The only further upgrades are
+> commissioned / DCC-authored custom art: hand-painted bespoke atlases for marquee
+> heroes, animated boot motion trails, trail/beam ramp textures if profiling asks
+> for them, or **rigged + animated** bespoke replacement models for the 11 holdouts.
+> Rebuild any
 > hero from the raw CC0 pack (`tmp/asset_src/kaykit`, gitignored); the procedural
 > floor stays the live fallback throughout.
 
@@ -490,6 +531,14 @@ an asset landing.
   `tritone` build mode (texture-space gradient map, shadow/midtone/highlight →
   palette) instead of a uniform factor tint — multi-tone, generated, no
   hand-painting. The flat-factor path is kept only as a script fallback.
+- **Cohort siblings share one body.** Resolved (A5): tri-tone fixed color, and
+  `applyAuthoredSilhouette` now fixes shape — per-hero proportions + innate identity
+  overlays so same-base heroes read distinct at gameplay zoom without new art. A
+  hand-painted/rigged bespoke per marquee hero is still an optional upgrade on top.
+- **Static holdout GLBs could regress animation.** Resolved (A6): generated holdout
+  GLBs are additive signature kits mounted over the procedural rig, never replacement
+  rigs. The animated primitive body stays live and missing files simply keep the old
+  procedural-only read.
 - **Creature clip pollution / determinism.** Clip wiring is renderer-side only;
   the sim/feel and macro/determinism tests must not move.
 - **Test isolation.** A pre-existing cross-file `REG`-state race can flake the

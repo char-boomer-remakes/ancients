@@ -104,4 +104,19 @@ describe('vfx cache', () => {
 
     expect(vfx.group.children.length).toBeGreaterThan(0);
   });
+
+  it('uses a soft alpha ramp for attack beams', () => {
+    const vfx = new VfxManager(() => 0);
+
+    vfx.attackVisual(
+      { kind: 'ranged-conversion', color: '#88ccff', scale: 1 },
+      { x: 0, y: 0 },
+      { x: 500, y: 0 }
+    );
+
+    const beam = vfx.group.children[0] as THREE.Mesh;
+    const material = beam.material as THREE.MeshBasicMaterial;
+    expect(material.alphaMap).toBeDefined();
+    expect(material.blending).toBe(THREE.AdditiveBlending);
+  });
 });

@@ -120,8 +120,10 @@ export function applyElementAura(sim: Sim, source: Unit, target: Unit, element: 
   const reaction = existing ? reactionFor(existing, element) : null;
   let damageMultiplier = 1;
   if (resolveReactions && reaction) {
-    damageMultiplier = reaction.damageMultiplier ?? 1;
-    const scale = 1 + source.stats.spellAmpPct / 100;
+    const reactionAmp = 1 + Math.max(0, source.stats.reactionAmpPct) / 100;
+    const multiplierBonus = (reaction.damageMultiplier ?? 1) - 1;
+    damageMultiplier = 1 + multiplierBonus * reactionAmp;
+    const scale = (1 + source.stats.spellAmpPct / 100) * reactionAmp;
     sim.events.emit({ t: 'reaction', uid: target.uid, from: source.uid, reaction: reaction.id, elements: [existing!, element] });
     if (reaction.extraDamagePct) {
       applyDamage(sim, source, target, Math.max(1, baseAmount * reaction.extraDamagePct * scale), 'magical', { noTriggers: true });
@@ -146,7 +148,7 @@ export function applyElementAura(sim: Sim, source: Unit, target: Unit, element: 
 
   target.elementAuras[element] = {
     gauge: Math.min(2, (target.elementAuras[element]?.gauge ?? 0) + 1),
-    until: now + 4,
+    until: now + 4 + Math.max(0, source.stats.elementalGaugeSec),
     sourceUid: source.uid
   };
   sim.events.emit({ t: 'element-apply', uid: target.uid, from: source.uid, element, gauge: target.elementAuras[element]!.gauge });

@@ -3,6 +3,7 @@ import { registerAllContent } from '../data';
 import { TUNING } from '../data/tuning';
 import { REG } from '../core/registry';
 import { applyDamage } from '../core/combat';
+import { itemStateFromSave } from '../core/items';
 import { Game, newGameSave } from '../systems/game';
 import type { Unit } from '../core/unit';
 import type { Vec2 } from '../core/types';
@@ -36,6 +37,34 @@ describe('gameplay overhaul: locomotion and discovery', () => {
     expect(roundTrip.stamina).toBeCloseTo(game.stamina);
     expect(roundTrip.discovered).toContain('tv-waypoint-dawnshade');
     expect(Game.validateSave(roundTrip)).toBe(true);
+  });
+
+  it('item stamina bonuses raise the active traversal cap', () => {
+    const game = Game.headless(newGameSave('juggernaut'));
+    const u = game.activeUnit()!;
+    u.items[0] = itemStateFromSave({ id: 'wanderer-wraps' }, game.sim.time);
+    u.markStatsDirty();
+    u.refresh(game.sim.time);
+
+    expect(game.staminaMax()).toBe(TUNING.traversal.staminaMax + 60);
+    game.stamina = game.staminaMax();
+    expect(Game.validateSave(game.buildSave())).toBe(true);
+  });
+
+  it('tag-in items reduce swap cooldown and apply an entrance burst', () => {
+    const save = newGameSave('juggernaut');
+    const axeSave = newGameSave('axe').roster[0];
+    axeSave.items[0] = { id: 'breacher-cloak' };
+    save.recruited.push('axe');
+    save.party.push('axe');
+    save.roster.push(axeSave);
+    const game = Game.headless(save);
+
+    expect(game.trySwap(1)).toBe(true);
+    const axe = game.activeUnit()!;
+    const baseCd = game.settings.resonance ? TUNING.resonanceSwapCooldownSec : TUNING.swapCooldownSec;
+    expect(game.swapReadyAt - game.sim.time).toBeLessThan(baseCd);
+    expect(axe.statuses.some((s) => s.tag === 'swap-in-burst')).toBe(true);
   });
 
   it('dash is root-stopped and does not disjoint homing projectiles', () => {
