@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllContent } from '../data';
 import { setupRaidSim } from '../core/macro';
-import { bossPhaseOf, pickBossFocus } from '../core/boss-brain';
+import { bossPhaseOf, pickBossFocus, pickBossMechanic, type BossMechanicCandidate } from '../core/boss-brain';
 import type { Unit } from '../core/unit';
 
 // ============================================================
@@ -110,5 +110,76 @@ describe('boss phase-FSM', () => {
     const fb = pickBossFocus(b.sim, b.boss);
     expect(a.boss.ctrl.boss!.pref).toBe(b.boss.ctrl.boss!.pref);
     expect(fa?.heroId).toBe(fb?.heroId);
+  });
+});
+
+describe('boss mechanic selection', () => {
+  const cand = (over: Partial<BossMechanicCandidate>): BossMechanicCandidate => ({
+    key: 'm', kind: 'zone', atHpPct: 90, armedAt: 0, ...over
+  });
+
+  it('starts nothing when no beats are armed', () => {
+    const { sim, boss } = raid(['sniper', 'crystal-maiden']);
+    expect(pickBossMechanic(sim, boss, [])).toBeNull();
+  });
+
+  it('holds a freshly-armed area beat until the party clusters, then fires it', () => {
+    const { sim, boss, get } = raid(['sniper', 'crystal-maiden']);
+    const sniper = get('sniper');
+    const cm = get('crystal-maiden');
+    boss.hp = boss.stats.maxHp; // opening, where a 90% zone arms
+    boss.ctrl.boss = { depth: 1 };
+
+    // spread out: no two bodies share a cluster, so the area beat waits
+    sniper.pos = { x: boss.pos.x - 1400, y: boss.pos.y };
+    cm.pos = { x: boss.pos.x - 2600, y: boss.pos.y + 1400 };
+    sim.rebuildSpatial();
+    const zone = cand({ key: 'zone-0', kind: 'zone', atHpPct: 90, armedAt: sim.time });
+    expect(pickBossMechanic(sim, boss, [zone])).toBeNull();
+
+    // pack the heroes together: now the zone is worth starting
+    sniper.pos = { x: boss.pos.x - 300, y: boss.pos.y };
+    cm.pos = { x: boss.pos.x - 320, y: boss.pos.y + 40 };
+    sim.rebuildSpatial();
+    expect(pickBossMechanic(sim, boss, [zone])).toBe('zone-0');
+  });
+
+  it('stops holding an area beat once it has waited long enough', () => {
+    const { sim, boss, get } = raid(['sniper', 'crystal-maiden']);
+    get('sniper').pos = { x: boss.pos.x - 1400, y: boss.pos.y };
+    get('crystal-maiden').pos = { x: boss.pos.x - 2600, y: boss.pos.y + 1400 };
+    boss.hp = boss.stats.maxHp;
+    boss.ctrl.boss = { depth: 1 };
+    sim.rebuildSpatial();
+
+    const stale = cand({ key: 'zone-0', kind: 'zone', atHpPct: 90, armedAt: sim.time - 5 });
+    expect(pickBossMechanic(sim, boss, [stale])).toBe('zone-0');
+  });
+
+  it('does not start a beat from a deeper phase than the boss is in', () => {
+    const { sim, boss, get } = raid(['sniper', 'crystal-maiden']);
+    get('sniper').pos = { x: boss.pos.x - 300, y: boss.pos.y };
+    get('crystal-maiden').pos = { x: boss.pos.x - 320, y: boss.pos.y + 40 };
+    sim.rebuildSpatial();
+    // signature reads as a 'pressure' beat; armed stale so the cluster-hold can't mask the gate
+    const sig = cand({ key: 'signature', kind: 'signature', atHpPct: 50, armedAt: sim.time - 5 });
+
+    boss.hp = boss.stats.maxHp; // opening — too early for a pressure beat
+    boss.ctrl.boss = { depth: 1 };
+    expect(pickBossMechanic(sim, boss, [sig])).toBeNull();
+
+    boss.hp = boss.stats.maxHp * 0.4; // pressure — now it may start
+    boss.ctrl.boss = { depth: 1 };
+    expect(pickBossMechanic(sim, boss, [sig])).toBe('signature');
+  });
+
+  it('prioritizes the enrage beat once the enrage phase begins', () => {
+    const { sim, boss } = raid(['sniper', 'crystal-maiden']);
+    boss.ctrl.boss = { depth: 1, enrageSec: 0 }; // sim.time >= 0 => enrage phase
+    const candidates = [
+      cand({ key: 'wave-0', kind: 'add-wave', atHpPct: 90, armedAt: sim.time }),
+      cand({ key: 'enrage', kind: 'enrage', atHpPct: 0, armedAt: sim.time })
+    ];
+    expect(pickBossMechanic(sim, boss, candidates)).toBe('enrage');
   });
 });

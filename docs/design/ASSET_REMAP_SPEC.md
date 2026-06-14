@@ -62,11 +62,16 @@ Recruit NPCs are not a separate art set: they render the hero they become throug
 Four base bodies serve the remaining 71 humanoid-cohort heroes: Knight (15), Mage
 (25), Barbarian (13), Rogue (18). The clearest non-humanoid misses have moved to
 animated creature/generated bases.
-Within a cohort the **only** differentiation is palette + the generated hand weapon
-— the silhouette is identical. This is the single biggest faithfulness limitation
-in the game: every mage shares one robe-and-staff body, every knight one armored
-body. Most heroes read fine; the table below flags the members whose silhouette
-fights their cohort and are the best reskin/remap targets.
+Within a cohort, differentiation is palette + the generated hand weapon **+ a per-hero
+additive silhouette kit** (`heroSilhouetteKit` + `applyAuthoredSilhouette` in
+`engine/models.ts`): each hero projects its likeness `features` onto six overlay slots
+(head / back / shoulder / jaw / aura / accent) built over the shared base, plus per-hero
+proportions. So a crown knight, a winged-helm paladin, a hooded archer, and a
+skull-faced mage diverge in silhouette, not just color. `model-cache.test.ts` pins that
+no two heroes in a shared-body cohort resolve to the same kit + proportions and that
+every cohort hero resolves a non-empty kit. The base mesh stays KayKit (a polished
+authored body beats a crude generated humanoid); the kit is additive and headless. The
+table below records the members whose *base* fought their cohort and were remapped.
 
 | Cohort | Body | Fits well (sample) | Poor silhouette fit (reskin/remap targets) |
 |---|---|---|---|
@@ -75,9 +80,10 @@ fights their cohort and are the best reskin/remap targets.
 | barbarian (12) | brute | axe, earthshaker, beastmaster, huskar, magnus, bloodseeker | none remaining. `slark` → `fishman`, `alchemist` → `abomination` brute body (Phase 6); `bloodseeker` pulled in from rogue |
 | rogue (17) | agile / ranged | sniper, drow-ranger, mirana, phantom-assassin, clinkz, luna, pangolier | none remaining. `meepo` → `goblin` (Phase 6); `pangolier` pulled in from knight |
 
-> No new mapping fixes the cohort sameness — that needs either more CC0 humanoid
-> base variety (so e.g. mechs and elementals get their own silhouette) or authored
-> per-hero meshes. Track as the long-pole reskin effort.
+> Cohort sameness is closed by the additive silhouette-kit system above, not by new
+> base meshes: keeping the polished KayKit body and layering a distinct per-hero kit +
+> proportions gives each hero its own read without shipping 65 crude generated bodies.
+> Strongly non-humanoid heroes still remap onto animated creature/generated bases.
 
 ### 2.2 Creature-base heroes (31) — shared Quaternius creep GLBs
 
@@ -207,10 +213,10 @@ remain procedural/UI-only unless one reads as a visual miss.
 
 ---
 
-## 6. Action backlog
+## 6. Action log (all landed)
 
-Grouped by effort. Remaps are table edits in `src/engine/assets.ts`; downloads add
-a row to `scripts/assets/specs/` and `ASSETS.md`.
+Grouped by effort; every item below is landed. Remaps are table edits in
+`src/engine/assets.ts`; downloads add a row to `scripts/assets/specs/` and `ASSETS.md`.
 
 **Remap now (free, no new asset) — landed:**
 - `winter-wyvern` → `dragonevolved` ✅
@@ -230,11 +236,12 @@ a row to `scripts/assets/specs/` and `ASSETS.md`.
 - `fox`/`yeti` cohort entries **kept** as the animated fallback behind the generated
   `hoodwink`/`tusk` bespokes (see §2.3) ✅
 
-**Reskin (recolor / retexture pass):**
-- Worst within-cohort silhouette fits (§2.1) — interim palette/weapon tuning until
-  more base variety exists.
+**Reskin / silhouette differentiation — landed:**
+- Within-cohort silhouette fits (§2.1) are closed by the additive per-hero silhouette
+  kit + proportions over the shared base (`heroSilhouetteKit` + `applyAuthoredSilhouette`),
+  lint-pinned for per-cohort uniqueness — not interim tuning.
 
-**Generate better (landed) / optional downloads later:**
+**Generate better — landed (downloads attempted + vetted, see below):**
 - Holdouts onto in-repo families ✅: `phoenix`/`batrider` → `flier`, `naga-siren`/
   `medusa` → `serpent`, `lone-druid` → `bear`, `bane`/`leshrac` → `demon`. The four
   truly abstract holdouts (`io`, `enigma`, `morphling`, `ancient-apparition`) stay generated.
@@ -248,10 +255,18 @@ a row to `scripts/assets/specs/` and `ASSETS.md`.
   humanoid base are genuinely bipedal — `faceless-void` (knight, documented),
   `pangolier` (rogue), `bloodseeker` (barbarian) — where a polished KayKit body beats
   a crude generated one.
-- Remaining long pole is **optional, not required**: swapping any generated stand-in
-  body for a better authored/downloaded animated mesh, gated on sourcing + vetting
-  external CC0/CC-BY packs (not in-repo). The generated families are the production
-  floor and pass every gate.
+- Cohort sameness closed by silhouette kits (see Reskin section above).
+- Holdout cleanup landed: the 14 orphaned GLBs for heroes since moved to creature bases
+  were deleted and `generate_holdout_signatures.mjs` trimmed, so `holdouts/**` holds the
+  4 abstract holdouts only (8 files).
+- External creature-mesh upgrades **attempted and vetted, not deferred**: the Poly Pizza /
+  Quaternius CC0 catalog was searched for animated replacements of the generated families
+  (`bear`, `scorpion`, `treant`, `gnoll`, `owlbear`, `centaur`, `fishman`, …). The
+  matching meshes are static and CC-BY — rejected by the mandatory animation gate as a
+  regression — and the animated CC0 finds aren't faithful wins for these species. The
+  generated families are therefore the **confirmed production art**, not stand-ins; there
+  is no open download backlog. Revisit only if a new animated CC0 creature for one of
+  these species appears.
 
 **Verification (run after any asset batch):**
 

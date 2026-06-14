@@ -26,12 +26,18 @@ The code has moved past several early audit findings:
 - **Hero silhouette variety advanced.** `clockwerk`/`timbersaw` moved to `goblin`,
   `death-prophet` moved to `ghost`, `arc-warden`/`outworld-destroyer`/`razor`
   moved to `energy`, and `pudge`/`undying` moved to `abomination`.
+- **Cohort sameness closed.** Each of the 65 shared-body cohort heroes now wears a
+  distinct additive silhouette kit (head/back/shoulder/jaw/aura/accent) + per-hero
+  proportions over the polished KayKit base (`heroSilhouetteKit` +
+  `applyAuthoredSilhouette`), lint-pinned for per-cohort uniqueness (§2.1).
 - **Phase 5 item-weapon polish landed.** The 13 marquee item GLBs now use tapered
   blades, ellipsoid cores/gems, higher-segment round parts, and stronger per-item
   silhouettes.
 - **Cleanup landed.** The old KayKit body/weapon files and `heroes.json` spec
   entries for heroes moved off humanoid cohorts were removed, so rebuilds do not
-  reintroduce unused bodies.
+  reintroduce unused bodies. The 14 orphaned holdout GLBs for heroes since moved to
+  creature bases were deleted and `generate_holdout_signatures.mjs` trimmed, so
+  `holdouts/**` holds exactly the 4 abstract holdouts (8 files).
 
 - **Animation** — does the GLB ship the clips the rig drives
   (`idle`/`run`/`attack`[/`cast`/`death`])? This game leans on motion + vfx, so a
@@ -102,9 +108,9 @@ bespoke bodies now satisfy the body-animation gate.
 
 ## 2. Heroes
 
-### 2.1 Humanoid cohorts (RETEX) — systemic low faithfulness, by design
+### 2.1 Humanoid cohorts (RETEX) — silhouette-differentiated per hero
 
-65 of 122 heroes still share **four** KayKit bodies, recolored per hero:
+65 of 122 heroes share **four** KayKit bodies, recolored per hero:
 
 | Base | Count | Heroes |
 |---|---|---|
@@ -113,10 +119,18 @@ bespoke bodies now satisfy the body-animation gate.
 | `barbarian` | 12 | earthshaker, lifestealer, ogre-magi, bristleback, troll-warlord, axe, magnus, brewmaster, huskar, beastmaster, underlord, bloodseeker |
 | `rogue` | 17 | sniper, mirana, drow-ranger, windranger, phantom-assassin, riki, bounty-hunter, anti-mage, templar-assassin, clinkz, void-spirit, ember-spirit, marci, phantom-lancer, monkey-king, luna, pangolier |
 
-This is the single biggest unfaithfulness in the project: within a cohort every hero
-shares one silhouette and differs only by palette + a generated weapon. It is a
-deliberate budget call, not a bug. Per-hero silhouette identity comes (when it comes)
-from the held-weapon GLB and palette, never the body.
+Cohort-mates **no longer read identically.** On top of the recolor + per-hero weapon,
+each cohort hero now resolves a structured **silhouette kit** —
+`heroSilhouetteKit(heroId)` in `engine/models.ts` projects the hero's likeness
+`features` onto six slots (head / back / shoulder / jaw / aura / accent), and
+`applyAuthoredSilhouette` builds those primitives over the shared body together with
+per-hero proportions. A crown knight, a winged-helm paladin, a hooded archer, and a
+skull-faced mage all diverge in silhouette, not just color. The combination is unique:
+`model-cache.test.ts` lints that within every shared-body cohort no two heroes resolve
+to the same kit + proportions, and that every cohort hero resolves a non-empty kit, so
+"two heroes render as the same coloured body" is now a test failure rather than a
+known compromise. The polished KayKit base is kept as the body (a clean authored mesh
+beats a crude generated humanoid); the kit is additive, headless, and ships no assets.
 
 Worst offenders (heroes whose Dota silhouette is strongly non-humanoid): **Phase 6
 closed the long-tail.** The only heroes still on a humanoid base are genuinely
@@ -320,8 +334,10 @@ monkey-king-bar, abyssal-blade, mjollnir, satanic, bloodthorn, desolator.
   `crystalys`, `diffusal-blade`, `maelstrom`, `silver-edge`, `echo-sabre`, `nullifier`,
   `skull-basher`, `ethereal-blade`, `dagon`, `meteor-hammer`, `heavens-halberd`.
 
-Upgrade status: **Phase 5 landed.** Future work here is opportunistic replacement with
-hand-authored downloads, not a production blocker.
+Upgrade status: **Phase 5 landed and closed.** The marquee 13-weapon set is the
+shipping target; broader item coverage is intentionally out of scope by design
+(ASSET_GAPS P3 — most items stay procedural/UI), not a backlog. The candidate list
+above is a note for *if* the tier ever expands, not pending work.
 
 ### 5.2 2D icon sprites (191 + 56, DL-CCBY)
 
@@ -505,11 +521,11 @@ Replace the "closest available" stand-ins with faithful, animated creatures.
 - **Exit:** every original Phase 3 species gap is either faithful or explicitly
   justified in code.
 
-### Phase 4 — Hero silhouette identity (largest effort, do last)
+### Phase 4 — Hero silhouette identity (largest effort) — landed
 
-The remaining 71 same-body cohort heroes (Section 2.1) are the biggest remaining
-unfaithfulness. Full per-hero bodies are out of scope; this phase de-risks the worst
-reads first.
+The 65 same-body cohort heroes (Section 2.1) were the biggest remaining unfaithfulness.
+Rather than ship 65 crude full bodies, this phase makes each hero diverge in silhouette
+on top of the polished shared base.
 
 - **Tier A (cheap, high value) — landed:** the generated hero weapon set (Section 5.4)
   now carries a per-hero signature shape (`STYLE_BY_HERO` + per-style geometry in
@@ -520,9 +536,13 @@ reads first.
   `winter-wyvern`→`dragonevolved`, `clockwerk`/`timbersaw`→`goblin`,
   `death-prophet`→`ghost`, `arc-warden`/`outworld-destroyer`/`razor`→`energy`, and
   `pudge`/`undying`→`abomination`.
-- **Tier C (backlog):** bespoke per-hero downloads for marquee heroes, opportunistically.
+- **Tier C (silhouette kits) — landed:** every cohort hero now resolves a distinct
+  additive silhouette kit (head / back / shoulder / jaw / aura / accent) + per-hero
+  proportions over the shared body (`heroSilhouetteKit` + `applyAuthoredSilhouette` in
+  `engine/models.ts`), so cohort-mates diverge in body read, not just weapon + color.
+  Per-cohort uniqueness and non-empty coverage are pinned by `model-cache.test.ts`.
 - **Exit:** no hero whose Dota silhouette is strongly non-humanoid is stuck on a plain
-  humanoid base; the rest are accepted cohort stand-ins by design.
+  humanoid base, and no two heroes in a shared-body cohort render as the same body.
 
 ### Phase 5 — Item + weapon polish (landed)
 
@@ -567,12 +587,13 @@ spec under `scripts/assets/specs/` → `build_assets.mjs`, then add an `ASSETS.m
 | 1 | holdout remaps + creep family fixes | none | S | landed |
 | 2 | fix 3 static bodies | none | M | landed with generated bodies |
 | 3 | faithfulness species bodies | 1 download + generated bodies | M | landed |
-| 4 | hero identity (weapons + worst offenders) | generated/shared bodies | L | landed for worst offenders |
+| 4 | hero identity (weapons + worst offenders + silhouette kits) | generated/shared bodies | L | landed |
 | 5 | item/weapon polish (required) | none | M | landed |
 | 6 | long-tail hero identity | generated `fishman` + shared/remap | M | landed |
+| 7 | per-hero silhouette kits + creature-mesh vetting | none | M | landed |
 
 Run the gates after every asset batch: `npm run assets:check && npm run typecheck &&
-npm test && npm run build`. Phases 0–6 are landed for the required production bar.
+npm test && npm run build`. Phases 0–7 are landed for the required production bar.
 
 **Phase 6 (long-tail hero identity) — landed.** Every strongly non-humanoid hero now
 rides an animated creature/generated base: `natures-prophet → treant`,
@@ -582,8 +603,18 @@ three heroes still on a humanoid base are genuinely bipedal — `faceless-void` 
 documented), `pangolier` (moved to rogue), `bloodseeker` (moved to barbarian) — where a
 polished KayKit body is more faithful than a crude generated one.
 
-The only remaining work is **opportunistic, not required**: swapping generated
-stand-in bodies (`flier`, `bear`, `treant`, `fishman`, `abomination`, etc.) for better
-authored/downloaded animated meshes. That is gated on sourcing and vetting external
-CC0/CC-BY assets (the raw packs are not in-repo), so it stays a backlog item rather
-than a blocker — the generated families are the production floor and pass every gate.
+**Phase 7 (silhouette kits + creature-mesh vetting) — landed.** The shared-body cohort
+sameness is closed: each cohort hero now wears a distinct additive silhouette kit (§2.1)
+over the shared base, lint-pinned for per-cohort uniqueness. The orphaned holdout GLBs
+were removed — `generate_holdout_signatures.mjs` and `holdouts/**` now hold exactly the
+4 genuinely abstract holdouts (io, enigma, morphling, ancient-apparition), 8 files.
+
+Creature-mesh upgrades were **attempted and vetted, not deferred**: the Poly Pizza /
+Quaternius CC0 catalog was searched for animated replacements of the generated families
+(`bear`, `scorpion`, `treant`, `gnoll`, `owlbear`, `centaur`, `fishman`, etc.). The
+matching meshes are **static** (no idle/locomotion clips) and CC-BY, which the mandatory
+animation gate rejects as a regression; the few animated CC0 finds (e.g. a Quaternius
+yeti / flier) are not faithful wins for these species. The generated families are
+therefore the **confirmed production art**, not interim stand-ins — there is no open
+download backlog. Re-run the vetting only if a new animated CC0 creature for one of
+these species appears.

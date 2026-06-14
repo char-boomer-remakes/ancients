@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "hash": "13bde43d48da",
-  "generatedAt": "2026-06-14T19:19:07.217Z",
+  "hash": "04461c64db94",
+  "generatedAt": "2026-06-14T20:00:02.273Z",
   "assetRoot": "/assets/",
-  "totalBytes": 119742482,
+  "totalBytes": 119341650,
   "groups": {
     "audio": {
       "count": 54,
@@ -22,8 +22,8 @@
       "bytes": 91940556
     },
     "holdout": {
-      "count": 22,
-      "bytes": 658004
+      "count": 8,
+      "bytes": 257172
     },
     "terrain": {
       "count": 27,
@@ -4030,26 +4030,6 @@
       "source": "generated in-repo: generate_holdout_signatures.mjs"
     },
     {
-      "path": "holdouts/bane.glb",
-      "url": "/assets/holdouts/bane.glb",
-      "bytes": 26672,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs"
-    },
-    {
-      "path": "holdouts/batrider.glb",
-      "url": "/assets/holdouts/batrider.glb",
-      "bytes": 18532,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs"
-    },
-    {
       "path": "holdouts/enigma.glb",
       "url": "/assets/holdouts/enigma.glb",
       "bytes": 36876,
@@ -4070,59 +4050,9 @@
       "source": "generated in-repo: generate_holdout_signatures.mjs"
     },
     {
-      "path": "holdouts/leshrac.glb",
-      "url": "/assets/holdouts/leshrac.glb",
-      "bytes": 24608,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs"
-    },
-    {
-      "path": "holdouts/lone-druid.glb",
-      "url": "/assets/holdouts/lone-druid.glb",
-      "bytes": 20084,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs"
-    },
-    {
-      "path": "holdouts/medusa.glb",
-      "url": "/assets/holdouts/medusa.glb",
-      "bytes": 34952,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs"
-    },
-    {
       "path": "holdouts/morphling.glb",
       "url": "/assets/holdouts/morphling.glb",
       "bytes": 19596,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs"
-    },
-    {
-      "path": "holdouts/naga-siren.glb",
-      "url": "/assets/holdouts/naga-siren.glb",
-      "bytes": 24344,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs"
-    },
-    {
-      "path": "holdouts/phoenix.glb",
-      "url": "/assets/holdouts/phoenix.glb",
-      "bytes": 22220,
       "type": "model",
       "group": "holdout",
       "preloadGroup": "holdout",
@@ -4162,42 +4092,6 @@
         "w": 0.9754,
         "d": 0.9754
       }
-    },
-    {
-      "path": "holdouts/replacements/bane.glb",
-      "url": "/assets/holdouts/replacements/bane.glb",
-      "bytes": 34500,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs",
-      "animations": [
-        "idle",
-        "run",
-        "attack",
-        "cast",
-        "channel",
-        "death"
-      ]
-    },
-    {
-      "path": "holdouts/replacements/batrider.glb",
-      "url": "/assets/holdouts/replacements/batrider.glb",
-      "bytes": 26968,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs",
-      "animations": [
-        "idle",
-        "run",
-        "attack",
-        "cast",
-        "channel",
-        "death"
-      ]
     },
     {
       "path": "holdouts/replacements/enigma.glb",
@@ -4268,60 +4162,6 @@
       }
     },
     {
-      "path": "holdouts/replacements/leshrac.glb",
-      "url": "/assets/holdouts/replacements/leshrac.glb",
-      "bytes": 32412,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs",
-      "animations": [
-        "idle",
-        "run",
-        "attack",
-        "cast",
-        "channel",
-        "death"
-      ]
-    },
-    {
-      "path": "holdouts/replacements/lone-druid.glb",
-      "url": "/assets/holdouts/replacements/lone-druid.glb",
-      "bytes": 27952,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs",
-      "animations": [
-        "idle",
-        "run",
-        "attack",
-        "cast",
-        "channel",
-        "death"
-      ]
-    },
-    {
-      "path": "holdouts/replacements/medusa.glb",
-      "url": "/assets/holdouts/replacements/medusa.glb",
-      "bytes": 45348,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs",
-      "animations": [
-        "idle",
-        "run",
-        "attack",
-        "cast",
-        "channel",
-        "death"
-      ]
-    },
-    {
       "path": "holdouts/replacements/morphling.glb",
       "url": "/assets/holdouts/replacements/morphling.glb",
       "bytes": 27396,
@@ -4354,42 +4194,6 @@
         "w": 1.0123,
         "d": 1.0123
       }
-    },
-    {
-      "path": "holdouts/replacements/naga-siren.glb",
-      "url": "/assets/holdouts/replacements/naga-siren.glb",
-      "bytes": 32144,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs",
-      "animations": [
-        "idle",
-        "run",
-        "attack",
-        "cast",
-        "channel",
-        "death"
-      ]
-    },
-    {
-      "path": "holdouts/replacements/phoenix.glb",
-      "url": "/assets/holdouts/replacements/phoenix.glb",
-      "bytes": 30096,
-      "type": "model",
-      "group": "holdout",
-      "preloadGroup": "holdout",
-      "sourceSpec": null,
-      "source": "generated in-repo: generate_holdout_signatures.mjs",
-      "animations": [
-        "idle",
-        "run",
-        "attack",
-        "cast",
-        "channel",
-        "death"
-      ]
     },
     {
       "path": "props/foliage/bush.glb",

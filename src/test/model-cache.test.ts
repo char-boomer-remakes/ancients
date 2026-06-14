@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, attachSignatureItemWeapon, buildUnitRig, heroProportions, modelGeometryCacheSize, mountHeroModel, recolorToPalette } from '../engine/models';
+import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, attachSignatureItemWeapon, buildUnitRig, heroProportions, heroSilhouetteKit, modelGeometryCacheSize, mountHeroModel, recolorToPalette } from '../engine/models';
 import { BESPOKE_HERO_MODEL_ASSETS, BESPOKE_HERO_MODELS, ENABLED_HERO_MODELS, ENABLED_HERO_BASES, ENABLED_HOLDOUT_MODELS, ENABLED_HOLDOUT_SIGNATURES, HERO_BASE, creepCreatureUrl, heroAssetEntry, heroBaseId, heroBaseUrl, holdoutReplacementUrl, holdoutSignatureUrl, itemWeaponGlbUrl, PHASE5_STARTER_ASSETS } from '../engine/assets';
 import { ALL_HEROES } from '../data/index';
 
@@ -484,6 +484,37 @@ describe('within-cohort silhouette variation (WS-A / marquee)', () => {
       const { rig } = mountStandIn(heroId);
       const hero = ALL_HEROES.find((h) => h.id === heroId)!;
       expect(() => applyAuthoredSilhouette(rig, heroId, hero.palette), heroId).not.toThrow();
+    }
+  });
+
+  it('gives every hero in a shared-body cohort a distinct silhouette (no cohort-mate reads alike)', () => {
+    // The four KayKit cohorts share one base mesh each, so the kit + proportions are
+    // the entire differentiation. Within each cohort that combination must be unique,
+    // or two heroes render as the same coloured body.
+    for (const cohort of ['knight', 'mage', 'barbarian', 'rogue']) {
+      const heroes = ALL_HEROES.filter((h) => heroBaseId(h.id) === cohort);
+      expect(heroes.length, `${cohort} has members`).toBeGreaterThan(0);
+      const seen = new Map<string, string>();
+      for (const h of heroes) {
+        const kit = heroSilhouetteKit(h.id);
+        const p = heroProportions(h.id);
+        const sig = [kit.head, kit.back, kit.shoulder, kit.jaw, kit.aura, kit.accent, p.broad.toFixed(3), p.height.toFixed(3)].join('|');
+        const prior = seen.get(sig);
+        expect(prior, `${cohort}: ${h.id} shares a silhouette with ${prior ?? ''} (${sig})`).toBeUndefined();
+        seen.set(sig, h.id);
+      }
+    }
+  });
+
+  it('resolves a non-empty silhouette kit for every shared-body cohort hero', () => {
+    // A bare body (all slots null) would fall back to palette-only differentiation,
+    // which is exactly the sameness this system exists to remove.
+    for (const cohort of ['knight', 'mage', 'barbarian', 'rogue']) {
+      for (const h of ALL_HEROES.filter((x) => heroBaseId(x.id) === cohort)) {
+        const kit = heroSilhouetteKit(h.id);
+        const slots = [kit.head, kit.back, kit.shoulder, kit.jaw, kit.aura, kit.accent].filter(Boolean);
+        expect(slots.length, `${h.id} has no silhouette kit`).toBeGreaterThan(0);
+      }
     }
   });
 });

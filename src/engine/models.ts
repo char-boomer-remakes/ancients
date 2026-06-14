@@ -688,6 +688,9 @@ const HERO_PROPORTION_OVERRIDES: Record<string, Partial<HeroProportions>> = {
   omniknight: { broad: 1.12 },
   dawnbreaker: { height: 1.04, broad: 1.14 },
   juggernaut: { height: 1, broad: 0.98 },
+  // chen + omniknight are both winged-halo paladins (identical silhouette kit), so
+  // a distinct body width is what keeps them from reading as the same hero.
+  chen: { height: 1.02, broad: 1.08 },
   'faceless-void': { height: 1.06, broad: 1.05 },
   'chaos-knight': { height: 1.06, broad: 1.1 },
   abaddon: { broad: 1.08 },
@@ -744,6 +747,138 @@ export function heroProportions(heroId: string): HeroProportions {
 }
 
 /**
+ * A hero's structured silhouette kit — the overlay slots layered over the shared
+ * cohort body so same-base heroes don't read identically. Each slot resolves to at
+ * most one part; the renderer (applyIdentityOverlay) builds primitives from it.
+ */
+export interface HeroSilhouetteKit {
+  /** crowning head read: crown / helm variant / hood / mask / … (one wins). */
+  head: string | null;
+  /** back read: wings / cape / quiver / banner / totem / … */
+  back: string | null;
+  /** shoulder read: pauldrons / fur / quills / ribs / plate / … */
+  shoulder: string | null;
+  /** face read: tusks / beard / snout / mandibles / fangs. */
+  jaw: string | null;
+  /** energy read: halo / soul-core / sigil / rift / smoke / scream. */
+  aura: string | null;
+  /** small belt/neck/hand read: sash / satchel / lantern / charm / … */
+  accent: string | null;
+}
+
+const SILHOUETTE_FEATURES_BY_HERO: ReadonlyMap<string, string> = new Map(
+  HERO_LIKENESS_PROFILES.map((p) => [p.heroId, p.features.join(' ').toLowerCase()])
+);
+
+// Ordered keyword→slot tables. The first matching keyword wins per slot, so the
+// already-distinct per-hero feature lists project onto distinct silhouette kits.
+// Order is priority: specific reads (winged helm) beat generic ones (helm).
+const HEAD_KEYWORDS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['simian', ['simian']],
+  ['faceless', ['faceless']],
+  ['skull', ['skull']],
+  ['crown', ['crown', 'circlet', 'tiara', 'diadem', 'coronet']],
+  ['antlers', ['antler']],
+  ['horns', ['horn']],
+  ['helm-winged', ['winged helm']],
+  ['helm-horned', ['horned helm']],
+  ['helm-boar', ['boar helm']],
+  ['helm-beak', ['beak helm']],
+  ['helm-plumed', ['plumed helm', 'plumed hat']],
+  ['helm-crescent', ['crescent helm']],
+  ['helm-crested', ['crested helm', 'helm crest']],
+  ['hat-captain', ['captain hat']],
+  ['hat-wide', ['wide hat', 'wide helm']],
+  ['helm', ['helm']],
+  ['twin-head', ['two heads']],
+  ['mask', ['mask']],
+  ['mohawk', ['mohawk']],
+  ['topknot', ['topknot']],
+  ['headband', ['headband']],
+  ['headdress', ['headdress']],
+  ['ponytail', ['ponytail', 'braid']],
+  ['dome', ['dome']],
+  ['bald', ['bald']],
+  ['hood', ['hood', 'cowl', 'veil']],
+  ['crest', ['crest', 'fin', 'plume']]
+];
+const BACK_KEYWORDS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['wings', ['wing']],
+  ['quiver', ['quiver']],
+  ['banner', ['banner']],
+  ['back-spear', ['back spear', 'back-spear']],
+  ['totem-back', ['totem']],
+  ['feathers', ['feather']],
+  ['tail', ['tail']],
+  ['cape', ['cape', 'cloak', 'coat']]
+];
+const SHOULDER_KEYWORDS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['quills', ['back quills', 'quilled']],
+  ['ribs', ['rib']],
+  ['stone-shoulders', ['stone shoulder', 'rock shoulder', 'rocky shoulder', 'boulder shoulder']],
+  ['carapace', ['carapace', 'shell']],
+  ['fur-shoulders', ['fur shoulder', 'fur']],
+  ['pauldrons', ['pauldron']],
+  ['plate', ['plate', 'armor', 'gold shoulders', 'silver shoulders', 'shoulders']]
+];
+const JAW_KEYWORDS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['tusks', ['tusk']],
+  ['mandibles', ['mandible']],
+  ['snout', ['snout']],
+  ['fangs', ['fang']],
+  ['beard', ['beard', 'moustache']]
+];
+const AURA_KEYWORDS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['halo', ['halo']],
+  ['scream', ['scream']],
+  ['sigil', ['sigil']],
+  ['rift', ['rift']],
+  ['core', ['soul core', 'star core', 'spirit core', 'core']],
+  ['smoke', ['smoke', 'wisp', 'mist']]
+];
+const ACCENT_KEYWORDS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['sash', ['sash', 'scarf']],
+  ['satchel', ['satchel']],
+  ['lantern', ['lantern']],
+  ['charm', ['charm', 'fetish']],
+  ['quill-pen', ['brush']],
+  ['tome', ['tome', 'book']],
+  ['collar', ['collar']],
+  ['goggles', ['goggles']],
+  ['belt', ['belt']]
+];
+
+// Match on a leading word boundary (so 'wing' hits 'wings'/'winged' but not the
+// ubiquitous 'glowing eyes'), allowing a trailing suffix for plurals/inflections.
+function matchKeyword(feats: string, keyword: string): boolean {
+  const escaped = keyword.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  return new RegExp(`\\b${escaped}`).test(feats);
+}
+
+function pickSlot(feats: string, table: ReadonlyArray<readonly [string, readonly string[]]>): string | null {
+  for (const [value, kws] of table) {
+    if (kws.some((k) => matchKeyword(feats, k))) return value;
+  }
+  return null;
+}
+
+/**
+ * Resolve a hero's silhouette kit from its likeness features. Pure + headless so a
+ * lint can pin that no two heroes in a shared-body cohort resolve to the same kit.
+ */
+export function heroSilhouetteKit(heroId: string): HeroSilhouetteKit {
+  const feats = SILHOUETTE_FEATURES_BY_HERO.get(heroId) ?? '';
+  return {
+    head: pickSlot(feats, HEAD_KEYWORDS),
+    back: pickSlot(feats, BACK_KEYWORDS),
+    shoulder: pickSlot(feats, SHOULDER_KEYWORDS),
+    jaw: pickSlot(feats, JAW_KEYWORDS),
+    aura: pickSlot(feats, AURA_KEYWORDS),
+    accent: pickSlot(feats, ACCENT_KEYWORDS)
+  };
+}
+
+/**
  * Re-derive a hero's innate identity gear (crown/horns/cape/…) from its likeness
  * `features` and parent it, visible, over the now-mounted authored body. Idempotent:
  * a prior overlay group is removed first so a re-mount never stacks duplicates.
@@ -771,105 +906,159 @@ function applyIdentityOverlay(
     mesh(new THREE.TorusGeometry(r * s, t * s, 8, 22, arc), lam(c, e));
   const sphere = (r: number, c: string, e = 0): THREE.Mesh =>
     mesh(new THREE.SphereGeometry(r * s, 12, 8), lam(c, e));
+  const cyl = (r: number, h: number, c: string, e = 0): THREE.Mesh =>
+    mesh(new THREE.CylinderGeometry(r * s, r * s, h * s, 10), lam(c, e));
 
-  const feats = (HERO_LIKENESS_PROFILES.find((p) => p.heroId === heroId)?.features ?? [])
-    .join(' ')
-    .toLowerCase();
-  const has = (...needles: string[]): boolean => needles.some((n) => feats.includes(n));
-
-  const crown = (): void => {
-    const n = 5;
-    for (let i = 0; i < n; i++) {
-      const sp = cone(0.05, 0.24 + (i % 2) * 0.12, A, 0x141008);
-      sp.position.set(0.02 * s, (2.0 + (i % 2) * 0.04) * s, (i - (n - 1) / 2) * 0.1 * s);
-      g.add(sp);
-    }
-  };
-  const horns = (): void => {
-    const hL = cone(0.07, 0.4, S);
-    hL.position.set(0.02 * s, 2.0 * s, 0.16 * s);
-    hL.rotation.set(0.4, 0, 0.5);
-    const hR = hL.clone();
-    hR.position.z = -0.16 * s;
-    hR.rotation.set(-0.4, 0, 0.5);
-    g.add(hL, hR);
-  };
-  const antlers = (): void => {
-    for (const dz of [0.16, -0.16]) {
-      const a = cone(0.05, 0.5, S);
-      a.position.set(0, 2.12 * s, dz * s);
-      a.rotation.x = dz > 0 ? 0.55 : -0.55;
-      const b = cone(0.035, 0.24, S);
-      b.position.set(0.02 * s, 2.34 * s, dz * 1.8 * s);
-      b.rotation.x = dz > 0 ? 1 : -1;
-      g.add(a, b);
-    }
-  };
-  const crest = (): void => {
-    for (let i = 0; i < 3; i++) {
-      const fin = box(0.04, 0.18 + i * 0.06, 0.04, A, 0x141008);
-      fin.position.set(-0.02 * s, (2.04 + i * 0.04) * s, (i - 1) * 0.07 * s);
-      fin.rotation.z = -0.2;
-      g.add(fin);
-    }
-  };
-  const hood = (): void => {
-    const h = sphere(0.27, P);
-    h.scale.set(0.95, 1.05, 1.12);
-    h.position.set(-0.04 * s, 1.9 * s, 0);
-    const peak = cone(0.13, 0.32, P);
-    peak.position.set(-0.1 * s, 2.06 * s, 0);
-    peak.rotation.z = 0.4;
-    g.add(h, peak);
-  };
-  const halo = (): void => {
-    const ring = torus(0.22, 0.03, A, 0x33280a);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(0, 2.24 * s, 0);
-    g.add(ring);
-  };
-  const wings = (): void => {
-    const wL = box(0.05, 0.8, 0.34, S);
-    wL.position.set(-0.4 * s, 1.34 * s, 0.42 * s);
-    wL.rotation.z = 0.4;
-    const wR = wL.clone();
-    wR.position.z = -0.42 * s;
-    g.add(wL, wR);
-  };
-  const cape = (): void => {
-    const c = box(0.05, 1.05, 0.66, P);
-    c.position.set(-0.34 * s, 1.0 * s, 0);
-    g.add(c);
-  };
-  const tusks = (): void => {
-    const tL = cone(0.045, 0.24, '#f0ead8');
-    tL.rotation.set(0, 0, 2.6);
-    tL.position.set(0.28 * s, 1.5 * s, 0.12 * s);
-    const tR = tL.clone();
-    tR.position.z = -0.12 * s;
-    g.add(tL, tR);
-  };
-  const beard = (): void => {
-    const b = cone(0.17, 0.4, S);
-    b.rotation.z = Math.PI;
-    b.position.set(0.15 * s, 1.56 * s, 0);
-    g.add(b);
+  // A plain helm dome other helm variants build on top of (+x is front, -x back).
+  const helmDome = (): void => {
+    const h = sphere(0.2, S);
+    h.scale.set(1, 0.95, 1.05);
+    h.position.set(0.04 * s, 1.96 * s, 0);
+    g.add(h);
   };
 
-  // One head silhouette wins (priority crown → antlers → horns → crest → hood),
-  // then independent back, jaw, and halo reads layer on. Capped + keyword-gated so
-  // we never re-add the weapon (which the GLB already carries) and stay readable.
-  if (has('crown', 'circlet', 'tiara', 'diadem')) crown();
-  else if (has('antler')) antlers();
-  else if (has('horn')) horns();
-  else if (has('crest', 'fins', 'fin', 'plume')) crest();
-  else if (has('hood', 'cowl', 'veil')) hood();
+  // One head read wins. Helm variants layer a distinctive crest onto a shared dome
+  // so e.g. winged/boar/plumed knights diverge instead of all reading "helmet".
+  const HEAD: Record<string, () => void> = {
+    crown: () => {
+      for (let i = 0; i < 5; i++) {
+        const sp = cone(0.05, 0.24 + (i % 2) * 0.12, A, 0x141008);
+        sp.position.set(0.02 * s, (2.0 + (i % 2) * 0.04) * s, (i - 2) * 0.1 * s);
+        g.add(sp);
+      }
+    },
+    horns: () => {
+      const hL = cone(0.07, 0.4, S); hL.position.set(0.02 * s, 2.0 * s, 0.16 * s); hL.rotation.set(0.4, 0, 0.5);
+      const hR = hL.clone(); hR.position.z = -0.16 * s; hR.rotation.set(-0.4, 0, 0.5);
+      g.add(hL, hR);
+    },
+    antlers: () => {
+      for (const dz of [0.16, -0.16]) {
+        const a = cone(0.05, 0.5, S); a.position.set(0, 2.12 * s, dz * s); a.rotation.x = dz > 0 ? 0.55 : -0.55;
+        const b = cone(0.035, 0.24, S); b.position.set(0.02 * s, 2.34 * s, dz * 1.8 * s); b.rotation.x = dz > 0 ? 1 : -1;
+        g.add(a, b);
+      }
+    },
+    crest: () => {
+      for (let i = 0; i < 3; i++) {
+        const fin = box(0.04, 0.18 + i * 0.06, 0.04, A, 0x141008);
+        fin.position.set(-0.02 * s, (2.04 + i * 0.04) * s, (i - 1) * 0.07 * s); fin.rotation.z = -0.2;
+        g.add(fin);
+      }
+    },
+    hood: () => {
+      const h = sphere(0.27, P); h.scale.set(0.95, 1.05, 1.12); h.position.set(-0.04 * s, 1.9 * s, 0);
+      const peak = cone(0.13, 0.32, P); peak.position.set(-0.1 * s, 2.06 * s, 0); peak.rotation.z = 0.4;
+      g.add(h, peak);
+    },
+    skull: () => {
+      const sk = sphere(0.2, '#e9e6d8'); sk.scale.set(1, 1.1, 0.92); sk.position.set(0.08 * s, 1.96 * s, 0);
+      for (const dz of [0.08, -0.08]) { const eye = box(0.05, 0.06, 0.05, '#161620'); eye.position.set(0.2 * s, 1.97 * s, dz * s); g.add(eye); }
+      g.add(sk);
+    },
+    faceless: () => {
+      const head = box(0.3, 0.34, 0.3, S); head.position.set(0.04 * s, 1.98 * s, 0);
+      const plate = box(0.06, 0.3, 0.26, A, 0x101018); plate.position.set(0.2 * s, 1.98 * s, 0);
+      g.add(head, plate);
+    },
+    simian: () => {
+      const face = sphere(0.2, A); face.position.set(0.12 * s, 1.96 * s, 0);
+      const circ = torus(0.2, 0.03, '#d8b24a', 0x33280a); circ.rotation.x = Math.PI / 2; circ.position.set(0.02 * s, 2.12 * s, 0);
+      g.add(face, circ);
+    },
+    'twin-head': () => {
+      for (const dz of [0.16, -0.16]) { const h = sphere(0.17, P); h.position.set(0.04 * s, 1.96 * s, dz * s); g.add(h); }
+    },
+    mask: () => { const m = box(0.08, 0.26, 0.26, A, 0x141008); m.position.set(0.2 * s, 1.92 * s, 0); g.add(m); },
+    mohawk: () => { for (let i = 0; i < 5; i++) { const sp = cone(0.04, 0.22 + (i === 2 ? 0.1 : 0), S); sp.position.set((0.04 - i * 0.02) * s, 2.04 * s, 0); g.add(sp); } },
+    topknot: () => {
+      const knot = sphere(0.1, S); knot.position.set(-0.06 * s, 2.12 * s, 0);
+      const tail = cyl(0.03, 0.34, S); tail.position.set(-0.16 * s, 2.0 * s, 0); tail.rotation.z = 0.8;
+      g.add(knot, tail);
+    },
+    headband: () => { const band = torus(0.2, 0.03, A, 0x222018); band.rotation.x = Math.PI / 2; band.position.set(0.04 * s, 1.98 * s, 0); g.add(band); },
+    headdress: () => { for (let i = 0; i < 5; i++) { const f = box(0.03, 0.3, 0.06, A, 0x141008); f.position.set(-0.04 * s, 2.08 * s, (i - 2) * 0.08 * s); f.rotation.z = -0.3; g.add(f); } },
+    ponytail: () => { const tail = cyl(0.05, 0.5, P); tail.position.set(-0.18 * s, 1.84 * s, 0); tail.rotation.z = 0.5; g.add(tail); },
+    dome: () => { const d = sphere(0.24, P); d.scale.set(1, 0.7, 1); d.position.set(0.02 * s, 2.02 * s, 0); g.add(d); },
+    bald: () => { const d = sphere(0.19, P); d.position.set(0.06 * s, 1.96 * s, 0); g.add(d); },
+    helm: () => helmDome(),
+    'helm-winged': () => { helmDome(); for (const dz of [0.22, -0.22]) { const w = box(0.04, 0.1, 0.2, A, 0x141008); w.position.set(0, 2.04 * s, dz * s); w.rotation.x = dz > 0 ? -0.5 : 0.5; g.add(w); } },
+    'helm-horned': () => { helmDome(); HEAD.horns(); },
+    'helm-boar': () => { helmDome(); for (const dz of [0.14, -0.14]) { const t = cone(0.04, 0.2, '#f0ead8'); t.position.set(0.18 * s, 1.86 * s, dz * s); t.rotation.z = 2.4; g.add(t); } },
+    'helm-beak': () => { helmDome(); const beak = cone(0.08, 0.26, A); beak.rotation.z = -Math.PI / 2; beak.position.set(0.24 * s, 1.92 * s, 0); g.add(beak); },
+    'helm-plumed': () => { helmDome(); const plume = cone(0.06, 0.4, A, 0x141008); plume.position.set(-0.04 * s, 2.16 * s, 0); plume.rotation.z = 0.2; g.add(plume); },
+    'helm-crescent': () => { helmDome(); const cr = torus(0.12, 0.025, A, 0x33280a, Math.PI); cr.position.set(0, 2.12 * s, 0); g.add(cr); },
+    'helm-crested': () => { helmDome(); for (let i = 0; i < 3; i++) { const fin = box(0.03, 0.16, 0.03, A, 0x141008); fin.position.set(-0.04 * s, 2.08 * s, (i - 1) * 0.06 * s); g.add(fin); } },
+    'hat-captain': () => { const brim = cyl(0.26, 0.04, S); brim.position.set(0.04 * s, 2.0 * s, 0); const top = box(0.18, 0.14, 0.3, S); top.position.set(0.02 * s, 2.1 * s, 0); g.add(brim, top); },
+    'hat-wide': () => { const brim = cyl(0.3, 0.04, S); brim.position.set(0.04 * s, 2.0 * s, 0); const top = cone(0.16, 0.24, S); top.position.set(0.02 * s, 2.16 * s, 0); g.add(brim, top); }
+  };
 
-  if (has('halo')) halo();
-  if (has('wing')) wings();
-  else if (has('cape', 'cloak', 'coat')) cape();
-  if (has('tusk')) tusks();
-  if (has('beard', 'moustache')) beard();
+  const BACK: Record<string, () => void> = {
+    wings: () => { const wL = box(0.05, 0.8, 0.34, S); wL.position.set(-0.4 * s, 1.34 * s, 0.42 * s); wL.rotation.z = 0.4; const wR = wL.clone(); wR.position.z = -0.42 * s; g.add(wL, wR); },
+    cape: () => { const c = box(0.05, 1.05, 0.66, P); c.position.set(-0.34 * s, 1.0 * s, 0); g.add(c); },
+    quiver: () => {
+      const q = cyl(0.06, 0.5, S); q.position.set(-0.3 * s, 1.4 * s, 0.18 * s); q.rotation.x = 0.4; g.add(q);
+      for (let i = 0; i < 3; i++) { const ar = cyl(0.012, 0.3, A); ar.position.set(-0.34 * s, 1.66 * s, (0.12 + i * 0.05) * s); ar.rotation.x = 0.4; g.add(ar); }
+    },
+    banner: () => { const pole = cyl(0.02, 0.95, S); pole.position.set(-0.34 * s, 1.5 * s, 0.2 * s); const flag = box(0.02, 0.4, 0.3, A, 0x221a08); flag.position.set(-0.34 * s, 1.8 * s, 0.36 * s); g.add(pole, flag); },
+    'back-spear': () => { const sp = cyl(0.025, 1.1, S); sp.position.set(-0.3 * s, 1.4 * s, 0); sp.rotation.z = 0.3; const tip = cone(0.05, 0.2, A); tip.position.set(-0.14 * s, 1.92 * s, 0); tip.rotation.z = 0.3; g.add(sp, tip); },
+    'totem-back': () => { const t = cyl(0.08, 0.7, S); t.position.set(-0.32 * s, 1.5 * s, 0); const sk = sphere(0.1, A); sk.position.set(-0.32 * s, 1.86 * s, 0); g.add(t, sk); },
+    feathers: () => { for (let i = 0; i < 4; i++) { const f = cone(0.04, 0.4, A, 0x141008); f.position.set(-0.3 * s, 1.5 * s, (i - 1.5) * 0.1 * s); f.rotation.z = 2.7; g.add(f); } },
+    tail: () => { const t = cyl(0.06, 0.6, S); t.position.set(-0.36 * s, 0.7 * s, 0); t.rotation.z = -0.6; g.add(t); }
+  };
+
+  const SHOULDER: Record<string, () => void> = {
+    pauldrons: () => { for (const dz of [0.34, -0.34]) { const p = sphere(0.16, S); p.scale.set(1, 0.7, 1); p.position.set(0, 1.68 * s, dz * s); g.add(p); } },
+    'stone-shoulders': () => { for (const dz of [0.34, -0.34]) { const p = box(0.26, 0.22, 0.26, S); p.position.set(0, 1.7 * s, dz * s); g.add(p); } },
+    'fur-shoulders': () => { for (const dz of [0.34, -0.34]) { const p = sphere(0.18, P); p.scale.set(1, 0.8, 1); p.position.set(-0.02 * s, 1.66 * s, dz * s); g.add(p); } },
+    plate: () => { for (const dz of [0.32, -0.32]) { const p = box(0.18, 0.12, 0.22, A, 0x141008); p.position.set(0, 1.74 * s, dz * s); g.add(p); } },
+    quills: () => { for (let i = 0; i < 6; i++) { const q = cone(0.04, 0.4, S); q.position.set(-0.3 * s, (1.2 + i * 0.12) * s, 0); q.rotation.z = 2.6; g.add(q); } },
+    ribs: () => { for (let i = 0; i < 3; i++) { const r = box(0.18, 0.04, 0.34, A); r.position.set(0.16 * s, (1.3 + i * 0.14) * s, 0); g.add(r); } },
+    carapace: () => { const c = sphere(0.3, S); c.scale.set(0.7, 0.8, 1.1); c.position.set(-0.16 * s, 1.4 * s, 0); g.add(c); }
+  };
+
+  const JAW: Record<string, () => void> = {
+    tusks: () => { const tL = cone(0.045, 0.24, '#f0ead8'); tL.rotation.set(0, 0, 2.6); tL.position.set(0.28 * s, 1.5 * s, 0.12 * s); const tR = tL.clone(); tR.position.z = -0.12 * s; g.add(tL, tR); },
+    mandibles: () => { for (const dz of [0.1, -0.1]) { const m = cone(0.03, 0.2, S); m.position.set(0.3 * s, 1.52 * s, dz * s); m.rotation.z = -1.4; g.add(m); } },
+    snout: () => { const sn = box(0.2, 0.12, 0.16, P); sn.position.set(0.28 * s, 1.56 * s, 0); g.add(sn); },
+    fangs: () => { for (const dz of [0.06, -0.06]) { const fg = cone(0.025, 0.12, '#f0ead8'); fg.rotation.z = Math.PI; fg.position.set(0.26 * s, 1.5 * s, dz * s); g.add(fg); } },
+    beard: () => { const b = cone(0.17, 0.4, S); b.rotation.z = Math.PI; b.position.set(0.15 * s, 1.56 * s, 0); g.add(b); }
+  };
+
+  const AURA: Record<string, () => void> = {
+    halo: () => { const ring = torus(0.22, 0.03, A, 0x33280a); ring.rotation.x = Math.PI / 2; ring.position.set(0, 2.24 * s, 0); g.add(ring); },
+    scream: () => { const ring = torus(0.26, 0.02, A, 0x33280a); ring.rotation.y = Math.PI / 2; ring.position.set(0.22 * s, 1.9 * s, 0); g.add(ring); },
+    sigil: () => { const sg = torus(0.14, 0.02, A, 0x33280a); sg.position.set(-0.3 * s, 1.2 * s, 0); g.add(sg); },
+    rift: () => { const r = box(0.04, 0.5, 0.18, A, 0x141008); r.position.set(-0.34 * s, 1.4 * s, 0.2 * s); r.rotation.z = 0.4; g.add(r); },
+    core: () => { const c = sphere(0.1, A, 0x222018); c.position.set(0.18 * s, 1.3 * s, 0); g.add(c); },
+    smoke: () => { for (let i = 0; i < 3; i++) { const p = sphere(0.07 + i * 0.02, P); p.position.set((-0.2 - i * 0.06) * s, (1.0 + i * 0.2) * s, 0); g.add(p); } }
+  };
+
+  const ACCENT: Record<string, () => void> = {
+    sash: () => { const sm = box(0.06, 0.7, 0.1, A, 0x141008); sm.position.set(0.18 * s, 1.2 * s, 0); sm.rotation.z = 0.5; g.add(sm); },
+    satchel: () => { const sm = box(0.16, 0.16, 0.1, S); sm.position.set(-0.1 * s, 1.1 * s, 0.3 * s); g.add(sm); },
+    lantern: () => { const lm = box(0.1, 0.14, 0.1, A, 0x33280a); lm.position.set(0.3 * s, 1.3 * s, 0.2 * s); g.add(lm); },
+    charm: () => { for (let i = 0; i < 3; i++) { const cm = box(0.05, 0.08, 0.02, A, 0x141008); cm.position.set(0.2 * s, (1.3 - i * 0.1) * s, (i - 1) * 0.1 * s); g.add(cm); } },
+    'quill-pen': () => { const qp = cone(0.02, 0.4, A); qp.position.set(0.24 * s, 1.5 * s, 0.16 * s); qp.rotation.z = -0.6; g.add(qp); },
+    tome: () => { const tm = box(0.16, 0.2, 0.06, A, 0x141008); tm.position.set(0.22 * s, 1.2 * s, 0.18 * s); g.add(tm); },
+    collar: () => { const cl = torus(0.16, 0.04, A, 0x33280a, Math.PI); cl.rotation.x = Math.PI / 2; cl.position.set(0.06 * s, 1.78 * s, 0); g.add(cl); },
+    goggles: () => { for (const dz of [0.08, -0.08]) { const go = cyl(0.05, 0.06, A, 0x222018); go.rotation.x = Math.PI / 2; go.position.set(0.2 * s, 1.94 * s, dz * s); g.add(go); } },
+    belt: () => { const bl = box(0.06, 0.08, 0.4, A, 0x141008); bl.position.set(0.12 * s, 1.2 * s, 0); g.add(bl); }
+  };
+
+  // Each slot resolves to at most one part, so cohort-mates that share a base body
+  // still diverge by head + back + shoulder + jaw + aura + accent. Keyword-gated so
+  // we never re-add the weapon (the GLB already carries it) and stay readable.
+  const kit = heroSilhouetteKit(heroId);
+  const run = (table: Record<string, () => void>, key: string | null): void => {
+    if (key && table[key]) table[key]();
+  };
+  run(HEAD, kit.head);
+  run(BACK, kit.back);
+  run(SHOULDER, kit.shoulder);
+  run(JAW, kit.jaw);
+  run(AURA, kit.aura);
+  run(ACCENT, kit.accent);
 
   if (g.children.length > 0) rig.body.add(g);
 }

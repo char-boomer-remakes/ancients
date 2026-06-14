@@ -104,6 +104,47 @@ describe('raid-mechanics (test 13)', () => {
     expect(boss.order).toMatchObject({ kind: 'attack-unit', uid: axe.uid });
   });
 
+  it('the enrage beat ramps the boss damage, attack speed, and move speed', () => {
+    const def: RaidDef = { ...SCRIPTED, id: 'test-enrage-ramp', addWaves: [], zones: [], signatureExotic: undefined, enrageSec: 0 };
+    const sim = setupRaidSim({
+      seed: 5, party: [{ heroId: 'sven', level: 20 }, { heroId: 'sniper', level: 20 }], boss: def.boss, maxSec: 30
+    });
+    const boss = sim.unitsArr.find((u) => u.team === 1 && u.ctrl.kind === 'boss')!;
+    boss.ctrl.boss!.enrageSec = def.enrageSec; // the FSM enters the enrage phase (wired by raidSetupFromDef in the live path)
+    const dmg0 = boss.externalMods.damagePct ?? 0;
+    const as0 = boss.externalMods.attackSpeed ?? 0;
+    const ms0 = boss.externalMods.moveSpeedPct ?? 0;
+
+    const mechanics = createRaidMechanicRunner(def, sim, boss);
+    mechanics.tick(sim); // enrageSec 0 arms immediately, and is the only candidate
+
+    expect(mechanics.fired.some((f) => f.kind === 'enrage')).toBe(true);
+    expect((boss.externalMods.damagePct ?? 0) - dmg0).toBe(120);
+    expect((boss.externalMods.attackSpeed ?? 0) - as0).toBe(120);
+    expect((boss.externalMods.moveSpeedPct ?? 0) - ms0).toBe(30);
+  });
+
+  it('adjudicates a timeout by surviving hp% when neither side wipes', () => {
+    // A near-unkillable, near-harmless boss: nobody dies inside the window, so the
+    // encounter must resolve on the timeout tie-break rather than a wipe.
+    const def: RaidDef = {
+      ...SCRIPTED,
+      id: 'test-timeout-raid',
+      addWaves: [], zones: [], signatureExotic: undefined, enrageSec: 999,
+      boss: { heroId: 'sven', level: 30, items: ['assault-cuirass'], hpScale: 60, damageScale: 0.01 }
+    };
+    const maxSec = 4;
+    const r = runRaidEncounter({ def, party: STRONG_PARTY, tier: 'normal', seed: 31, maxSec });
+
+    const boss = r.sim.unitsArr.find((u) => u.team === 1)!;
+    const partyAlive = r.sim.unitsArr.filter((u) => u.team === 0 && u.alive && u.kind === 'hero').length;
+    expect(boss.alive, 'the boss outlasts the window').toBe(true);
+    expect(partyAlive, 'the party outlasts the window').toBeGreaterThan(0);
+    expect(r.ticks).toBeGreaterThanOrEqual(Math.round(maxSec / r.sim.dt) - 1); // ran to the timer
+    expect(r.winner).toBe(0); // a full party out-scores a chipped boss on hp%
+    expect(r.cleared).toBe(true);
+  });
+
   it('arms simultaneous beats but lets the boss brain start one per tick', () => {
     const gated: RaidDef = {
       ...SCRIPTED,
