@@ -352,6 +352,11 @@ describe('dungeon session D1/D2', () => {
     const session = g.liveDungeon!;
     const template = session.roomTemplate();
     expect(session.sim.bounds).toEqual({ w: template.size.x, h: template.size.y });
+    expect(session.sim.obstacles.length).toBe((template.blockers ?? []).length + (template.walls ?? []).length + (template.doors ?? []).length);
+    for (const obstacle of session.sim.obstacles) {
+      expect(obstacle.body.shape.kind).toBe('circle');
+      expect(obstacle.body.blocksMovement).toBe(true);
+    }
     for (const uid of session.enemyUids) {
       const enemy = session.sim.unit(uid);
       expect(enemy?.pos.x).toBeGreaterThanOrEqual(0);

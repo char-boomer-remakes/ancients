@@ -6,9 +6,10 @@ import { bossBkbItemOverrides, tierScale } from '../core/phase3';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { makeItemState, sortInventory } from '../core/items';
+import { normalizeCollisionObstacle, roomCollisionObstacle } from '../core/collision';
 import { bossVisualScale } from '../engine/world-size';
 import { TUNING } from '../data/tuning';
-import type { AffixDef, BossDef, CreepInstanceSave, DifficultyTier, DungeonDef, DungeonLayout, DungeonRoom, EffectNode, MacroHeroSetup, PlannedPack, RaidDef, RoomTemplate, SeasonalModeKind, SummonSpec, Vec2, ZoneSpec } from '../core/types';
+import type { AffixDef, BossDef, CollisionObstacle, CollisionObstacleInput, CreepInstanceSave, DifficultyTier, DungeonDef, DungeonLayout, DungeonRoom, EffectNode, MacroHeroSetup, PlannedPack, RaidDef, RoomTemplate, SeasonalModeKind, SummonSpec, Vec2, ZoneSpec } from '../core/types';
 import type { Unit } from '../core/unit';
 
 const FALLBACK_ROOM_SIZE = { x: 4200, y: 3000 };
@@ -90,6 +91,19 @@ function roomBounds(template: RoomTemplate): { w: number; h: number } {
   return { w: template.size.x, h: template.size.y };
 }
 
+function roomObstacleInputs(template: RoomTemplate): CollisionObstacleInput[] {
+  const bodies = [
+    ...(template.walls ?? []),
+    ...(template.blockers ?? []),
+    ...(template.doors ?? []).map((door) => door.body)
+  ];
+  return bodies.map(roomCollisionObstacle).filter((body) => body.radius > 0);
+}
+
+function roomObstacles(template: RoomTemplate): CollisionObstacle[] {
+  return roomObstacleInputs(template).map(normalizeCollisionObstacle);
+}
+
 export interface DungeonSessionResult {
   cleared: boolean;
   wiped: boolean;
@@ -158,7 +172,8 @@ export class DungeonSession {
     const templates = registeredTemplates(def);
     this.layout = generateDungeon(def, tier, seed, { modifiers: opts?.modifiers, roomTemplates: templates, endless: opts?.endless, endlessLevel: opts?.endlessLevel });
     this.roomTemplates = templateMap(def, templates);
-    this.sim = new Sim({ seed, bounds: roomBounds(this.roomTemplateFor(this.layout.rooms[0])) });
+    const firstTemplate = this.roomTemplateFor(this.layout.rooms[0]);
+    this.sim = new Sim({ seed, bounds: roomBounds(firstTemplate), obstacles: roomObstacleInputs(firstTemplate) });
     this.maxTicks = Math.round((opts?.maxSec ?? this.layout.depth * 75) / this.sim.dt);
     this.affixes = new Map((def.affixes ?? []).map((affix) => [affix.id, affix]));
     this.spawnParty(party);
@@ -347,7 +362,9 @@ export class DungeonSession {
   private enterNextPlayableRoom(): void {
     while (!this.done && !this.awaitingExit) {
       const room = this.room;
-      this.sim.bounds = roomBounds(this.roomTemplateFor(room));
+      const template = this.roomTemplateFor(room);
+      this.sim.bounds = roomBounds(template);
+      this.sim.obstacles = roomObstacles(template);
       this.repositionParty();
       this.enemyUids = [];
       this.guardianUid = null;

@@ -497,6 +497,79 @@ export interface WorldSize {
   footprintDecoupled?: boolean;
 }
 
+// ---------- Collision and hitboxes (COLLISION_HITBOX_SPEC) ----------
+export type CollisionLayer =
+  | 'unit'
+  | 'static'
+  | 'wall'
+  | 'door'
+  | 'hazard'
+  | 'trigger'
+  | 'loot'
+  | 'decor';
+
+export type CollisionShape =
+  | { kind: 'circle'; radius: number }
+  | { kind: 'capsule'; halfLength: number; radius: number; angle?: number }
+  | { kind: 'rect'; width: number; depth: number; angle?: number };
+
+export interface CollisionFeedbackHint {
+  stopSound?: 'stone' | 'wood' | 'metal' | 'flesh' | 'magic';
+  impactVfx?: 'spark' | 'dust' | 'shield' | 'blood' | 'immune';
+  label?: string;
+}
+
+export interface CollisionBody {
+  layer: CollisionLayer;
+  shape: CollisionShape;
+  blocksMovement?: boolean;
+  blocksProjectiles?: boolean;
+  blocksVision?: boolean;
+  targetable?: boolean;
+  interactable?: boolean;
+  pickPadding?: number;
+  feedback?: CollisionFeedbackHint;
+}
+
+export interface ResolvedUnitBodies {
+  movement: CollisionBody;
+  target: CollisionBody;
+  hit: CollisionBody;
+  pick: CollisionBody;
+}
+
+export interface CollisionObstacleInput {
+  pos: Vec2;
+  radius: number;
+  id?: string;
+  source?: string;
+  body?: CollisionBody;
+}
+
+export interface CollisionObstacle {
+  pos: Vec2;
+  radius: number;
+  id?: string;
+  source?: string;
+  body: CollisionBody;
+}
+
+export interface RoomCollisionBody {
+  id: string;
+  pos: Vec2;
+  body: CollisionBody;
+  source?: string;
+}
+
+export interface DungeonDoorBody {
+  id: string;
+  connectorIndex: number;
+  body: RoomCollisionBody;
+  openBody?: RoomCollisionBody;
+  clearHeightM?: number;
+  clearWidth: number;
+}
+
 export type ItemWeaponVisualKind =
   | NonNullable<SilhouetteSpec['weapon']>
   | 'broad-cleaver'
@@ -727,7 +800,7 @@ export interface BossDef {
   id: string;
   heroId: string;
   region: string;
-  rank: 'boss' | 'mini-boss';
+  rank: 'boss' | 'mini-boss' | 'world-boss';
   worldSize?: WorldSize;       // explicit override; else source-hero size raised to the rank floor
   phases?: { atHpPct: number; onEnter: EffectNode[]; gambitBias?: string }[];
   loot: LootTable;
@@ -742,6 +815,9 @@ export interface RaidDef {
   location: string;
   unlockQuest: string;
   boss: RaidBossSetup;
+  /** Render-only size band for the live arena lift (OVERWORLD_PLANNING §3): defaults
+   *  to `'boss'` (huge floor); marquee colossi declare `'world-boss'` (colossal). */
+  bossRank?: BossDef['rank'];
   addWaves: { atHpPct: number; summon: SummonSpec; count: number }[];
   zones: { atHpPct: number; zone: ZoneSpec }[];
   enrageSec: number;
@@ -939,6 +1015,11 @@ export interface RoomTemplate {
   connectors: { side: 'n' | 's' | 'e' | 'w'; at: Vec2 }[];
   spawnAnchors: Vec2[];
   props?: { treeDensity: number; rockDensity: number };
+  walls?: RoomCollisionBody[];
+  blockers?: RoomCollisionBody[];
+  doors?: DungeonDoorBody[];
+  noSpawnZones?: RoomCollisionBody[];
+  safeZones?: RoomCollisionBody[];
   allowTypes: RoomType[];
 }
 

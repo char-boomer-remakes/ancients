@@ -5,6 +5,7 @@ import { REG } from '../core/registry';
 import { applyDamage } from '../core/combat';
 import { itemStateFromSave } from '../core/items';
 import { buildHero } from '../core/hero-setup';
+import { normalizeCollisionObstacle, staticCircleObstacle } from '../core/collision';
 import { Game, newGameSave } from '../systems/game';
 import type { Unit } from '../core/unit';
 import type { ItemSave, Vec2 } from '../core/types';
@@ -55,8 +56,8 @@ describe('gameplay overhaul: locomotion and discovery', () => {
   it('projects move orders out of tree and rock obstacle circles', () => {
     const game = Game.headless(newGameSave('juggernaut'));
     const hero = game.activeUnit()!;
-    const obstacle = { pos: { x: hero.pos.x + 240, y: hero.pos.y }, radius: 120 };
-    game.sim.obstacles = [obstacle];
+    const obstacle = staticCircleObstacle({ pos: { x: hero.pos.x + 240, y: hero.pos.y }, radius: 120, id: 'test-obstacle' });
+    game.sim.obstacles = [normalizeCollisionObstacle(obstacle)];
 
     game.orderMove({ ...obstacle.pos });
 

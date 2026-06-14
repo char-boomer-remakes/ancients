@@ -12,10 +12,13 @@ import { soundForAbility } from './gestures';
 import { thinkUnit } from './controllers';
 import { computeTeamMind } from './utility';
 import { itemReady } from './items';
+import { homingProjectileHitRadius, normalizeCollisionObstacle, projectileSegmentHitsUnit, radiusContainsUnit, zoneContainsUnit } from './collision';
 import { makeCreepUnit, makeSummonUnit, Unit, type ItemState } from './unit';
 import { abilityMaxLevel, levelArr } from './values';
 import type {
   CreepDef,
+  CollisionObstacle,
+  CollisionObstacleInput,
   DifficultyTier,
   EffectNode,
   HeroDef,
@@ -40,7 +43,7 @@ import type {
 export interface SimOptions {
   seed: number;
   bounds: { w: number; h: number };
-  obstacles?: { pos: Vec2; radius: number }[];
+  obstacles?: CollisionObstacleInput[];
 }
 
 export interface Projectile {
@@ -123,7 +126,7 @@ export class Sim {
   rng: Rng;
   events = new EventBus();
   bounds: { w: number; h: number };
-  obstacles: { pos: Vec2; radius: number }[];
+  obstacles: CollisionObstacle[];
 
   unitsArr: Unit[] = [];
   private byUid = new Map<number, Unit>();
@@ -151,7 +154,7 @@ export class Sim {
   constructor(opts: SimOptions) {
     this.rng = new Rng(opts.seed);
     this.bounds = opts.bounds;
-    this.obstacles = opts.obstacles ?? [];
+    this.obstacles = (opts.obstacles ?? []).map(normalizeCollisionObstacle);
   }
 
   /** Resolve a unit by uid (dead-but-not-removed units still resolve). */
@@ -180,8 +183,7 @@ export class Sim {
     const out: Unit[] = [];
     this.forEachNearbyUnit(center, radius + 64, (u) => {
       if (!u.alive || u.kind === 'npc') return;
-      const r = radius + u.radius * 0.5;
-      if (dist2(u.pos, center) <= r * r && pred(u)) out.push(u);
+      if (radiusContainsUnit(center, radius, u) && pred(u)) out.push(u);
     });
     out.sort((a, b) => a.uid - b.uid);
     return out;
@@ -584,7 +586,7 @@ export class Sim {
         }
         const d = dist(p.pos, target.pos);
         const step = p.speed * this.dt;
-        if (d <= step + TUNING.projectileHitRadius + target.radius * 0.5) {
+        if (d <= step + homingProjectileHitRadius(target, TUNING.projectileHitRadius)) {
           p.pos = { ...target.pos };
           this.projectileImpact(p, target, caster);
         } else {
@@ -609,8 +611,7 @@ export class Sim {
           if (!p.hitsAllies && u.team === p.team) return;
           if (u.summary.untargetable || u.summary.invulnerable) return;
           if (p.hitUids.includes(u.uid)) return;
-          const segD = segPointDist(from, p.pos, u.pos);
-          if (segD <= p.width / 2 + u.radius) {
+          if (projectileSegmentHitsUnit(from, p.pos, p.width, u)) {
             const along = dist(from, u.pos);
             if (along < hitD) {
               hitD = along;
@@ -737,12 +738,7 @@ export class Sim {
   }
 
   private zoneContains(z: Zone, u: Unit): boolean {
-    if (z.shape === 'circle') {
-      if (!z.pos) return false;
-      const r = (z.radius ?? 0) + u.radius * 0.5;
-      return dist2(u.pos, z.pos) <= r * r;
-    }
-    return z.a !== undefined && z.b !== undefined && segPointDist(z.a, z.b, u.pos) <= z.width / 2 + u.radius * 0.5;
+    return zoneContainsUnit(z, u);
   }
 
   private forEachZoneCandidate(z: Zone, fn: (u: Unit) => void): void {
@@ -1141,16 +1137,6 @@ export class Sim {
     mix(this.zones.length);
     return (h >>> 0).toString(16);
   }
-}
-
-function segPointDist(a: Vec2, b: Vec2, p: Vec2): number {
-  const abx = b.x - a.x;
-  const aby = b.y - a.y;
-  const l2 = abx * abx + aby * aby;
-  if (l2 < 1e-9) return dist(p, a);
-  let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / l2;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(p.x - (a.x + abx * t), p.y - (a.y + aby * t));
 }
 
 function resolveAuraMods(def: { values?: Record<string, number[]>; aura?: { mods?: Record<string, number | string> } }, level: number): Record<string, number> {

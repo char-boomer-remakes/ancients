@@ -4,6 +4,7 @@ import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { resolveCollisions, steerToward } from '../core/movement';
 import { dist, pointSegDist } from '../core/math2d';
+import { projectileSegmentHitsUnit, resolveUnitBodies, staticCircleObstacle, zoneContainsUnit } from '../core/collision';
 
 beforeAll(() => registerAllContent());
 
@@ -99,6 +100,54 @@ describe('movement and collision', () => {
     }
 
     expect(arrived).toBe(true);
+    expect(dist(unit.pos, sim.obstacles[0].pos)).toBeGreaterThanOrEqual(sim.obstacles[0].radius + unit.radius - 0.1);
+  });
+
+  it('resolves the default unit body contract from a unit radius', () => {
+    const sim = new Sim({ seed: 25, bounds: { w: 2000, h: 2000 } });
+    const unit = sim.spawnHero(REG.hero('juggernaut'), {
+      team: 0,
+      pos: { x: 500, y: 500 },
+      level: 1,
+      ctrl: { kind: 'none' }
+    });
+
+    const bodies = resolveUnitBodies(unit);
+
+    expect(bodies.movement.shape).toEqual({ kind: 'circle', radius: unit.radius });
+    expect(bodies.movement.blocksMovement).toBe(true);
+    expect(bodies.target.targetable).toBe(true);
+    expect(bodies.hit.shape).toEqual({ kind: 'circle', radius: unit.radius });
+    expect(bodies.pick.pickPadding).toBeGreaterThan(0);
+  });
+
+  it('keeps named hit helpers in parity with current circle math', () => {
+    const target = { pos: { x: 180, y: 0 }, radius: 80, kind: 'creep' as const };
+    expect(zoneContainsUnit({ shape: 'circle', pos: { x: 100, y: 0 }, radius: 40, width: 0 }, target)).toBe(true);
+    expect(projectileSegmentHitsUnit({ x: 0, y: 91 }, { x: 240, y: 91 }, 20, target)).toBe(false);
+    expect(projectileSegmentHitsUnit({ x: 0, y: 80 }, { x: 240, y: 80 }, 20, target)).toBe(true);
+  });
+
+  it('normalizes authored static circle obstacles for movement collision', () => {
+    const obstacle = staticCircleObstacle({
+      pos: { x: 600, y: 500 },
+      radius: 80,
+      id: 'test-pillar',
+      source: 'movement.test',
+      feedbackLabel: 'Test pillar'
+    });
+    const sim = new Sim({ seed: 26, bounds: { w: 2000, h: 2000 }, obstacles: [obstacle] });
+    const unit = sim.spawnHero(REG.hero('juggernaut'), {
+      team: 0,
+      pos: { x: 620, y: 500 },
+      level: 1,
+      ctrl: { kind: 'none' }
+    });
+
+    resolveCollisions(sim, unit, true);
+
+    expect(sim.obstacles[0].body.shape).toEqual({ kind: 'circle', radius: 80 });
+    expect(sim.obstacles[0].body.blocksMovement).toBe(true);
     expect(dist(unit.pos, sim.obstacles[0].pos)).toBeGreaterThanOrEqual(sim.obstacles[0].radius + unit.radius - 0.1);
   });
 });

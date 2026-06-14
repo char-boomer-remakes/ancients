@@ -54,7 +54,8 @@ import { resonanceMods, elementForHero } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { abilityMaxLevel, abilityRankRequiredHeroLevel, autoAbilityLevels, canLearnAbilityRank, normalizeAbilityLevels } from '../core/values';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DishDef, DomainDef, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, EchoSpawnDef, GambitRule, GameSave, GraphicsSettings, GroundItemDrop, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, NeutralStashEntry, Order, QuestDef, QuestGiverDef, QuestKind, QuestProgress, QuestReward, QuestSave, QuestStatus, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, Vec2 } from '../core/types';
+import { obstacleBlocksMovement } from '../core/collision';
+import type { ActiveElement, ArmoryLoadouts, BossDef, CollisionObstacleInput, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DishDef, DomainDef, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, EchoSpawnDef, GambitRule, GameSave, GraphicsSettings, GroundItemDrop, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, NeutralStashEntry, Order, QuestDef, QuestGiverDef, QuestKind, QuestProgress, QuestReward, QuestSave, QuestStatus, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, Vec2 } from '../core/types';
 import { advance as questAdvance, chosenBranch as questChosenBranch, claim as questClaim, normalizeQuestSave, questGiverPos, refreshAvailability, type QuestContext, type QuestEvent } from '../core/quests';
 import { migratePhase7Save } from '../core/phase7';
 import { ProceduralAudio, type CinematicMixMode } from '../engine/audio';
@@ -465,7 +466,7 @@ export interface QuestGiverView {
 
 export interface SceneLike {
   selectedUid: number;
-  terrain: { obstacles: { pos: Vec2; radius: number }[] };
+  terrain: { obstacles: CollisionObstacleInput[] };
   groundHeightAt?(simX: number, simY: number): number;
   centerOn?(point: Vec2): void;
   pushEvent(ev: SimEvent, sim: Sim): void;
@@ -542,7 +543,7 @@ export interface AudioLike {
 /** No-op scene for headless (test/CI) runs — no WebGL, no DOM. */
 export class HeadlessScene implements SceneLike {
   selectedUid = -1;
-  terrain = { obstacles: [] as { pos: Vec2; radius: number }[] };
+  terrain = { obstacles: [] as CollisionObstacleInput[] };
   groundHeightAt(): number { return 0; }
   pushEvent(): void {}
   update(): void {}
@@ -5652,6 +5653,7 @@ export class Game {
     for (let pass = 0; pass < 3; pass++) {
       let moved = false;
       for (const obstacle of sim.obstacles) {
+        if (!obstacleBlocksMovement(obstacle)) continue;
         const minD = obstacle.radius + u.radius + 10;
         const dx = out.x - obstacle.pos.x;
         const dy = out.y - obstacle.pos.y;

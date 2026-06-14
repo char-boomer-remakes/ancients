@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { Rng, hashString } from '../core/rng';
-import type { RegionDef } from '../core/types';
+import { staticCircleObstacle } from '../core/collision';
+import type { CollisionObstacleInput, RegionDef } from '../core/types';
 import { WORLD_SCALE } from './scale';
 import { loadTex, loadModel, instancedFromModel } from './asset-loaders';
-import { TOWN_BUILDING_SIZE, DRESSING_PROP_SIZES, FOLIAGE_SIZES } from '../data/world/props';
+import { TOWN_BUILDING_SIZE, TOWN_LANDMARK_SIZE, DRESSING_PROP_SIZES, FOLIAGE_COLLISION, FOLIAGE_SIZES } from '../data/world/props';
 
 // ------------------------------------------------------------------
 // Procedural low-poly terrain: vertex-jittered plane, painted height
@@ -14,7 +15,7 @@ import { TOWN_BUILDING_SIZE, DRESSING_PROP_SIZES, FOLIAGE_SIZES } from '../data/
 export interface TerrainInfo {
   group: THREE.Group;
   heightAt(simX: number, simY: number): number; // world-units height
-  obstacles: { pos: { x: number; y: number }; radius: number }[];
+  obstacles: CollisionObstacleInput[];
   setStaticPropShadows?(enabled: boolean): void;
   /** Advances animated materials (water ripples). No-op when none. */
   update?(time: number): void;
@@ -422,6 +423,37 @@ function swapToInstancedModels(
     });
     for (const f of fallback) f.visible = false;
   });
+}
+
+/** The town's central `landmark` (OVERWORLD_PLANNING §3): a tiered stone monument
+ *  crowned with a beacon, fit to the declared `TOWN_LANDMARK_SIZE.heightM` so it reads
+ *  as the tallest thing in the region and frames the 1.8 m hero at its foot. */
+function buildTownMonument(): THREE.Group {
+  const g = new THREE.Group();
+  const stone = new THREE.MeshStandardMaterial({ color: 0x8a8694, flatShading: true, roughness: 0.74, metalness: 0.12 });
+  const trim = new THREE.MeshStandardMaterial({ color: 0xb6b0c0, flatShading: true, roughness: 0.5, metalness: 0.3 });
+  // Built in normalized units, then scaled so the whole stack reads at the target height.
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.4, 1.4, 8), stone);
+  base.position.y = 0.7;
+  const step = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.9, 2.6), stone);
+  step.position.y = 1.6;
+  step.rotation.y = Math.PI / 4;
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.95, 7.4, 6), stone);
+  shaft.position.y = 5.7;
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.5, 6), trim);
+  collar.position.y = 9.5;
+  const beacon = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.85),
+    new THREE.MeshStandardMaterial({ color: 0xffe2a0, emissive: 0xffc24a, emissiveIntensity: 1.6, roughness: 0.2, metalness: 0.1 })
+  );
+  beacon.position.y = 10.9;
+  beacon.name = 'monument-beacon';
+  g.add(base, step, shaft, collar, beacon);
+  // Fit the assembled height (built ≈ 11.75 m) to the declared landmark height.
+  const box = new THREE.Box3().setFromObject(g);
+  const builtH = box.getSize(new THREE.Vector3()).y || 1;
+  g.scale.setScalar(TOWN_LANDMARK_SIZE.heightM / builtH);
+  return g;
 }
 
 /** Once building GLBs load, place a varied one per hut slot and hide the box huts. */
@@ -860,7 +892,7 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
   };
 
   // scatter props (deterministic), keeping clearings around town/shrine/camps/spawns
-  const obstacles: { pos: { x: number; y: number }; radius: number }[] = [];
+  const obstacles: CollisionObstacleInput[] = [];
   const clearings: { x: number; y: number; r: number }[] = [
     { x: region.town.pos.x, y: region.town.pos.y, r: region.town.radius + 250 },
     ...region.camps.map((c) => ({ x: c.pos.x, y: c.pos.y, r: c.radius + 320 })),
@@ -900,7 +932,15 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
     m4.compose(new THREE.Vector3(wx, h + 0.5, wz), new THREE.Quaternion(), new THREE.Vector3(s, s, s));
     trunks.setMatrixAt(placedTrees, m4);
     treeMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(wx, h, wz), qY, new THREE.Vector3(s, s, s)));
-    obstacles.push({ pos: { x, y }, radius: 55 * s });
+    obstacles.push(staticCircleObstacle({
+      pos: { x, y },
+      radius: FOLIAGE_COLLISION.tree.radius * s,
+      id: `tree:${placedTrees}`,
+      source: 'terrain:foliage',
+      layer: FOLIAGE_COLLISION.tree.layer,
+      blocksProjectiles: FOLIAGE_COLLISION.tree.blocksProjectiles,
+      feedbackLabel: FOLIAGE_COLLISION.tree.label
+    }));
     placedTrees++;
   }
   trees.count = placedTrees;
@@ -925,7 +965,15 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
     m4.compose(new THREE.Vector3(x / WORLD_SCALE, heightAt(x, y) + 0.3 * s, y / WORLD_SCALE), qR, new THREE.Vector3(s, s * 0.8, s));
     rocks.setMatrixAt(placedRocks, m4);
     rockMatrices.push(new THREE.Matrix4().compose(new THREE.Vector3(x / WORLD_SCALE, heightAt(x, y), y / WORLD_SCALE), qR, new THREE.Vector3(s, s, s)));
-    obstacles.push({ pos: { x, y }, radius: 60 * s });
+    obstacles.push(staticCircleObstacle({
+      pos: { x, y },
+      radius: FOLIAGE_COLLISION.rock.radius * s,
+      id: `rock:${placedRocks}`,
+      source: 'terrain:foliage',
+      layer: FOLIAGE_COLLISION.rock.layer,
+      blocksProjectiles: FOLIAGE_COLLISION.rock.blocksProjectiles,
+      feedbackLabel: FOLIAGE_COLLISION.rock.label
+    }));
     placedRocks++;
   }
   rocks.count = placedRocks;
@@ -974,6 +1022,15 @@ function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number
   );
   plaza.position.set(wx, baseY + 0.12, wz);
   g.add(plaza);
+
+  // Central landmark monument: the region's tallest read, anchored to the plaza centre.
+  const monument = buildTownMonument();
+  monument.position.set(wx, baseY, wz);
+  monument.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) { markStaticShadowCaster(m, staticPropShadows); m.receiveShadow = true; }
+  });
+  g.add(monument);
 
   // huts around the plaza (procedural fallback; swapped for authored buildings below)
   const hutMat = new THREE.MeshStandardMaterial({ color: 0x9a7a52, flatShading: true, roughness: 0.88, metalness: 0.03 });

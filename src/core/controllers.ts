@@ -7,6 +7,7 @@ import { dominantRole } from './combat-profile';
 import { tauntToTop } from './threat';
 import { pickBossFocus } from './boss-brain';
 import { isDisabled } from './status';
+import { zoneContainsUnit as collisionZoneContainsUnit } from './collision';
 import type { Unit } from './unit';
 import type { GambitAction, GambitCondition, GambitRule, GambitTargetMode, Vec2 } from './types';
 import type { Sim } from './sim';
@@ -194,12 +195,7 @@ function enemyCandidate(sim: Sim, u: Unit, o: Unit): boolean {
 }
 
 function zoneContainsUnit(z: Zone, u: Unit): boolean {
-  if (z.shape === 'circle') {
-    if (!z.pos) return false;
-    const r = (z.radius ?? 0) + u.radius * 0.5;
-    return dist2(u.pos, z.pos) <= r * r;
-  }
-  return z.a !== undefined && z.b !== undefined && pointSegDist(u.pos, z.a, z.b) <= z.width / 2 + u.radius * 0.5;
+  return collisionZoneContainsUnit(z, u);
 }
 
 function zoneThreatensUnit(z: Zone, u: Unit): boolean {

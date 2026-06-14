@@ -1,6 +1,7 @@
 import { TUNING } from '../data/tuning';
 import { angleDelta, clamp, closestOnSeg, dist, dist2, fromAngle, norm, pointSegDist, sub, turnToward, v2 } from './math2d';
 import { cannotMove } from './status';
+import { obstacleBlocksMovement } from './collision';
 import type { Unit } from './unit';
 import type { Vec2 } from './types';
 import type { Sim } from './sim';
@@ -65,6 +66,7 @@ export function steerToward(sim: Sim, u: Unit, point: Vec2, dt: number, arriveRa
       blockers.push({ pos, radius, nearSurface });
     };
     for (const o of sim.obstacles) {
+      if (!obstacleBlocksMovement(o)) continue;
       considerObstacle(o.pos, o.radius);
     }
     blockers.sort((a, b) => a.nearSurface - b.nearSurface);
@@ -134,6 +136,7 @@ export function resolveCollisions(sim: Sim, u: Unit, ignoreUnits = false): void 
       });
     }
     for (const o of sim.obstacles) {
+      if (!obstacleBlocksMovement(o)) continue;
       const minD = o.radius + u.radius;
       const d2 = dist2(o.pos, u.pos);
       if (d2 < minD * minD && d2 > 1e-8) {

@@ -1381,6 +1381,27 @@ export class GameScene {
       group.add(marker);
     }
 
+    const bodyMat = new THREE.MeshBasicMaterial({ color: 0xd7c28a, transparent: true, opacity: 0.28, depthTest: false, depthWrite: false });
+    for (const blocker of template.blockers ?? []) {
+      if (blocker.body.shape.kind !== 'circle') continue;
+      const r = blocker.body.shape.radius / WORLD_SCALE;
+      const marker = new THREE.Mesh(new THREE.RingGeometry(Math.max(0.03, r * 0.68), Math.max(0.04, r), 28), bodyMat);
+      marker.rotation.x = -Math.PI / 2;
+      marker.position.set(blocker.pos.x / WORLD_SCALE, floorY + 0.24, blocker.pos.y / WORLD_SCALE);
+      marker.renderOrder = 9;
+      group.add(marker);
+    }
+
+    const zoneMat = new THREE.MeshBasicMaterial({ color: 0x8ec5ff, transparent: true, opacity: 0.12, depthTest: false, depthWrite: false });
+    for (const zone of [...(template.safeZones ?? []), ...(template.noSpawnZones ?? [])]) {
+      if (zone.body.shape.kind !== 'circle') continue;
+      const marker = new THREE.Mesh(new THREE.CircleGeometry(zone.body.shape.radius / WORLD_SCALE, 28), zoneMat);
+      marker.rotation.x = -Math.PI / 2;
+      marker.position.set(zone.pos.x / WORLD_SCALE, floorY + 0.18, zone.pos.y / WORLD_SCALE);
+      marker.renderOrder = 7;
+      group.add(marker);
+    }
+
     this.dungeonRoomGroup = group;
     this.dungeonRoomFloorY = floorY;
     this.scene.add(group);

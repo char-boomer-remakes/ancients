@@ -1,4 +1,5 @@
-import type { RegionDef, RoomTemplate, RoomType, Vec2 } from '../core/types';
+import { circleBody } from '../core/collision';
+import type { CollisionLayer, RegionDef, RoomCollisionBody, RoomTemplate, RoomType, Vec2 } from '../core/types';
 
 type Biome = RegionDef['biome'];
 type Side = 'n' | 's' | 'e' | 'w';
@@ -11,6 +12,35 @@ function connector(side: Side, x: number, y: number): { side: Side; at: Vec2 } {
   return { side, at: { x, y } };
 }
 
+function roomBody(id: string, pos: Vec2, radius: number, layer: CollisionLayer, blocksMovement: boolean, label: string): RoomCollisionBody {
+  return {
+    id,
+    pos,
+    source: 'data/room-templates',
+    body: circleBody(radius, {
+      layer,
+      blocksMovement,
+      blocksProjectiles: blocksMovement,
+      feedback: { stopSound: blocksMovement ? 'stone' : 'magic', impactVfx: blocksMovement ? 'dust' : 'spark', label }
+    })
+  };
+}
+
+function defaultBlockers(id: string, size: Vec2): RoomCollisionBody[] {
+  return [
+    roomBody(`${id}:pillar-west`, { x: size.x * 0.42, y: size.y * 0.5 }, 105, 'static', true, 'Dungeon pillar'),
+    roomBody(`${id}:pillar-east`, { x: size.x * 0.56, y: size.y * 0.5 }, 95, 'static', true, 'Dungeon pillar')
+  ];
+}
+
+function connectorNoSpawnZones(id: string, connectors: { side: Side; at: Vec2 }[]): RoomCollisionBody[] {
+  return connectors.map((c, i) => roomBody(`${id}:door-clear-${i}`, c.at, 300, 'trigger', false, 'Door clear space'));
+}
+
+function entranceSafeZone(id: string, size: Vec2): RoomCollisionBody[] {
+  return [roomBody(`${id}:entrance-safe`, { x: Math.max(420, size.x * 0.18), y: size.y / 2 }, 420, 'trigger', false, 'Entrance safe zone')];
+}
+
 function room(
   id: string,
   biome: Biome,
@@ -20,7 +50,18 @@ function room(
   allowTypes: RoomType[] = ALL_ROOM_TYPES,
   props: RoomTemplate['props'] = { treeDensity: 0.05, rockDensity: 0.08 }
 ): RoomTemplate {
-  return { id, biome, size, connectors, spawnAnchors, allowTypes, props };
+  return {
+    id,
+    biome,
+    size,
+    connectors,
+    spawnAnchors,
+    blockers: defaultBlockers(id, size),
+    noSpawnZones: connectorNoSpawnZones(id, connectors),
+    safeZones: entranceSafeZone(id, size),
+    allowTypes,
+    props
+  };
 }
 
 function fourDoor(size: Vec2): { side: Side; at: Vec2 }[] {
