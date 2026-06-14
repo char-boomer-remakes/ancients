@@ -1,5 +1,5 @@
 import { TUNING } from '../data/tuning';
-import { DEFAULT_CREEP_DROP_TABLES } from '../data/creep-drops';
+import { DEFAULT_CREEP_DROP_TABLES, qualityOddsByTier } from '../data/creep-drops';
 import { QUALITY_GRADES, nextQuality, rarityColor } from '../data/quality';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
@@ -15,6 +15,7 @@ import {
   bossTierUnlocked,
   buybackCost,
   chooseFaction,
+  creepCombatTier,
   dayNightMods,
   defaultPhase3SaveFields,
   draftTeams,
@@ -1509,7 +1510,12 @@ export class Game {
     if (reward.kind === 'none' || reward.kind === 'rest' || !reward.table) return;
     const table = this.modifiedDungeonLootTable(def, reward.table, modifiers);
     const modSalt = modifiers.length > 0 ? `:${modifiers.join('+')}` : '';
-    const roll = rollItemDrops(table, tier, {}, new Rng(stableContentSeed(`${def.id}:room-reward:${tier}:${room.index}${modSalt}`, Math.round(this.playtime))));
+    // Dry streaks persist per dungeon across runs so a slot's pity (e.g. the guardian
+    // anchor's `pity: 4`) actually accrues instead of resetting every roll (GAMEPLAY_2.0 §0.2).
+    const prev = this.dungeonProgress[def.id];
+    const dryStreaks = { ...(prev?.dryStreaks ?? {}) };
+    const roll = rollItemDrops(table, tier, dryStreaks, new Rng(stableContentSeed(`${def.id}:room-reward:${tier}:${room.index}${modSalt}`, Math.round(this.playtime))));
+    this.dungeonProgress[def.id] = { ...(prev ?? { clears: 0, wipes: 0, bestDepth: 0, bestTier: 'normal' as DifficultyTier }), dryStreaks: roll.dryStreaks };
     if (roll.items.length === 0) return;
     const drops = this.addDroppedItems(roll.items);
     const names = drops.map((it) => REG.item(it.id).name).join(', ');
@@ -1526,7 +1532,9 @@ export class Game {
       bestTier: cleared ? higherDungeonTier(tier, prev.bestTier) : prev.bestTier,
       lastTier: tier,
       lastModifiers: [...modifiers],
-      lastClearedAt: cleared ? Math.round(this.playtime) : prev.lastClearedAt
+      lastClearedAt: cleared ? Math.round(this.playtime) : prev.lastClearedAt,
+      // Carry the pity dry streaks accrued during the run (set by grantDungeonRoomReward).
+      ...(prev.dryStreaks ? { dryStreaks: prev.dryStreaks } : {})
     };
   }
 
@@ -1963,14 +1971,33 @@ export class Game {
           chance: { normal: 0.55, nightmare: 0.65, hell: 0.75 },
           pool: pool.filter((id) => itemAllowedFromSource(id, 'echo')).map((id) => ({ id, weight: REG.item(id).cost })),
           source: 'echo'
+        },
+        {
+          id: `${heroId}-echo-endgame`,
+          rarity: 'legendary',
+          rolls: 1,
+          chance: TUNING.overworldEgSlotPct.echo,
+          pool: this.echoEndgamePool(hero.attribute).map((id) => ({ id, weight: REG.item(id).cost })),
+          qualityOddsByTier: qualityOddsByTier(),
+          source: 'echo'
         }
       ]
     };
   }
 
+  private echoEndgamePool(attribute: string): string[] {
+    const ids = attribute === 'agi'
+      ? ['manta-style', 'daedalus', 'monkey-king-bar', 'mjollnir', 'silver-edge', 'moon-shard']
+      : attribute === 'str'
+        ? ['black-king-bar', 'assault-cuirass', 'sange-and-yasha', 'guardian-greaves', 'bloodstone']
+        : ['shivas-guard', 'ethereal-blade', 'wind-waker', 'kaya-and-sange', 'yasha-and-kaya', 'bloodstone'];
+    return ids.filter((id) => REG.items.has(id) && itemAllowedFromSource(id, 'echo') && !GATED_TOP_TIER.has(id));
+  }
+
   private rollEchoComponentDrop(heroId: string): ItemSave[] {
-    const seed = stableContentSeed(`${heroId}:echo-drop`, this.party.find((r) => r.heroId === heroId)?.echo.kills ?? 0);
-    const roll = rollItemDrops(this.echoComponentTable(heroId), 'normal', {}, new Rng(seed));
+    const difficulty = creepCombatTier(this.region.id);
+    const seed = stableContentSeed(`${heroId}:echo-drop:${difficulty}`, this.party.find((r) => r.heroId === heroId)?.echo.kills ?? 0);
+    const roll = rollItemDrops(this.echoComponentTable(heroId), difficulty, {}, new Rng(seed));
     if (roll.items.length === 0) return [];
     const drops = this.addDroppedItems(roll.items);
     this.msg(`Echo drop: ${roll.items.map((it) => REG.item(it.id).name).join(', ')} (→ Armory)`, 'good', this.dropAccent(roll.items));
@@ -2574,7 +2601,7 @@ export class Game {
       const a = (i / camp.count) * Math.PI * 2;
       const r = camp.radius * 0.55;
       const pos = { x: camp.pos.x + Math.cos(a) * r, y: camp.pos.y + Math.sin(a) * r };
-      const u = this.sim.spawnCreep(def, { team: 1, pos, wild: true, homePos: { ...camp.pos } });
+      const u = this.sim.spawnCreep(def, { team: 1, pos, wild: true, homePos: { ...camp.pos }, regionId: this.region.id, combatTier: creepCombatTier(this.region.id) });
       uids.push(u.uid);
     }
     return uids;
@@ -3545,8 +3572,9 @@ export class Game {
       if (typeof r.clears !== 'number' || typeof r.wipes !== 'number' || typeof r.bestDepth !== 'number') return false;
       if (!['normal', 'nightmare', 'hell'].includes(r.bestTier)) return false;
       if (r.lastTier !== undefined && !['normal', 'nightmare', 'hell'].includes(r.lastTier)) return false;
-      if (!Array.isArray(r.lastModifiers) || !r.lastModifiers.every((id) => typeof id === 'string')) return false;
+      if (r.lastModifiers !== undefined && (!Array.isArray(r.lastModifiers) || !r.lastModifiers.every((id) => typeof id === 'string'))) return false;
       if (r.lastClearedAt !== undefined && typeof r.lastClearedAt !== 'number') return false;
+      if (r.dryStreaks !== undefined && (!r.dryStreaks || typeof r.dryStreaks !== 'object' || !Object.values(r.dryStreaks).every((n) => typeof n === 'number' && n >= 0))) return false;
     }
     if (!v.eliteFive || typeof v.eliteFive.defeated !== 'number' || typeof v.eliteFive.championDown !== 'boolean') return false;
     if (!v.factionChoices || typeof v.factionChoices !== 'object') return false;
@@ -3716,9 +3744,11 @@ export class Game {
       }
     }
 
-    // neutral drop on a slain wild creep (§3.7): rolls into the dedicated neutral stash
+    // neutral drop on a slain wild creep (§3.7): rolls into the dedicated neutral stash.
+    // Overworld kills roll their loot at the region's combat tier so the nightmare/hell
+    // drop columns are live in deep regions, matching the creep-combat scaling (GAMEPLAY_2.0 §0.2).
     if (victim && victim.kind === 'creep' && victim.tier) {
-      this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid);
+      this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid, creepCombatTier(this.region.id));
       this.rollNeutralFor(victim.tier, ev.victimUid);
     }
 

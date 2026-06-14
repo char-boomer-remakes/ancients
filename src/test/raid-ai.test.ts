@@ -193,11 +193,15 @@ describe('AI-depth difficulty lever', () => {
 
     // the lever is independent of stat scaling, which also rises
     expect(hell.hpScale).toBeGreaterThan(normal.hpScale);
+    expect(hell.armorScale).toBeGreaterThan(normal.armorScale);
 
     // and it reaches the live sim's boss controller
+    const normalSim = setupRaidSim({ seed: 1, party: PARTY, boss: normal, maxSec: 30 });
+    const normalBoss = normalSim.unitsArr.find((u) => u.team === 1 && u.ctrl.kind === 'boss')!;
     const sim = setupRaidSim({ seed: 1, party: PARTY, boss: hell, maxSec: 30 });
     const boss = sim.unitsArr.find((u) => u.team === 1 && u.ctrl.kind === 'boss')!;
     expect(boss.ctrl.boss?.depth).toBe(TUNING.bossTierAiDepth.hell);
+    expect(boss.stats.armor).toBeGreaterThan(normalBoss.stats.armor);
     const ally = sim.unitsArr.find((u) => u.team === 0 && u.kind === 'hero')!;
     expect(ally.ctrl.aiDepth).toBe(TUNING.bossTierAiDepth.hell);
   });

@@ -10,7 +10,7 @@ import { buildDefaultGambit } from '../core/controllers';
 import { autoPicksForLevel, buildHero } from '../core/hero-setup';
 import { makeItemState } from '../core/items';
 import { recruitLevelCap } from '../core/progression';
-import { xpForLevel } from '../core/stats';
+import { levelFromXp, xpForLevel } from '../core/stats';
 import { TUNING } from '../data/tuning';
 import { Game, newGameSave } from '../systems/game';
 import type { SimEvent } from '../core/types';
@@ -279,19 +279,26 @@ describe('reputation-gate', () => {
 // Test 8: recruit level ceiling by badge count; XP banks past the cap
 // ----------------------------------------------------------------
 describe('recruit-ceiling', () => {
-  it('the cap is [15,22,30...] by badge count', () => {
-    expect(recruitLevelCap(0)).toBe(15);
-    expect(recruitLevelCap(1)).toBe(22);
+  it('the cap is [18,25,30...] by badge count', () => {
+    expect(recruitLevelCap(0)).toBe(18);
+    expect(recruitLevelCap(1)).toBe(25);
     expect(recruitLevelCap(2)).toBe(30);
     expect(recruitLevelCap(5)).toBe(30);
+  });
+
+  it('level 1 is stable until the level 2 XP threshold', () => {
+    expect(xpForLevel(2)).toBeGreaterThan(0);
+    expect(levelFromXp(0)).toBe(1);
+    expect(levelFromXp(xpForLevel(2) - 1)).toBe(1);
+    expect(levelFromXp(xpForLevel(2))).toBe(2);
   });
 
   it('XP past the ceiling banks and only converts post-cap', () => {
     const sim = arena();
     const h = sim.spawnHero(REG.hero('juggernaut'), { team: 0, pos: { x: 100, y: 100 }, level: 1, ctrl: { kind: 'none' } });
-    h.addXp(xpForLevel(30) * 2, 15); // far past the ceiling
-    expect(h.level).toBe(15);                          // clamped by the badge ceiling
-    expect(h.xp).toBeGreaterThan(xpForLevel(15));      // banked, not lost
+    h.addXp(xpForLevel(30) * 2, TUNING.recruitLevelCap[0]); // far past the ceiling
+    expect(h.level).toBe(TUNING.recruitLevelCap[0]);    // clamped by the badge ceiling
+    expect(h.xp).toBeGreaterThan(xpForLevel(TUNING.recruitLevelCap[0])); // banked, not lost
     h.addXp(0, 30);                                    // a new badge raises the ceiling
     expect(h.level).toBe(30);                          // banked XP catches up
   });

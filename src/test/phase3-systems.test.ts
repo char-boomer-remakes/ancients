@@ -26,6 +26,8 @@ import {
 import { Rng } from '../core/rng';
 import { runRaidBattle } from '../core/macro';
 import { Game, newGameSave, SAVE_VERSION } from '../systems/game';
+import { DEFAULT_CREEP_DROP_TABLES } from '../data/creep-drops';
+import { TUNING } from '../data/tuning';
 
 beforeAll(() => registerAllContent());
 
@@ -67,6 +69,35 @@ describe('Phase 3 difficulty, loot, and reward economy', () => {
       expect(generalized.dryStreaks.assembled).toBe(legacy.dryStreak);
       expect(generalized.pityUsed).toBe(legacy.pityUsed);
     }
+  });
+
+  it('adds endgame slots to large and ancient creep tables with tiered chances', () => {
+    const large = DEFAULT_CREEP_DROP_TABLES.large.slots.find((s) => s.id === 'creep-large-endgame');
+    const ancient = DEFAULT_CREEP_DROP_TABLES.ancient.slots.find((s) => s.id === 'creep-ancient-endgame');
+    expect(large?.chance).toEqual(TUNING.overworldEgSlotPct.largeCreep);
+    expect(ancient?.chance).toEqual(TUNING.overworldEgSlotPct.ancientCreep);
+    expect(ancient!.chance.hell).toBeGreaterThan(ancient!.chance.normal);
+    expect(ancient!.qualityOddsByTier?.hell?.standard).toBeLessThan(ancient!.qualityOddsByTier?.normal?.standard ?? 1);
+  });
+
+  it('lets quality odds intentionally roll standard or upgraded copies', () => {
+    const table = {
+      guaranteed: [],
+      slots: [{
+        id: 'quality-test',
+        rarity: 'legendary' as const,
+        rolls: 1,
+        chance: { normal: 1, nightmare: 1, hell: 1 },
+        pool: [{ id: 'black-king-bar', weight: 1 }],
+        qualityOddsByTier: {
+          normal: { standard: 1 },
+          nightmare: { unusual: 1 },
+          hell: { unusual: 1 }
+        }
+      }]
+    };
+    expect(rollItemDrops(table, 'normal', {}, new Rng(1)).items[0].quality).toBeUndefined();
+    expect(rollItemDrops(table, 'nightmare', {}, new Rng(1)).items[0].quality).toBe('unusual');
   });
 
   it('gates Hell behind a cleared Nightmare rerun', () => {

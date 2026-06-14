@@ -30,7 +30,7 @@ export interface ItemDropRoll {
   pityUsed: boolean;
 }
 
-const QUALITY_ORDER: ItemQuality[] = ['unusual', 'corrupted', 'frozen', 'genuine', 'inscribed'];
+const QUALITY_ORDER: ItemQuality[] = ['unusual', 'corrupted', 'frozen', 'genuine', 'inscribed', 'standard'];
 
 function pickWeighted(pool: DropEntry[], rng: Rng): DropEntry {
   const total = pool.reduce((sum, entry) => sum + Math.max(0, entry.weight), 0);
@@ -44,9 +44,9 @@ function pickWeighted(pool: DropEntry[], rng: Rng): DropEntry {
   return pool[pool.length - 1];
 }
 
-function rollQuality(entry: DropEntry, table: ItemDropTable['slots'][number], rng: Rng): ItemQuality | undefined {
+function rollQuality(entry: DropEntry, table: ItemDropTable['slots'][number], tier: DifficultyTier, rng: Rng): ItemQuality | undefined {
   if (entry.quality) return entry.quality === 'standard' ? undefined : entry.quality;
-  const odds = table.qualityOdds;
+  const odds = table.qualityOddsByTier?.[tier] ?? table.qualityOdds;
   if (!odds) return undefined;
   const total = QUALITY_ORDER.reduce((sum, q) => sum + Math.max(0, odds[q] ?? 0), 0);
   if (total <= 0) return undefined;
@@ -93,7 +93,7 @@ export function rollItemDrops(table: ItemDropTable, tier: DifficultyTier, dryStr
         continue;
       }
       const entry = pickWeighted(slot.pool, rng);
-      const quality = rollQuality(entry, slot, rng);
+      const quality = rollQuality(entry, slot, tier, rng);
       const item: ItemSave = { id: entry.id };
       if (quality) item.quality = quality;
       items.push(item);
@@ -120,6 +120,13 @@ export function rollLoot(table: LootTable, tier: DifficultyTier, dryStreak: numb
 
 export function tierScale(tier: DifficultyTier): { hp: number; damage: number; armor: number } {
   return TUNING.bossTierScale[tier];
+}
+
+export function creepCombatTier(regionId: string): DifficultyTier {
+  const mult = TUNING.regionRewardMult[regionId as keyof typeof TUNING.regionRewardMult] ?? 1;
+  if (mult >= 2.0) return 'hell';
+  if (mult >= 1.4) return 'nightmare';
+  return 'normal';
 }
 
 export function bossTierUnlocked(progress: { tier: DifficultyTier; dryClears: number } | undefined, target: DifficultyTier, badgeCleared: boolean): boolean {
@@ -274,7 +281,7 @@ export function draftTeams(def: DraftDef, recruited: string[], seed: number): { 
   return { player, enemy, bans };
 }
 
-export function raidSetupFromDef(def: RaidDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number): { seed: number; party: MacroHeroSetup[]; boss: MacroHeroSetup & { hpScale: number; damageScale: number; aiDepth: number; enrageSec: number }; maxSec: number } {
+export function raidSetupFromDef(def: RaidDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number): { seed: number; party: MacroHeroSetup[]; boss: MacroHeroSetup & { hpScale: number; damageScale: number; armorScale: number; aiDepth: number; enrageSec: number }; maxSec: number } {
   const scale = tierScale(tier);
   return {
     seed,
@@ -283,6 +290,7 @@ export function raidSetupFromDef(def: RaidDef, party: MacroHeroSetup[], tier: Di
       ...def.boss,
       hpScale: (def.boss.hpScale ?? TUNING.raidBossHpScale) * scale.hp,
       damageScale: (def.boss.damageScale ?? TUNING.raidBossDamageScale) * scale.damage,
+      armorScale: scale.armor,
       // AI-depth lever beside the stat scaling (AI_OVERHAUL §6)
       aiDepth: def.boss.aiDepth ?? TUNING.bossTierAiDepth[tier],
       enrageSec: def.enrageSec

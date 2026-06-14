@@ -195,7 +195,7 @@ export const HERO_LIKENESS_PROFILES: HeroLikenessProfile[] = [
   { heroId: 'necrophos', readsAs: 'plague reaper', features: ['hood', 'scythe', 'skull head', 'glowing eyes'] },
   { heroId: 'puck', readsAs: 'faerie dragon', features: ['wings', 'horns', 'slim body', 'glowing eyes'] },
   { heroId: 'pugna', readsAs: 'nether skull-mage', features: ['skull head', 'ward orbs', 'cape', 'glowing eyes'] },
-  { heroId: 'queen-of-pain', readsAs: 'blue pain demon', features: ['bat wings', 'horns', 'claws', 'glowing eyes'] },
+  // queen-of-pain is profiled in the marquee group above (richer entry); no duplicate here.
   { heroId: 'shadow-demon', readsAs: 'eredar demon', features: ['horns', 'hood', 'claws', 'glowing eyes'] },
   { heroId: 'shadow-shaman', readsAs: 'troll shaman', features: ['mask', 'feathers', 'ward staff', 'glowing eyes'] },
   // ---- Standard: Universal ----

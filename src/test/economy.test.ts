@@ -178,10 +178,10 @@ describe('reward-scaling-live (test 10)', () => {
   it('banks XP under the recruit ceiling but converts XP->gold once past the true level cap', () => {
     const def = creepOfTier('large');
 
-    // (a) recruit ceiling honored: a level-15 hero with no badges banks XP, no overflow gold.
+    // (a) recruit ceiling honored: a sub-cap hero with no badges banks XP, no overflow gold.
     const banked = Game.headless(soloSave('juggernaut', 15, []));
     banked.sim.events.captureAll = true;
-    expect(banked.recruitLevelCap()).toBe(TUNING.recruitLevelCap[0]); // 15
+    expect(banked.recruitLevelCap()).toBe(TUNING.recruitLevelCap[0]);
     const beforeBank = banked.gold;
     const evBank = killWildCreep(banked, def);
     const scaledBank = scaledBounty(evBank.bounty, banked.region.id, 'normal', def.tier, 1);

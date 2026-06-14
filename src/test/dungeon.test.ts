@@ -10,7 +10,7 @@ import { xpForLevel } from '../core/stats';
 import { dungeonAffixes } from '../data/dungeon-affixes';
 import { Game, newGameSave } from '../systems/game';
 import { DungeonSession } from '../systems/dungeon-session';
-import type { AffixDef, DungeonDef, GameSave, ItemDropTable, PlannedPack, RoomType, SpawnCard } from '../core/types';
+import type { AffixDef, DungeonDef, DungeonRoom, GameSave, ItemDropTable, PlannedPack, RoomType, SpawnCard } from '../core/types';
 
 beforeAll(() => registerAllContent());
 
@@ -203,6 +203,45 @@ describe('dungeon generation D0', () => {
     expect(sawQuality).toBe(true);
   });
 
+  it('persists dungeon guardian pity across reward rolls', () => {
+    const game = Game.headless(newGameSave('juggernaut'));
+    const def = REG.dungeon('frost-hollow');
+    const room: DungeonRoom = {
+      index: 99,
+      type: 'boss',
+      templateId: 'test',
+      exits: [],
+      packs: [],
+      reward: {
+        kind: 'guardian',
+        roomType: 'boss',
+        table: {
+          guaranteed: [],
+          slots: [{
+            id: 'guardian-pity-test',
+            rarity: 'legendary',
+            rolls: 1,
+            chance: { normal: 0, nightmare: 0, hell: 0 },
+            pool: [{ id: 'black-king-bar', weight: 1 }],
+            pity: 4,
+            source: 'dungeon'
+          }]
+        }
+      }
+    };
+    const grant = (game as unknown as { grantDungeonRoomReward: (d: DungeonDef, tier: 'normal' | 'nightmare' | 'hell', r: DungeonRoom) => void }).grantDungeonRoomReward.bind(game);
+
+    grant(def, 'hell', room);
+    grant(def, 'hell', room);
+    grant(def, 'hell', room);
+    expect(game.dungeonProgress[def.id].dryStreaks?.['guardian-pity-test']).toBe(3);
+    expect(game.inventoryStash.some((it) => it.id === 'black-king-bar')).toBe(false);
+
+    grant(def, 'hell', room);
+    expect(game.dungeonProgress[def.id].dryStreaks?.['guardian-pity-test']).toBe(0);
+    expect(game.inventoryStash.some((it) => it.id === 'black-king-bar')).toBe(true);
+  });
+
   it('forces modifier affixes when legal', () => {
     const modded: DungeonDef = {
       ...BASE_DUNGEON,
@@ -354,6 +393,33 @@ describe('dungeon session D1/D2', () => {
     expect(progress.bestTier).toBe('nightmare');
     expect(progress.lastModifiers).toEqual(['deep-map', 'frozen-oath']);
     expect(g.inventoryStash.length).toBeGreaterThan(before);
+  });
+
+  it('persists guardian pity across runs so the anchor drops within its pity window', () => {
+    const g = Game.headless(dungeonSave());
+    const guardianAnchors = new Set(['eye-of-skadi', 'refresher-orb']);
+    const runToClear = (seed: number): void => {
+      expect(g.startDungeon('frost-hollow', 'normal', { seed })).toBe(true);
+      for (let guard = 0; g.liveDungeon && guard < 4000; guard++) {
+        if (g.liveDungeon.exitsUnlocked()) chooseFirstExit(g);
+        else clearCurrentRoom(g);
+      }
+      expect(g.liveDungeon).toBeNull();
+    };
+
+    // The Frost Hollow guardian anchor carries `pity: 4`. Streaks persist on
+    // dungeonProgress, so four dry guardian clears must force the drop — it can
+    // never stall forever the way an empty per-run streak would.
+    let anchorsDropped = 0;
+    for (let run = 0; run < 4; run++) {
+      const before = g.inventoryStash.filter((it) => guardianAnchors.has(it.id)).length;
+      runToClear(7100 + run);
+      const after = g.inventoryStash.filter((it) => guardianAnchors.has(it.id)).length;
+      anchorsDropped += after - before;
+      // The streak map is threaded through and saved, not reset each run.
+      expect(g.buildSave().dungeonProgress['frost-hollow']).toBeDefined();
+    }
+    expect(anchorsDropped).toBeGreaterThan(0);
   });
 
   it('ejects cleanly on a one-room wipe without saving mid-run state', () => {

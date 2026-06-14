@@ -33,6 +33,15 @@ export function normalizeArmoryLoadouts(value: unknown): ArmoryLoadouts {
 
 const TIER_RANK: Record<DifficultyTier, number> = { normal: 0, nightmare: 1, hell: 2 };
 
+function normalizeDryStreaks(value: unknown): Record<string, number> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const out: Record<string, number> = {};
+  for (const [slot, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === 'number' && raw > 0) out[slot] = Math.floor(raw);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function normalizeDungeonProgress(value: unknown): Record<string, DungeonProgressSave> {
   if (!value || typeof value !== 'object') return {};
   const out: Record<string, DungeonProgressSave> = {};
@@ -41,6 +50,7 @@ export function normalizeDungeonProgress(value: unknown): Record<string, Dungeon
     const rec = raw as Partial<DungeonProgressSave>;
     const bestTier = (['normal', 'nightmare', 'hell'] as const).includes(rec.bestTier as DifficultyTier) ? rec.bestTier as DifficultyTier : 'normal';
     const lastTier = (['normal', 'nightmare', 'hell'] as const).includes(rec.lastTier as DifficultyTier) ? rec.lastTier as DifficultyTier : undefined;
+    const dryStreaks = normalizeDryStreaks(rec.dryStreaks);
     out[dungeonId] = {
       clears: Math.max(0, Math.floor(typeof rec.clears === 'number' ? rec.clears : 0)),
       wipes: Math.max(0, Math.floor(typeof rec.wipes === 'number' ? rec.wipes : 0)),
@@ -48,7 +58,8 @@ export function normalizeDungeonProgress(value: unknown): Record<string, Dungeon
       bestTier,
       lastTier,
       lastModifiers: Array.isArray(rec.lastModifiers) ? rec.lastModifiers.filter((id): id is string => typeof id === 'string') : [],
-      lastClearedAt: typeof rec.lastClearedAt === 'number' ? rec.lastClearedAt : undefined
+      lastClearedAt: typeof rec.lastClearedAt === 'number' ? rec.lastClearedAt : undefined,
+      ...(dryStreaks ? { dryStreaks } : {})
     };
   }
   return out;

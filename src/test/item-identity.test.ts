@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllContent } from '../data/index';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
-import { applyDamage } from '../core/combat';
+import { applyDamage, attackImpact } from '../core/combat';
 import { applyStatus } from '../core/effects';
 import { makeItemState, itemReady, sortInventory, computeBuyPlan, executeBuy } from '../core/items';
 import type { Unit } from '../core/unit';
@@ -156,18 +156,30 @@ describe('Glimmer Cape', () => {
 });
 
 describe('Battlefury cleave', () => {
-  it('rewards stacking enemies', () => {
+  it('rewards stacking enemies but respects armor', () => {
     const sim = new Sim({ seed: 5, bounds: { w: 4000, h: 4000 } });
     const jug = sim.spawnHero(REG.hero('juggernaut'), { team: 0, pos: { x: 1000, y: 1000 }, level: 15, ctrl: { kind: 'player' } });
     give(sim, jug, 'battlefury');
     const main = sim.spawnCreep(REG.creep('hellbear'), { team: 1, pos: { x: 1120, y: 1000 }, wild: true });
     main.ctrl = { kind: 'none' };
     const side = sim.spawnCreep(REG.creep('hellbear'), { team: 1, pos: { x: 1250, y: 1100 }, wild: true });
+    const armoredSide = sim.spawnCreep(REG.creep('hellbear'), { team: 1, pos: { x: 1250, y: 900 }, wild: true });
     side.ctrl = { kind: 'none' };
-    const sideHp = side.stats.maxHp;
-    sim.order(jug.uid, { kind: 'attack-unit', uid: main.uid });
-    sim.run(3);
-    expect(side.hp).toBeLessThan(sideHp); // cleave splashed
+    armoredSide.ctrl = { kind: 'none' };
+    armoredSide.externalMods.armor = (armoredSide.externalMods.armor ?? 0) + 40;
+    armoredSide.markStatsDirty();
+    armoredSide.refresh(0);
+    armoredSide.hp = armoredSide.stats.maxHp;
+
+    const sideHp = side.hp;
+    const armoredHp = armoredSide.hp;
+    attackImpact(sim, jug, main);
+
+    const sideDamage = sideHp - side.hp;
+    const armoredDamage = armoredHp - armoredSide.hp;
+    expect(sideDamage).toBeGreaterThan(0);
+    expect(armoredDamage).toBeGreaterThan(0);
+    expect(armoredDamage).toBeLessThan(sideDamage);
   });
 });
 

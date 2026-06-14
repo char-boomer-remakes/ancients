@@ -515,6 +515,7 @@ export interface DropSlot {
   chance: Record<DifficultyTier, number>;
   pool: DropEntry[];
   qualityOdds?: Partial<Record<ItemQuality, number>>;
+  qualityOddsByTier?: Partial<Record<DifficultyTier, Partial<Record<ItemQuality, number>>>>;
   pity?: number;
   source?: DropSource;
 }
@@ -974,6 +975,7 @@ export interface MacroHeroSetup {
 export interface RaidBossSetup extends MacroHeroSetup {
   hpScale?: number;
   damageScale?: number;
+  armorScale?: number;
   /** Boss-brain opportunism (AI_OVERHAUL §5/§6): 0..1, scales off-threat targeting. */
   aiDepth?: number;
   /** Encounter enrage timer (s); arms the boss phase-FSM enrage phase. */
@@ -1038,6 +1040,8 @@ export interface DungeonProgressSave {
   lastTier?: DifficultyTier;
   lastModifiers?: string[];
   lastClearedAt?: number;
+  /** Per-loot-slot dry streaks, persisted across runs so a guardian's pity actually accrues. */
+  dryStreaks?: Record<string, number>;
 }
 export interface HeroSave {
   heroId: string;

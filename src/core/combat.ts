@@ -262,7 +262,7 @@ export function attackImpact(sim: Sim, attacker: Unit, victim: Unit): void {
       if (!o.alive || o === victim || o.team === attacker.team) return;
       if (o.summary.untargetable) return;
       if (dist2(o.pos, victim.pos) <= cleaveRadius * cleaveRadius) {
-        applyDamage(sim, attacker, o, cleaveDmg, 'physical', { fromAttack: false, ignoreArmor: true });
+        applyDamage(sim, attacker, o, cleaveDmg, 'physical', { fromAttack: false, ignoreArmor: TUNING.cleaveIgnoresArmor });
       }
     });
   }

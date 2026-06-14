@@ -19,6 +19,7 @@ import type {
   Attribute,
   CreepDef,
   CreepTier,
+  DifficultyTier,
   GambitRule,
   HeroBaseStats,
   HeroDef,
@@ -33,6 +34,11 @@ import type {
   Vec2
 } from './types';
 import { abilityMaxLevel, abilityVal, levelArr } from './values';
+
+export interface CreepCombatScaleOpts {
+  regionId?: string;
+  combatTier?: DifficultyTier;
+}
 
 export interface AbilityState {
   def: AbilityDef;
@@ -541,11 +547,24 @@ export function heroBaseToStats(def: HeroDef): HeroBaseStats {
   return { ...def.baseStats };
 }
 
-export function creepToBase(def: CreepDef, star: 1 | 2 | 3): HeroBaseStats {
+function creepCombatScale(opts: CreepCombatScaleOpts = {}): { hp: number; damage: number } {
+  const regionId = opts.regionId as keyof typeof TUNING.creepCombatScale.hpByRegion | undefined;
+  const tier = opts.combatTier ?? 'normal';
+  const hpRegion = regionId ? TUNING.creepCombatScale.hpByRegion[regionId] ?? 1 : 1;
+  const damageRegion = regionId ? TUNING.creepCombatScale.damageByRegion[regionId] ?? 1 : 1;
+  const tierMult = TUNING.creepCombatScale.tier[tier] ?? 1;
+  return {
+    hp: hpRegion * tierMult,
+    damage: damageRegion * tierMult
+  };
+}
+
+export function creepToBase(def: CreepDef, star: 1 | 2 | 3, opts: CreepCombatScaleOpts = {}): HeroBaseStats {
   const dm = TUNING.starDamageMult[star - 1];
+  const scale = creepCombatScale(opts);
   return {
     str: 0, agi: 0, int: 0, strGain: 0, agiGain: 0, intGain: 0,
-    baseDamage: def.stats.damage * dm,
+    baseDamage: def.stats.damage * dm * scale.damage,
     baseArmor: def.stats.armor,
     attackRange: def.stats.attackRange,
     attackPoint: 0.4,
@@ -558,15 +577,16 @@ export function creepToBase(def: CreepDef, star: 1 | 2 | 3): HeroBaseStats {
   };
 }
 
-export function makeCreepUnit(def: CreepDef, opts: { team: Team; pos: Vec2; star?: 1 | 2 | 3; wild?: boolean }): Unit {
+export function makeCreepUnit(def: CreepDef, opts: { team: Team; pos: Vec2; star?: 1 | 2 | 3; wild?: boolean } & CreepCombatScaleOpts): Unit {
   const star = opts.star ?? 1;
   const sm = TUNING.starStatMult[star - 1];
+  const scale = creepCombatScale(opts);
   const u = new Unit({
     kind: 'creep',
     team: opts.team,
     name: def.name,
     attribute: 'str',
-    base: creepToBase(def, star),
+    base: creepToBase(def, star, opts),
     pos: opts.pos,
     radius: TUNING.unitRadiusCreep[def.tier]
   });
@@ -578,8 +598,8 @@ export function makeCreepUnit(def: CreepDef, opts: { team: Team; pos: Vec2; star
   if (def.elementalShield) {
     u.elementalShield = {
       element: def.elementalShield.element,
-      hp: def.elementalShield.hp * sm,
-      maxHp: def.elementalShield.hp * sm,
+      hp: def.elementalShield.hp * sm * scale.hp,
+      maxHp: def.elementalShield.hp * sm * scale.hp,
       weakTo: [...def.elementalShield.weakTo],
       weakMult: def.elementalShield.weakMult,
       vulnerableUntil: -1
@@ -588,7 +608,7 @@ export function makeCreepUnit(def: CreepDef, opts: { team: Team; pos: Vec2; star
   u.bounty = { xp: def.bounty.xp * sm, gold: def.bounty.gold * sm };
   // creeps: fixed pools, no attribute scaling
   u.externalMods = {
-    maxHp: def.stats.maxHp * sm - (TUNING.baseHp + 0),
+    maxHp: def.stats.maxHp * sm * scale.hp - (TUNING.baseHp + 0),
     magicResistPct: def.stats.magicResistPct - TUNING.baseMagicResist
   };
   u.abilities = def.abilities.map((a) => ({

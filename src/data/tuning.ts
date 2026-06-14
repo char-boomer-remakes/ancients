@@ -40,6 +40,8 @@ export const TUNING = {
   creepThinkTicks: 5,
   gambitThinkTicks: 5,
   bossThinkTicks: 4,
+  applyBossArmorTier: true,
+  cleaveIgnoresArmor: false,
 
   // --- AI brain (AI_OVERHAUL): utility scorer + team-mind + threat ---
   ai: {
@@ -51,6 +53,10 @@ export const TUNING = {
     focusStickiness: 1.18,      // a challenger must beat the held focus score by this to flip it
     engageRangeMult: 1.25,      // initiator engages once the shared focus is this * castRange away
     bossAiDepth: 0.5,           // default boss-brain opportunism (A6 dials this per tier)
+    manaFloorPct: 0.18,
+    manaConservationWeight: 0.5,
+    holdClusterMin: 2,
+    itemIntentFallback: true
   },
 
   // --- threat (AI_OVERHAUL §4, WoW-grounded): generalized past boss-only ---
@@ -68,7 +74,7 @@ export const TUNING = {
 
   // --- xp / gold (trainer-level wallet) ---
   startingGold: 2600,
-  xpCurve: [0, 0, 230, 600, 1080, 1660, 2260, 2980, 3730, 4620, 5550, 6520, 7530, 8580, 9805, 11055, 12330, 13630, 14955, 16455, 18045, 19645, 21495, 23595, 25945, 28545, 31395, 34495, 37845, 41445, 45295],
+  xpCurve: [0, 230, 600, 1080, 1660, 2260, 2980, 3730, 4620, 5550, 6520, 7530, 8580, 9805, 11055, 12330, 13630, 14955, 16455, 18045, 19645, 21495, 23595, 25945, 28545, 31395, 34495, 37845, 41445, 45295],
   levelCap: 30,
   postCapXpToGold: 0.12,      // gold per excess xp; loot now carries more of the post-cap reward
   xpActivePct: 1.0,
@@ -89,11 +95,53 @@ export const TUNING = {
     'mount-joerlak': 2.35,
     'mad-moon-crater': 2.55
   },
+  creepCombatScale: {
+    hpByRegion: {
+      'tranquil-vale': 1.0,
+      'nightsilver-woods': 1.19,
+      icewrack: 1.41,
+      'devarshi-desert': 1.72,
+      shadeshore: 2.07,
+      'vile-reaches': 2.53,
+      quoidge: 3.04,
+      'hidden-wood': 3.25,
+      'mount-joerlak': 3.77,
+      'mad-moon-crater': 4.2
+    },
+    damageByRegion: {
+      'tranquil-vale': 1.0,
+      'nightsilver-woods': 1.11,
+      icewrack: 1.22,
+      'devarshi-desert': 1.37,
+      shadeshore: 1.53,
+      'vile-reaches': 1.7,
+      quoidge: 1.9,
+      'hidden-wood': 1.99,
+      'mount-joerlak': 2.17,
+      'mad-moon-crater': 2.32
+    },
+    tier: { normal: 1.0, nightmare: 1.5, hell: 2.1 }
+  },
   tierRewardMult: { normal: 1.0, nightmare: 1.65, hell: 2.45 },
   creepTierRewardMult: { small: 1.0, medium: 1.35, large: 1.85, ancient: 2.6 },
   creepStarBountyMult: [1.0, 1.75, 2.8],
   neutralDropPctByTier: { small: 0.10, medium: 0.14, large: 0.20, ancient: 0.28 },
   tinkersBench: { rerollCost: 225, reclaimCost: 150, enchantCost: 600 },
+  loot: {
+    egCadenceMinByBand: { early: 28, mid: 18, late: 11 },
+    egRaritySplit: {
+      early: { legendary: 0.95, immortal: 0.05, arcana: 0.0 },
+      mid: { legendary: 0.9, immortal: 0.095, arcana: 0.005 },
+      late: { legendary: 0.84, immortal: 0.15, arcana: 0.01 }
+    },
+    qualityDropChance: { normal: 0.08, nightmare: 0.18, hell: 0.3 },
+    bandMarkQuota: { early: 24, mid: 18, late: 12 }
+  },
+  overworldEgSlotPct: {
+    largeCreep: { normal: 0.02, nightmare: 0.035, hell: 0.05 },
+    ancientCreep: { normal: 0.04, nightmare: 0.055, hell: 0.07 },
+    echo: { normal: 0.03, nightmare: 0.045, hell: 0.06 }
+  },
   blackMarket: {
     recipeWheelCost: 650,
     relicWheelBaseCost: 2400,
@@ -116,7 +164,7 @@ export const TUNING = {
   healServiceCost: 120,
 
   // --- recruitment ceiling + trials (Phase 6 §3.1, §3.4) ---
-  recruitLevelCap: [15, 22, 30],  // index = badge count, clamped at last entry (test §6.8 names [15,22,30])
+  recruitLevelCap: [18, 25, 30],  // index = badge count, clamped at last entry
   relocationShardFloor: 1,        // failed trial drops Find shards to this floor, never locks out
   findShardsNeeded: 2,            // default echo kills to reveal a trial marker
   echoHpTaxPct: 0.4,              // overworld/trial echoes lose this fraction of max HP (×0.6, §3.2)

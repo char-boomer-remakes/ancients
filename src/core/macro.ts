@@ -156,8 +156,10 @@ export function setupRaidSim(setup: RaidSetup): Sim {
   }, bossLevel, bossBuild);
   const hpScale = setup.boss.hpScale ?? TUNING.raidBossHpScale;
   const damageScale = setup.boss.damageScale ?? TUNING.raidBossDamageScale;
+  const armorScale = TUNING.applyBossArmorTier ? setup.boss.armorScale ?? 1 : 1;
   boss.externalMods.maxHp = (boss.externalMods.maxHp ?? 0) + boss.stats.maxHp * (hpScale - 1);
   boss.externalMods.damagePct = (boss.externalMods.damagePct ?? 0) + (damageScale - 1) * 100;
+  boss.externalMods.armor = (boss.externalMods.armor ?? 0) + boss.base.baseArmor * (armorScale - 1);
   boss.radius = TUNING.unitRadiusHero * TUNING.raidBossRadiusScale;
   boss.markStatsDirty();
   boss.refresh(0);

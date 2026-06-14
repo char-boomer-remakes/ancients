@@ -219,7 +219,7 @@ function enemyCandidate(sim: Sim, u: Unit, o: Unit): boolean {
   return o.alive && o.team !== u.team && o.kind !== 'npc' && !o.summary.untargetable && o.isVisibleTo(u.team, sim.time);
 }
 
-function dangerScore(o: Unit): number {
+export function dangerousScore(o: Unit): number {
   const attackDps = o.stats.damage / Math.max(0.2, o.stats.attackInterval);
   const casterBias = o.abilities.some((a) => a.level > 0 && a.cooldownUntil <= 0 && a.def.targeting !== 'passive' && a.def.targeting !== 'aura') ? 120 : 0;
   const heroBias = o.kind === 'hero' ? 150 : 0;
@@ -228,7 +228,7 @@ function dangerScore(o: Unit): number {
 }
 
 function dangerNorm(o: Unit): number {
-  return Math.max(0, Math.min(1, dangerScore(o) / TUNING.ai.dangerNorm));
+  return Math.max(0, Math.min(1, dangerousScore(o) / TUNING.ai.dangerNorm));
 }
 
 /** A target is worth committing to by how killable and how dangerous it is. */
@@ -425,21 +425,35 @@ function raidStackForHealOrder(sim: Sim, u: Unit): Order | null {
 
 interface Scored { score: number; order: Order; slot: number }
 
-function finalAbilityScore(u: Unit, score: number, intent: AbilityIntent, order: Order, focus: Unit | null): number {
+function manaAdjustedScore(u: Unit, score: number, manaCost: number): number {
+  if (manaCost <= 0 || u.stats.maxMana <= 0) return score;
+  const afterPct = (u.mana - manaCost) / Math.max(1, u.stats.maxMana);
+  const floor = TUNING.ai.manaFloorPct;
+  if (afterPct >= floor) return score;
+  const pressure = Math.min(1, (floor - afterPct) / Math.max(0.01, floor));
+  return score * Math.max(0.25, 1 - pressure * TUNING.ai.manaConservationWeight);
+}
+
+function finalAbilityScore(u: Unit, score: number, intent: AbilityIntent, order: Order, focus: Unit | null, manaCost = 0, clusterCount = Infinity, isUlt = false): number {
   let out = score;
   if (focus && ((order.kind === 'cast' && order.uid === focus.uid) || (order.kind === 'attack-unit' && order.uid === focus.uid))) {
     out *= 0.75 + combatProfile(u).weights.focusFollow * 0.25;
   }
 
   const boss = u.ctrl.kind === 'boss' ? u.ctrl.boss : undefined;
-  if (!boss) return out;
+  if (boss) {
+    if (boss.pref === 'cluster' && intent.aoe) out *= 1.28;
+    if (boss.pref === 'kill' && intent.offensive && !intent.aoe) out *= 1.22;
+    if (boss.pref === 'healer' && (intent.hardControl || intent.softControl)) out *= 1.18;
+    if (boss.phase === 'enrage' && intent.offensive) out *= 1.12;
+    if (boss.phase === 'desperation' && (intent.hardControl || intent.escape || intent.buff)) out *= 1.12;
+  }
 
-  if (boss.pref === 'cluster' && intent.aoe) out *= 1.28;
-  if (boss.pref === 'kill' && intent.offensive && !intent.aoe) out *= 1.22;
-  if (boss.pref === 'healer' && (intent.hardControl || intent.softControl)) out *= 1.18;
-  if (boss.phase === 'enrage' && intent.offensive) out *= 1.12;
-  if (boss.phase === 'desperation' && (intent.hardControl || intent.escape || intent.buff)) out *= 1.12;
-  return out;
+  if (isUlt && intent.aoe && clusterCount < TUNING.ai.holdClusterMin) {
+    const depth = u.ctrl.aiDepth ?? TUNING.ai.bossAiDepth;
+    if (depth >= TUNING.bossTierAiDepth.nightmare) out *= Math.max(0.4, 1 - 0.45 * depth);
+  }
+  return manaAdjustedScore(u, out, manaCost);
 }
 
 function scoreAbility(sim: Sim, u: Unit, slot: number, focus: Unit | null, profile: CombatProfile): Scored | null {

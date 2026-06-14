@@ -15,6 +15,7 @@ import { makeCreepUnit, makeSummonUnit, Unit, type ItemState } from './unit';
 import { abilityMaxLevel, levelArr } from './values';
 import type {
   CreepDef,
+  DifficultyTier,
   EffectNode,
   HeroDef,
   Order,
@@ -236,8 +237,8 @@ export class Sim {
     return u;
   }
 
-  spawnCreep(def: CreepDef, opts: { team: Team; pos: Vec2; star?: 1 | 2 | 3; wild?: boolean; homePos?: Vec2; ownerUid?: number }): Unit {
-    const u = makeCreepUnit(def, { team: opts.team, pos: opts.pos, star: opts.star, wild: opts.wild });
+  spawnCreep(def: CreepDef, opts: { team: Team; pos: Vec2; star?: 1 | 2 | 3; wild?: boolean; homePos?: Vec2; ownerUid?: number; regionId?: string; combatTier?: DifficultyTier }): Unit {
+    const u = makeCreepUnit(def, { team: opts.team, pos: opts.pos, star: opts.star, wild: opts.wild, regionId: opts.regionId, combatTier: opts.combatTier });
     u.aggroRadius = def.aggroRadius;
     if (opts.ownerUid !== undefined) {
       u.ownerUid = opts.ownerUid;

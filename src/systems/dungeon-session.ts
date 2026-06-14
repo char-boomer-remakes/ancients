@@ -232,7 +232,7 @@ export class DungeonSession {
         x: center.x + Math.cos(angle) * 115,
         y: center.y + Math.sin(angle) * 115
       };
-      const u = this.sim.spawnCreep(REG.creep(card.creepId), { team: 1, pos, star: card.star, wild: true, homePos: { ...center } });
+      const u = this.sim.spawnCreep(REG.creep(card.creepId), { team: 1, pos, star: card.star, wild: true, homePos: { ...center }, combatTier: this.tier });
       spawned.push(u);
       this.enemyUids.push(u.uid);
     });
@@ -284,6 +284,9 @@ export class DungeonSession {
     u.items[1] = makeItemState(REG.item('assault-cuirass'));
     u.externalMods.maxHp = (u.externalMods.maxHp ?? 0) + u.stats.maxHp * (TUNING.raidBossHpScale * scale.hp - 1);
     u.externalMods.damagePct = (u.externalMods.damagePct ?? 0) + (TUNING.raidBossDamageScale * scale.damage - 1) * 100;
+    if (TUNING.applyBossArmorTier) {
+      u.externalMods.armor = (u.externalMods.armor ?? 0) + u.base.baseArmor * (scale.armor - 1);
+    }
     u.radius = TUNING.unitRadiusHero * TUNING.raidBossRadiusScale;
     u.markStatsDirty();
     u.refresh(this.sim.time);
