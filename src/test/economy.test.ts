@@ -6,6 +6,7 @@ import { freshEchoProgress } from '../core/echo';
 import { rollLoot, scaledBounty } from '../core/phase3';
 import { overflowXpToGold } from '../core/progression';
 import { xpForLevel } from '../core/stats';
+import { GRADE_UP_COSTS, MASTERWORK_COSTS, REFORGE_COSTS } from '../data/forge';
 import { TUNING } from '../data/tuning';
 import { GATED_TOP_TIER, Game, itemAllowedFromSource, newGameSave } from '../systems/game';
 import type { CreepDef, GambitRule, GameSave, SimEvent } from '../core/types';
@@ -545,7 +546,7 @@ describe('loot overhaul curated chase and black-market sinks', () => {
     expect(relic).not.toBeNull();
     const relicDef = REG.item(relic!.id);
     expect(g.gold).toBe(goldBeforeRelic - (TUNING.blackMarket.relicWheelBaseCost + TUNING.blackMarket.relicWheelStepCost));
-    expect(relicDef.tier).toBe('core');
+    expect(['t1', 't2', 't3', 't4']).toContain(relicDef.tier);
     expect(relicDef.rarity).not.toBe('immortal');
     expect(relicDef.rarity).not.toBe('arcana');
     expect(GATED_TOP_TIER.has(relic!.id)).toBe(false);
@@ -568,7 +569,7 @@ describe('loot overhaul curated chase and black-market sinks', () => {
     const redeemed = g.blackMarketRedeemLootMark('early');
     expect(redeemed).not.toBeNull();
     expect(redeemed!.bound).toBe(true);
-    expect(REG.item(redeemed!.id).tier).toBe('core');
+    expect(['t1', 't2', 't3', 't4']).toContain(REG.item(redeemed!.id).tier);
     expect(REG.item(redeemed!.id).rarity).toBe('legendary');
     expect(GATED_TOP_TIER.has(redeemed!.id)).toBe(false);
     expect(g.lootMarks.early).toBe(0);
@@ -635,6 +636,52 @@ describe('loot overhaul curated chase and black-market sinks', () => {
 
     expect(g.salvageArmoryItem(0)).toBe(0);
     expect(g.inventoryStash.some((it) => it.id === 'broadsword')).toBe(true);
+  });
+
+  it('grades up a bound Armory item through the deterministic Forge path', () => {
+    const save = soloSave('juggernaut', 20);
+    save.gold = 10_000;
+    save.essence = 100;
+    save.inventoryStash = [{ id: 'daedalus', bound: true, grade: 'standard', gradeRoll: 0.4, affixes: [], sockets: [] }];
+    const g = Game.headless(save);
+    const quote = g.forgeGradeUpQuote(0, true)!;
+
+    expect(quote.to).toBe('sharp');
+    expect(g.forgeArmoryItemGrade(0, true)).toBe(true);
+    expect(g.inventoryStash[0].grade).toBe('sharp');
+    expect(g.inventoryStash[0].affixes?.length).toBeGreaterThan(0);
+    expect(g.inventoryStash[0].resolvedMods).toBeDefined();
+    expect(g.essence).toBe(100 - GRADE_UP_COSTS.sharp.deterministicEssence);
+  });
+
+  it('reforges affixes and masterworks grade roll for bound Armory items', () => {
+    const save = soloSave('juggernaut', 20);
+    save.gold = 10_000;
+    save.essence = 100;
+    save.inventoryStash = [{
+      id: 'daedalus',
+      bound: true,
+      grade: 'sharp',
+      gradeRoll: 0.2,
+      affixes: [{ affixId: 'heavy', roll: 0.2, resolved: { damage: 6 } }],
+      sockets: []
+    }];
+    const g = Game.headless(save);
+    const goldBeforeReforge = g.gold;
+    const essenceBeforeReforge = g.essence;
+
+    expect(g.reforgeArmoryItem(0)).toBe(true);
+    expect(g.inventoryStash[0].affixes?.length).toBeGreaterThan(0);
+    expect(g.gold).toBe(goldBeforeReforge - REFORGE_COSTS.sharp.gold);
+    expect(g.essence).toBe(essenceBeforeReforge - REFORGE_COSTS.sharp.essence);
+
+    const beforeRoll = g.inventoryStash[0].gradeRoll!;
+    const goldBeforeMasterwork = g.gold;
+    const essenceBeforeMasterwork = g.essence;
+    expect(g.masterworkArmoryItem(0)).toBe(true);
+    expect(g.inventoryStash[0].gradeRoll).toBeGreaterThan(beforeRoll);
+    expect(g.gold).toBe(goldBeforeMasterwork - MASTERWORK_COSTS.sharp.gold);
+    expect(g.essence).toBe(essenceBeforeMasterwork - MASTERWORK_COSTS.sharp.essence);
   });
 
   it('exposes live Black Market wheel costs through the view-model', () => {

@@ -139,7 +139,13 @@ export function itemSaveOf(it: ItemState | null, now: number): ItemSave | null {
     cooldownLeft: it.cooldownUntil > now ? it.cooldownUntil - now : undefined,
     bound: it.bound || undefined,
     quality: it.quality,
-    inscribedKills: it.inscribedKills || undefined
+    inscribedKills: it.inscribedKills || undefined,
+    grade: it.grade,
+    gradeRoll: it.gradeRoll,
+    affixes: it.affixes?.map((affix) => ({ ...affix, resolved: { ...affix.resolved } })),
+    sockets: it.sockets ? [...it.sockets] : undefined,
+    resolvedMods: it.resolvedMods ? { ...it.resolvedMods } : undefined,
+    locked: it.locked || undefined
   };
 }
 
@@ -151,6 +157,12 @@ export function itemStateFromSave(s: ItemSave, now: number): ItemState {
     cooldownUntil: s.cooldownLeft ? now + s.cooldownLeft : 0,
     bound: s.bound || undefined,
     quality: s.quality,
-    inscribedKills: s.inscribedKills || undefined
+    inscribedKills: s.inscribedKills || undefined,
+    grade: s.grade,
+    gradeRoll: s.gradeRoll,
+    affixes: s.affixes?.map((affix) => ({ ...affix, resolved: { ...affix.resolved } })),
+    sockets: s.sockets ? [...s.sockets] : undefined,
+    resolvedMods: s.resolvedMods ? { ...s.resolvedMods } : undefined,
+    locked: s.locked || undefined
   };
 }

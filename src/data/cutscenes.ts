@@ -1,4 +1,4 @@
-import type { CutsceneDef, RegionDef } from '../core/types';
+import type { CutsceneBeat, CutsceneDef, RegionDef } from '../core/types';
 import { ALL_GYMS } from './gyms';
 import { ALL_RAIDS } from './raids';
 import { ELITE_DRAFT } from './drafts';
@@ -20,6 +20,40 @@ export const OUTWORLD_CLAIMANT_RAID_IDS = [
 
 const setpieceShot = { angle: 'wide', move: 'push-in', palette: 'moonlit gold', mood: 'mythic' } as const;
 const stingerShot = { angle: 'title-card', move: 'hold', palette: 'biome grade', mood: 'revealing' } as const;
+
+const ACT_BREAKS: Record<string, { title: string; line: string; palette: string; mood: string }> = {
+  'lunar-badge': {
+    title: 'Act I - Echoes In The Shards',
+    line: 'An Echo is not a ghost. It is a remembered champion, resolved long enough to ride with you.',
+    palette: 'moonlit blue',
+    mood: 'revelation'
+  },
+  'arcane-badge': {
+    title: 'Act VI - The Scholars Name It',
+    line: 'Quoidge gives the war its real name: Ancient falls, time resets, and Avaryn already chose to rule the cycle.',
+    palette: 'arcane violet',
+    mood: 'truth named'
+  },
+  'titan-badge': {
+    title: 'Act VIII - The First Division',
+    line: 'The Titan Badge is permission to approach the crater, and a warning: not every broken thing wants to be made whole.',
+    palette: 'titan bronze',
+    mood: 'permission'
+  }
+};
+
+const RAID_GRADES: Record<string, { palette: string; mood: string; reveal: string; vfx: string }> = {
+  'renegade-marshal': { palette: 'gunmetal voidlight', mood: 'dusty swagger', reveal: 'The rifle finds you before the Marshal steps out of the wreck.', vfx: '#8fb7ff' },
+  'void-prelate': { palette: 'dark between stars', mood: 'chosen blade', reveal: 'The blade appears only after it has already chosen the angle.', vfx: '#7c6bff' },
+  'queen-of-blades': { palette: 'fallen-star purple', mood: 'swarm closing', reveal: 'The crater tightens like a web around the first footstep.', vfx: '#d882ff' },
+  'lord-of-terror': { palette: 'hell-rift red', mood: 'abyss rising', reveal: 'The rift opens upward, as if the floor has learned to look back.', vfx: '#ff4c2f' },
+  'prime-evil': { palette: 'worldstone ember', mood: 'destruction crowned', reveal: 'The vault burns around the stone at the world\'s heart.', vfx: '#ff7a2c' },
+  'lord-of-hatred': { palette: 'lightless black', mood: 'name withheld', reveal: 'The hall goes dark before the voice admits it has arrived.', vfx: '#d62f44' },
+  'forsaken-queen': { palette: 'banshee frost', mood: 'mercy gone', reveal: 'A cold arrow hangs in the air without thawing.', vfx: '#9ed8ff' },
+  'last-eldwurm': { palette: 'dragonfire under moon', mood: 'home-world refusal', reveal: 'One wing, old burns, and a dragon that belongs to this falling moon.', vfx: '#ff7a2c' },
+  'lich-king': { palette: 'frost crown', mood: 'summit throne', reveal: 'The summit reveals a throne made from everyone who climbed first.', vfx: '#d8f4ff' },
+  'roshan-pit': { palette: 'pit gold', mood: 'immortal bargain', reveal: 'The Pit is empty only until Roshan decides otherwise.', vfx: '#ffd86a' }
+};
 
 const PROLOGUE: CutsceneDef = {
   id: 'prologue-moon-breaks',
@@ -122,6 +156,22 @@ function arrival(region: RegionDef): CutsceneDef {
 
 function badge(gym: (typeof ALL_GYMS)[number]): CutsceneDef {
   const setpiece = ['lunar-badge', 'arcane-badge', 'titan-badge'].includes(gym.badgeId);
+  const act = ACT_BREAKS[gym.badgeId];
+  const actBeats: CutsceneBeat[] = act ? [
+    {
+      shot: { angle: 'high', move: 'pull-back', palette: act.palette, mood: act.mood },
+      stage: [{ kind: 'title', text: act.title }],
+      line: { speaker: 'The Loop', text: act.line },
+      sound: 'levelup',
+      hold: 4.2
+    },
+    {
+      shot: { angle: 'wide', move: 'push-in', palette: 'road opening', mood: 'deeper path' },
+      stage: [{ kind: 'focus', target: 'region' }],
+      line: { speaker: 'Journal', text: 'The road opens, and the war underneath it sounds closer.' },
+      hold: 2.8
+    }
+  ] : [];
   return {
     id: `badge-${gym.badgeId}`,
     title: gym.badgeId.replace(/-/g, ' '),
@@ -138,12 +188,14 @@ function badge(gym: (typeof ALL_GYMS)[number]): CutsceneDef {
         line: { speaker: gym.leader, text: gym.dialogue[0] ?? gym.theme },
         sound: 'badge',
         hold: setpiece ? 4.2 : 2.8
-      }
+      },
+      ...actBeats
     ]
   };
 }
 
 function raidIntro(raid: (typeof ALL_RAIDS)[number]): CutsceneDef {
+  const grade = RAID_GRADES[raid.id] ?? { palette: 'raid shadow', mood: 'withheld', reveal: raid.location, vfx: '#ffd86a' };
   return {
     id: `raid-intro-${raid.id}`,
     title: raid.name,
@@ -155,14 +207,20 @@ function raidIntro(raid: (typeof ALL_RAIDS)[number]): CutsceneDef {
     replayable: true,
     beats: [
       {
-        shot: { angle: 'wide', move: 'crane', palette: 'raid shadow', mood: 'withheld' },
+        shot: { angle: 'wide', move: 'crane', palette: grade.palette, mood: 'withheld' },
         stage: [{ kind: 'title', text: raid.location }],
-        line: { speaker: raid.name, text: raid.dialogue[0] ?? raid.title },
-        hold: 3
+        line: { speaker: raid.location, text: grade.reveal },
+        hold: 2.6
       },
       {
-        shot: { angle: 'low', move: 'push-in', palette: 'claimant accent', mood: 'threatening' },
+        shot: { angle: 'low', move: 'push-in', palette: grade.palette, mood: grade.mood },
         stage: [{ kind: 'focus', target: 'boss' }],
+        line: { speaker: raid.name, text: raid.dialogue[0] ?? raid.title },
+        hold: 3.1
+      },
+      {
+        shot: { angle: 'close', move: 'push-in', palette: grade.palette, mood: 'claim named' },
+        stage: [{ kind: 'vfx', archetype: 'global-mark', color: grade.vfx }],
         line: { speaker: raid.name, text: raid.dialogue[1] ?? raid.title },
         sound: 'raid-clear',
         hold: 3.2
@@ -303,6 +361,26 @@ const ECHO_MILESTONE: CutsceneDef = {
   ]
 };
 
+const RESONANCE_FIRST_REACTION: CutsceneDef = {
+  id: 'resonance-first-reaction',
+  title: 'The Wars Answer',
+  tier: 'stinger',
+  trigger: { kind: 'echo-milestone' },
+  skippable: true,
+  letterbox: false,
+  category: 'Binds',
+  replayable: false,
+  beats: [
+    {
+      shot: { angle: 'close', move: 'snap', palette: 'resonance prism', mood: 'systems awakened' },
+      stage: [{ kind: 'vfx', archetype: 'global-mark', color: '#b88cff' }],
+      line: { speaker: 'Resonance', text: '{echoLine}' },
+      sound: 'levelup',
+      hold: 2.8
+    }
+  ]
+};
+
 const ELITE_OPEN: CutsceneDef = {
   id: 'elite-gauntlet-open',
   title: 'The Gauntlet Opens',
@@ -341,6 +419,38 @@ const ELITE_PERSONAS: CutsceneDef[] = ELITE_DRAFT.members.map((member, index) =>
   ]
 }));
 
+const CHAMPION_INTRO: CutsceneDef = {
+  id: 'champion-intro',
+  title: 'The Twice-Crowned',
+  tier: 'setpiece',
+  trigger: { kind: 'elite-start' },
+  skippable: true,
+  letterbox: true,
+  category: 'Endgame',
+  replayable: true,
+  beats: [
+    {
+      shot: { angle: 'wide', move: 'crane', palette: 'radiant and dire', mood: 'throne revealed' },
+      stage: [{ kind: 'title', text: ELITE_DRAFT.championTitle }],
+      line: { speaker: ELITE_DRAFT.championName, text: ELITE_DRAFT.championDialogue[0] },
+      hold: 3.2
+    },
+    {
+      shot: { angle: 'low', move: 'push-in', palette: 'draft gold', mood: 'meta claimed' },
+      stage: [{ kind: 'focus', target: 'boss' }],
+      line: { speaker: ELITE_DRAFT.championName, text: ELITE_DRAFT.championDialogue[1] },
+      hold: 3.1
+    },
+    {
+      shot: { angle: 'close', move: 'snap', palette: 'tower shadow', mood: 'challenge' },
+      stage: [{ kind: 'vfx', archetype: 'global-mark', color: '#ffd86a' }],
+      line: { speaker: ELITE_DRAFT.championName, text: ELITE_DRAFT.championDialogue[2] },
+      sound: 'badge',
+      hold: 2.8
+    }
+  ]
+};
+
 const CHAMPION_CLEAR: CutsceneDef = {
   id: 'champion-clear',
   title: 'Two Crowns, No Equals',
@@ -352,17 +462,35 @@ const CHAMPION_CLEAR: CutsceneDef = {
   replayable: true,
   beats: [
     {
-      shot: { angle: 'low', move: 'push-in', palette: 'radiant and dire', mood: 'concession' },
+      shot: { angle: 'low', move: 'pull-back', palette: 'radiant and dire', mood: 'concession' },
       stage: [{ kind: 'title', text: ELITE_DRAFT.championTitle }],
-      line: { speaker: ELITE_DRAFT.championName, text: ELITE_DRAFT.championDialogue[0] },
-      hold: 3.6
+      line: { speaker: ELITE_DRAFT.championName, text: 'Two crowns held the cycle in place. Yours broke the grip.' },
+      hold: 3.2
     },
     {
-      shot: { angle: 'wide', move: 'crane', palette: 'crater moonlight', mood: 'choice' },
+      shot: { angle: 'wide', move: 'crane', palette: 'crater moonlight', mood: 'tower revealed' },
       stage: [{ kind: 'focus', target: 'tower' }],
-      line: { speaker: 'The Tower', text: 'The Loop is open. Decide what the world remembers next.' },
+      line: { speaker: 'The Tower', text: 'Roshan waits below. The Ancient waits above. The Loop waits for an answer.' },
+      hold: 3.8
+    },
+    {
+      shot: { angle: 'high', move: 'pull-back', palette: 'almost-whole moon', mood: 'world gathered' },
+      stage: [{ kind: 'vfx', archetype: 'dome', color: '#d8f4ff' }],
+      line: { speaker: 'Narration', text: 'Every shard road, every bound Echo, every claimant turned back: the Moon is almost whole in your hands.' },
+      hold: 4
+    },
+    {
+      shot: { angle: 'title-card', move: 'hold', palette: 'zet violet', mood: 'choice' },
+      stage: [{ kind: 'title', text: 'Zet\'s Question' }],
+      line: { speaker: 'The Loop', text: 'Reunite it. Rule it. Break it open. The world will remember the shape you choose.' },
       sound: 'raid-clear',
-      hold: 4.2
+      hold: 4.4
+    },
+    {
+      shot: { angle: 'wide', move: 'push-in', palette: 'new dawn', mood: 'held open' },
+      stage: [{ kind: 'focus', target: 'tower' }],
+      line: { speaker: 'The Tower', text: 'For one turn of the war, the reset does not close.' },
+      hold: 3.2
     }
   ]
 };
@@ -409,6 +537,26 @@ const RAPIER_FIRST_HOLD: CutsceneDef = {
       line: { speaker: 'Divine Rapier', text: '{itemLore}' },
       sound: 'raid-clear',
       hold: 3.4
+    }
+  ]
+};
+
+const CHASE_ITEM_FIRST_HOLD: CutsceneDef = {
+  id: 'item-chase-first-hold',
+  title: '{item}',
+  tier: 'stinger',
+  trigger: { kind: 'item-first-hold', itemId: 'butterfly' },
+  skippable: true,
+  letterbox: false,
+  category: 'Items',
+  replayable: false,
+  beats: [
+    {
+      shot: { angle: 'close', move: 'push-in', palette: 'relic flare', mood: 'turning point' },
+      stage: [{ kind: 'focus', target: 'item' }],
+      line: { speaker: '{item}', text: '{itemLore}' },
+      sound: 'levelup',
+      hold: 2.7
     }
   ]
 };
@@ -741,11 +889,14 @@ export const ALL_CUTSCENES: CutsceneDef[] = [
   VOID_PRELATE_PHASE,
   LAST_ELDWURM_PHASE,
   ECHO_MILESTONE,
+  RESONANCE_FIRST_REACTION,
   ELITE_OPEN,
   ...ELITE_PERSONAS,
+  CHAMPION_INTRO,
   CHAMPION_CLEAR,
   AEGIS_FIRST_HOLD,
   RAPIER_FIRST_HOLD,
+  CHASE_ITEM_FIRST_HOLD,
   OUTWORLD_FIRST_CONTACT,
   OUTWORLD_ALL_CLEAR,
   ...SEASONAL_INTROS,

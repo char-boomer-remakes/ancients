@@ -1,10 +1,16 @@
 import { TUNING } from '../data/tuning';
+import { rollAffixesFor } from '../data/affixes';
+import { refreshResolvedMods } from '../data/forge';
+import { gradeFloor, rollGrade, type GradeFloorSource } from '../data/grade';
+import { socketsForDrop } from '../data/gems';
+import { REG } from './registry';
 import { Rng, hashString } from './rng';
 import type {
   BossDef,
   CreepTier,
   DifficultyTier,
   DropEntry,
+  DropSource,
   DraftDef,
   GameSave,
   ItemDropTable,
@@ -83,6 +89,36 @@ function rollQuality(entry: DropEntry, table: ItemDropTable['slots'][number], ti
   return undefined;
 }
 
+function itemSupportsRolledIdentity(itemId: string): boolean {
+  const def = REG.item(itemId);
+  return !['consumable', 'special'].includes(def.tier);
+}
+
+function gradeSourceForDrop(source?: DropSource | GradeFloorSource): GradeFloorSource | undefined {
+  switch (source) {
+    case 'boss': return 'boss';
+    case 'raid': return 'raid';
+    case 'special-battle': return 'special';
+    case 'elite': return 'elite';
+    case 'special': return 'special';
+    default: return undefined;
+  }
+}
+
+function instantiateDroppedItem(id: string, tier: DifficultyTier, rng: Rng, quality?: ItemQuality, source?: DropSource | GradeFloorSource): ItemSave {
+  const item: ItemSave = { id };
+  if (quality) item.quality = quality;
+  if (!itemSupportsRolledIdentity(id)) return item;
+
+  const def = REG.item(id);
+  const floor = gradeFloor(def, { difficulty: tier, source: gradeSourceForDrop(source) });
+  const grade = rollGrade(floor, rng.next());
+  const gradeRoll = rng.next();
+  const affixes = rollAffixesFor(def, grade, tier, rng);
+  const sockets = socketsForDrop(grade, def.socketCap ?? 0, rng.next());
+  return refreshResolvedMods({ ...item, grade, gradeRoll, affixes, sockets }, def);
+}
+
 function assembledEntries(table: LootTable): DropEntry[] {
   if (!table.assembledRarityPools) return table.assembledPool.map((id) => ({ id, weight: 1 }));
   const rarityForId = new Map<string, ItemRarity>();
@@ -95,7 +131,7 @@ function assembledEntries(table: LootTable): DropEntry[] {
   });
 }
 
-export function lootTableToDropTable(table: LootTable): ItemDropTable {
+export function lootTableToDropTable(table: LootTable, source?: DropSource): ItemDropTable {
   return {
     guaranteed: [...table.guaranteed],
     slots: [
@@ -107,14 +143,15 @@ export function lootTableToDropTable(table: LootTable): ItemDropTable {
         pool: assembledEntries(table),
         qualityOdds: table.qualityOdds,
         pity: table.pity,
+        source,
         raritySplit: !!table.assembledRarityPools
       }
     ]
   };
 }
 
-export function rollItemDrops(table: ItemDropTable, tier: DifficultyTier, dryStreaks: Record<string, number>, rng: Rng, band?: LootBand): ItemDropRoll {
-  const items: ItemSave[] = table.guaranteed.map((id) => ({ id }));
+export function rollItemDrops(table: ItemDropTable, tier: DifficultyTier, dryStreaks: Record<string, number>, rng: Rng, band?: LootBand, opts: { source?: DropSource | GradeFloorSource } = {}): ItemDropRoll {
+  const items: ItemSave[] = table.guaranteed.map((id) => instantiateDroppedItem(id, tier, rng, undefined, opts.source));
   const nextDry = { ...dryStreaks };
   let pityUsed = false;
 
@@ -131,9 +168,7 @@ export function rollItemDrops(table: ItemDropTable, tier: DifficultyTier, dryStr
       }
       const entry = pickDropEntry(slot, rng, band);
       const quality = rollQuality(entry, slot, tier, rng);
-      const item: ItemSave = { id: entry.id };
-      if (quality) item.quality = quality;
-      items.push(item);
+      items.push(instantiateDroppedItem(entry.id, tier, rng, quality, slot.source ?? opts.source));
       dry = 0;
       pityUsed = pityUsed || pity;
     }
@@ -143,8 +178,8 @@ export function rollItemDrops(table: ItemDropTable, tier: DifficultyTier, dryStr
   return { items, dryStreaks: nextDry, pityUsed };
 }
 
-export function rollLoot(table: LootTable, tier: DifficultyTier, dryStreak: number, seed: number, band?: LootBand): LootRoll {
-  const roll = rollItemDrops(lootTableToDropTable(table), tier, { assembled: dryStreak }, new Rng(seed), band);
+export function rollLoot(table: LootTable, tier: DifficultyTier, dryStreak: number, seed: number, band?: LootBand, source?: DropSource): LootRoll {
+  const roll = rollItemDrops(lootTableToDropTable(table, source), tier, { assembled: dryStreak }, new Rng(seed), band, { source });
   const guaranteed = roll.items.slice(0, table.guaranteed.length);
   const assembled = roll.items[table.guaranteed.length];
   return {

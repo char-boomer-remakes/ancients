@@ -1,4 +1,4 @@
-import type { DropSource, ItemDef, ItemRarity } from '../../core/types';
+import type { DropSource, ItemDef, ItemRarity, ItemTier } from '../../core/types';
 
 // ============================================================
 // Phase 1 item catalog: consumables, components, and 15+
@@ -21,7 +21,7 @@ export const CONSUMABLES: ItemDef[] = [
       castPoint: 0,
       cooldown: [1],
       effects: [
-        { kind: 'status', status: 'buff', duration: 16, target: 'self', params: { mods: { hpRegen: 7 }, tag: 'tango-regen' } }
+        { kind: 'status', status: 'buff', duration: 16, target: 'self', params: { mods: { hpRegenPctMax: 15 / 16 }, tag: 'tango-regen' } }
       ],
       vfx: { archetype: 'shield', color: '#9fdc5c', scale: 0.4 }
     }
@@ -43,7 +43,7 @@ export const CONSUMABLES: ItemDef[] = [
       castPoint: 0,
       cooldown: [1],
       effects: [
-        { kind: 'status', status: 'buff', duration: 8, target: 'target', params: { mods: { hpRegen: 50 }, breakOnDamage: true, tag: 'salve-regen' } }
+        { kind: 'status', status: 'buff', duration: 8, target: 'target', params: { mods: { hpRegenPctMax: 25 / 8 }, breakOnDamage: true, tag: 'salve-regen' } }
       ],
       vfx: { archetype: 'shield', color: '#ff9fb8', scale: 0.5 }
     }
@@ -63,7 +63,7 @@ export const CONSUMABLES: ItemDef[] = [
       castPoint: 0,
       cooldown: [1],
       effects: [
-        { kind: 'status', status: 'buff', duration: 20, target: 'self', params: { mods: { manaRegen: 11 }, breakOnDamage: true, tag: 'clarity-regen' } }
+        { kind: 'status', status: 'buff', duration: 20, target: 'self', params: { mods: { manaRegenPctMax: 25 / 20 }, breakOnDamage: true, tag: 'clarity-regen' } }
       ],
       vfx: { archetype: 'shield', color: '#86c8ff', scale: 0.4 }
     }
@@ -386,7 +386,7 @@ export const ASSEMBLED: ItemDef[] = [
     passiveMods: { int: 10, manaRegen: 2.5, moveSpeed: 20 },
     lore: 'The wind obeys whoever holds the scepter, and mocks everyone else.',
     glyph: 'cyclone',
-    appearance: { weapon: { kind: 'staff', color: '#9fe8e8', emissive: '#2a5a5a' }, aura: { archetype: 'storm', color: '#9fe8e8', color2: '#e8fbff' } },
+    appearance: { weapon: { kind: 'staff', color: '#9fe8e8', emissive: '#2a5a5a' }, aura: { archetype: 'cyclone', color: '#9fe8e8', color2: '#e8fbff' } },
     active: {
       id: 'euls-active',
       name: 'Cyclone',
@@ -397,7 +397,8 @@ export const ASSEMBLED: ItemDef[] = [
       cooldown: [23],
       manaCost: [175],
       effects: [{ kind: 'status', status: 'cyclone', duration: 2.5, target: 'target' }],
-      vfx: { archetype: 'storm', color: '#9fe8e8', color2: '#e8fbff', scale: 0.8 }
+      vfx: { archetype: 'cyclone', color: '#9fe8e8', color2: '#e8fbff', scale: 0.8 },
+      sound: 'storm'
     }
   },
   {
@@ -977,7 +978,8 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
       id: 'mjollnir-active', name: 'Static Charge', targeting: 'unit-target', affects: 'ally', castRange: 800, castPoint: 0, cooldown: [35], manaCost: [50],
       values: { dps: [80], radius: [450] },
       effects: [{ kind: 'status', status: 'buff', duration: 15, target: 'target', params: { tag: 'mjollnir-shield', periodic: { interval: 1, effects: [{ kind: 'damage', dtype: 'magical', amount: 'dps', target: 'enemies-in-radius', radius: 'radius' }] } } }],
-      vfx: { archetype: 'storm', color: '#7ddcff', color2: '#ffffff', scale: 0.8 }
+      vfx: { archetype: 'storm', color: '#7ddcff', color2: '#ffffff', scale: 0.8 },
+      sound: 'lightning'
     },
     appearance: { weapon: { kind: 'storm-haft', color: '#7ddcff', emissive: '#244b7a' }, aura: { archetype: 'storm', color: '#7ddcff', color2: '#ffffff' } },
     attackVisual: [{ kind: 'lightning-bounce', color: '#7ddcff', color2: '#ffffff', scale: 1.25 }],
@@ -1195,7 +1197,8 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     active: {
       id: 'gleipnir-active', name: 'Eternal Chains', targeting: 'ground-aoe', castRange: 1100, castPoint: 0, cooldown: [18], manaCost: [200],
       effects: [{ kind: 'damage', dtype: 'magical', amount: 180, target: 'enemies-in-radius', radius: 450 }, { kind: 'status', status: 'root', duration: 2, target: 'enemies-in-radius', radius: 450 }],
-      vfx: { archetype: 'storm', color: '#7ddcff', color2: '#d8a0ff', scale: 1 }
+      vfx: { archetype: 'storm', color: '#7ddcff', color2: '#d8a0ff', scale: 1 },
+      sound: 'lightning'
     },
     attackVisual: [{ kind: 'lightning-bounce', color: '#7ddcff', color2: '#ffffff', scale: 1.1 }],
     elementOnHit: 'electro'
@@ -1243,11 +1246,12 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     components: ['euls-scepter', 'force-staff'], recipeCost: 1100,
     passiveMods: { int: 20, manaRegen: 4, moveSpeed: 40, hpRegen: 2.5 },
     lore: 'A cyclone with travel plans.', glyph: 'cyclone',
-    appearance: { weapon: { kind: 'staff', color: '#c8ffff', emissive: '#245a5a' }, aura: { archetype: 'storm', color: '#c8ffff', color2: '#ffffff' } },
+    appearance: { weapon: { kind: 'staff', color: '#c8ffff', emissive: '#245a5a' }, aura: { archetype: 'cyclone', color: '#c8ffff', color2: '#ffffff' } },
     active: {
       id: 'wind-waker-active', name: 'Cyclone Drift', targeting: 'unit-target', affects: 'ally', castRange: 700, castPoint: 0, cooldown: [18], manaCost: [175],
       effects: [{ kind: 'status', status: 'cyclone', duration: 2.5, target: 'target' }, { kind: 'statmod', mods: { moveSpeedPct: 40 }, duration: 2.5, target: 'target' }],
-      vfx: { archetype: 'storm', color: '#c8ffff', color2: '#ffffff', scale: 0.9 }
+      vfx: { archetype: 'cyclone', color: '#c8ffff', color2: '#ffffff', scale: 0.9 },
+      sound: 'storm'
     }
   },
   {
@@ -1405,24 +1409,69 @@ const SOURCE_OVERRIDES: Record<string, DropSource[]> = {
   cheese: ['raid']
 };
 
+const TIER_OVERRIDES: Partial<Record<string, ItemTier>> = {
+  'divine-rapier': 'special',
+  'aegis-of-the-immortal': 'special',
+  cheese: 'special',
+  'refresher-shard': 'special',
+  'aghanims-scepter': 'special',
+  'aghanims-blessing': 'special',
+  'aghanims-shard': 'special'
+};
+
+const SET_OVERRIDES: Partial<Record<string, string>> = {
+  'shivas-guard': 'frostforged',
+  'eye-of-skadi': 'frostforged',
+  'wind-waker': 'frostforged',
+  satanic: 'bloodbound',
+  bloodthorn: 'bloodbound',
+  'heart-of-tarrasque': 'bloodbound'
+};
+
+function coreTierByCost(cost: number): ItemTier {
+  if (cost >= 5175) return 't4';
+  if (cost >= 4800) return 't3';
+  if (cost >= 2500) return 't2';
+  return 't1';
+}
+
+function normalizeItemTier(item: ItemDef): ItemTier {
+  return TIER_OVERRIDES[item.id] ?? (item.tier === 'core' ? coreTierByCost(item.cost) : item.tier);
+}
+
+function socketCapFor(item: ItemDef, tier: ItemTier): number | undefined {
+  if (tier === 'consumable' || tier === 'special') return undefined;
+  if (tier === 't4') return 3;
+  if (tier === 't3') return 2;
+  if (tier === 't2' || tier === 't1') return 1;
+  return item.socketCap;
+}
+
 function defaultRarity(item: ItemDef): ItemRarity {
-  if (item.tier === 'consumable') return 'common';
-  if (item.tier === 'component') {
+  const tier = normalizeItemTier(item);
+  if (tier === 'consumable') return 'common';
+  if (tier === 'component') {
     if (item.cost >= 2200) return 'mythical';
     if (item.cost >= 1000) return 'rare';
     return 'uncommon';
   }
-  if (item.tier === 'basic') return 'uncommon';
-  if (item.cost >= 5000) return 'legendary';
-  if (item.cost >= 2500) return 'mythical';
+  if (tier === 'basic') return 'uncommon';
+  if (tier === 'special') return 'immortal';
+  if (tier === 't4') return 'immortal';
+  if (tier === 't3') return 'legendary';
+  if (tier === 't2') return 'mythical';
   return 'rare';
 }
 
 function normalizeLootMetadata(item: ItemDef): ItemDef {
+  const tier = normalizeItemTier(item);
   return {
     ...item,
+    tier,
     rarity: item.rarity ?? RARITY_OVERRIDES[item.id] ?? defaultRarity(item),
-    exclusiveTo: item.exclusiveTo ?? SOURCE_OVERRIDES[item.id]
+    exclusiveTo: item.exclusiveTo ?? SOURCE_OVERRIDES[item.id],
+    set: item.set ?? SET_OVERRIDES[item.id],
+    socketCap: item.socketCap ?? socketCapFor(item, tier)
   };
 }
 

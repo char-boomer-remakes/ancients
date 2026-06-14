@@ -1,5 +1,7 @@
 import { TUNING } from '../data/tuning';
 import { qualityStatMods } from '../data/quality';
+import { ITEM_SET_DEFS } from '../data/sets';
+import { affixDef } from '../data/affixes';
 import { clamp } from './math2d';
 import { REG } from './registry';
 import { deriveStats, levelFromXp, xpForLevel, type DerivedStats } from './stats';
@@ -23,9 +25,12 @@ import type {
   GambitRule,
   HeroBaseStats,
   HeroDef,
+  ItemGrade,
   ItemQuality,
+  RolledAffix,
   Order,
   SilhouetteSpec,
+  StatModMap,
   StatusId,
   SummonSpec,
   Team,
@@ -57,6 +62,12 @@ export interface ItemState {
   bound?: boolean;
   quality?: ItemQuality;
   inscribedKills?: number;   // banked holder kills for an Inscribed copy (LOOT L5)
+  grade?: ItemGrade;
+  gradeRoll?: number;
+  affixes?: RolledAffix[];
+  sockets?: (string | null)[];
+  resolvedMods?: StatModMap;
+  locked?: boolean;
 }
 
 export interface CastState {
@@ -273,10 +284,18 @@ export class Unit {
       if (!it) continue;
       const def = REG.items.get(it.defId);
       if (def?.passiveMods) addAll(def.passiveMods as Record<string, number>);
+      if (it.resolvedMods) addAll(it.resolvedMods as Record<string, number>);
       // quality overlay (LOOT L5): a bounded, named delta on the copy, summed
       // here through the same item-mod pass. Inscribed grows with banked kills.
       if (it.quality && it.quality !== 'standard') {
         addAll(qualityStatMods(it.quality, it.inscribedKills) as Record<string, number> | undefined);
+      }
+    }
+    const equippedIds = new Set(this.items.filter((item): item is ItemState => !!item).map((item) => item.defId));
+    for (const set of ITEM_SET_DEFS) {
+      const pieces = set.pieces.filter((id) => equippedIds.has(id)).length;
+      for (const bonus of set.bonuses) {
+        if (pieces >= bonus.atPieces) addAll(bonus.mods as Record<string, number> | undefined);
       }
     }
     // statuses (incl. auras applied as buff statuses)
@@ -489,6 +508,10 @@ export class Unit {
       if (!it) continue;
       const def = REG.items.get(it.defId);
       if (def?.attackMod) out.push({ spec: def.attackMod, level: 1 });
+      for (const affix of it.affixes ?? []) {
+        const attack = affixDef(affix.affixId).attack;
+        if (attack) out.push({ spec: attack, level: 1 });
+      }
     }
     for (const s of this.statuses) {
       if (s.attackMod) out.push({ spec: s.attackMod, level: 1, consumeTag: s.consumeOnAttack ? s.tag : undefined });

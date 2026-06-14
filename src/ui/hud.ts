@@ -1,6 +1,8 @@
 import { REG } from '../core/registry';
 import { TUNING } from '../data/tuning';
 import { QUALITY_GRADES, qualityColor, rarityColor } from '../data/quality';
+import { affixDef } from '../data/affixes';
+import { GRADE_DEFS } from '../data/grade';
 import { xpProgress } from '../core/progression';
 import { itemReady, sellValue, computeBuyPlan } from '../core/items';
 import { buybackCost } from '../core/phase3';
@@ -21,6 +23,15 @@ import * as THREE from 'three';
 const ABILITY_KEYS = ['Q', 'W', 'E', 'R', 'D', 'F'];
 const ITEM_KEYS = ['Z', 'X', 'C', 'V', '·', '·'];
 const GOLD_STREAK_WINDOW_MS = 1500;
+
+function gradeLabel(item: { grade?: ItemSave['grade']; affixes?: ItemSave['affixes']; sockets?: ItemSave['sockets'] }): string {
+  const grade = item.grade ?? 'standard';
+  const def = GRADE_DEFS[grade];
+  const pips = def.pips > 0 ? ` ${'•'.repeat(def.pips)}` : '';
+  const affixes = (item.affixes ?? []).map((affix) => affixDef(affix.affixId).name).join(', ');
+  const sockets = item.sockets && item.sockets.length > 0 ? ` · ${item.sockets.length} socket${item.sockets.length === 1 ? '' : 's'}` : '';
+  return `${def.name}${pips}${affixes ? ` · ${affixes}` : ''}${sockets}`;
+}
 
 interface Floater {
   el: HTMLElement;
@@ -129,8 +140,19 @@ export class Hud {
     this.cinematicLayer.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('[data-cinematic]') as HTMLElement | null;
       if (btn?.dataset.cinematic === 'next') this.game.cinematicAdvance();
+    });
+    this.cinematicLayer.addEventListener('mousedown', (e) => {
+      const btn = (e.target as HTMLElement).closest('[data-cinematic]') as HTMLElement | null;
       if (btn?.dataset.cinematic === 'ff') this.game.cinematicFastForward(true);
-      if (btn?.dataset.cinematic === 'skip') this.game.cinematicSkip();
+      if (btn?.dataset.cinematic === 'skip') this.game.cinematicRequestSkip();
+    });
+    this.cinematicLayer.addEventListener('mouseup', () => {
+      this.game.cinematicFastForward(false);
+      this.game.cinematicReleaseSkip();
+    });
+    this.cinematicLayer.addEventListener('mouseleave', () => {
+      this.game.cinematicFastForward(false);
+      this.game.cinematicReleaseSkip();
     });
     this.game.onOpenGymPrefight = (gymId) => this.openGymPrefight(gymId);
     this.game.onOpenDungeonEntry = (dungeonId) => this.openDungeonEntry(dungeonId);
@@ -362,8 +384,11 @@ export class Hud {
         ? ` [${QUALITY_GRADES[it.quality!].name}${it.quality === 'inscribed' && it.inscribedKills ? ` ${it.inscribedKills}` : ''}]`
         : '';
       const qBorder = hasQuality ? `box-shadow: inset 0 0 0 2px ${qualityColor(it.quality)};` : '';
+      const gDef = GRADE_DEFS[it.grade ?? 'standard'];
+      const gTip = ` [${gradeLabel(it)}]`;
+      const gradeFrame = `outline:2px solid ${gDef.frame};`;
       itemsHtml += `
-        <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}" title="${idef.name}${qTip} — ${idef.lore}" style="border-color:${rarityColor(idef.rarity)};${qBorder}">
+        <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}" title="${idef.name}${qTip}${gTip} — ${idef.lore}" style="border-color:${rarityColor(idef.rarity)};${gradeFrame}${qBorder}">
           <img src="${itemIcon(idef)}" alt="">
           ${cdLeft > 0 ? `<span class="cd-num">${cdLeft.toFixed(cdLeft > 5 ? 0 : 1)}</span>` : ''}
           ${it.charges >= 0 ? `<span class="charges">${it.charges}</span>` : ''}
@@ -1321,17 +1346,29 @@ export class Hud {
           const qLabel = it.quality && it.quality !== 'standard'
             ? ` · <span style="color:${qualityColor(it.quality)}">${QUALITY_GRADES[it.quality].name}</span>`
             : '';
-          const flags = [def.tier, it.bound ? 'bound' : 'liquid'].join(' · ');
+          const gDef = GRADE_DEFS[it.grade ?? 'standard'];
+          const flags = [def.tier, gradeLabel(it), it.bound ? 'bound' : 'liquid'].join(' · ');
           const quote = it.bound ? g.qualityUpgradeQuote(i) : null;
-          const forge = quote
-            ? `<button class="btn small" data-arm-upgrade="${i}">Forge ${QUALITY_GRADES[quote.to].name} (${quote.essence}e/${quote.gold}g)</button>`
+          const qualityForge = quote
+            ? `<button class="btn small" data-arm-upgrade="${i}">Quality ${QUALITY_GRADES[quote.to].name} (${quote.essence}e/${quote.gold}g)</button>`
             : '';
-          return `<div class="svc-row" style="border-left:3px solid ${rarityColor(def.rarity)}">
+          const gradeDet = it.bound ? g.forgeGradeUpQuote(i, true) : null;
+          const gradeGamble = it.bound ? g.forgeGradeUpQuote(i, false) : null;
+          const reforge = it.bound ? g.reforgeArmoryItemQuote(i) : null;
+          const masterwork = it.bound ? g.masterworkArmoryItemQuote(i) : null;
+          const powerForge = [
+            gradeDet ? `<button class="btn small" data-arm-grade-det="${i}">Grade ${gradeDet.to} (${gradeDet.essence}e)</button>` : '',
+            gradeGamble ? `<button class="btn small" data-arm-grade-gamble="${i}">Gamble ${gradeGamble.to} (${gradeGamble.gold}g/${gradeGamble.essence}e · ${Math.round(gradeGamble.chance * 100)}%)</button>` : '',
+            reforge ? `<button class="btn small" data-arm-reforge="${i}">Reforge (${reforge.gold}g/${reforge.essence}e)</button>` : '',
+            masterwork ? `<button class="btn small" data-arm-masterwork="${i}">Masterwork (${masterwork.gold}g/${masterwork.essence}e)</button>` : ''
+          ].join('');
+          return `<div class="svc-row" style="border-left:3px solid ${rarityColor(def.rarity)}; outline:1px solid ${gDef.frame}">
             <div class="svc-main"><b style="color:${rarityColor(def.rarity)}">${def.name}</b> <em>${flags}${qLabel}</em><div class="rr-sub">${def.lore}</div></div>
             <div class="svc-actions">
               <select class="small-select" data-arm-pick="${i}">${heroOptions}</select>
               <button class="btn small" data-arm-hero-eq="${i}">Equip</button>
-              ${forge}
+              ${powerForge}
+              ${qualityForge}
               ${it.bound ? `<button class="btn small" data-arm-salvage="${i}">Salvage</button>` : ''}
             </div>
           </div>`;
@@ -1520,6 +1557,10 @@ export class Hud {
     }));
     this.modal.querySelectorAll<HTMLElement>('[data-arm-salvage]').forEach((el) => el.addEventListener('click', () => { g.salvageArmoryItem(Number(el.dataset.armSalvage)); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-arm-upgrade]').forEach((el) => el.addEventListener('click', () => { g.upgradeArmoryItemQuality(Number(el.dataset.armUpgrade)); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-grade-det]').forEach((el) => el.addEventListener('click', () => { g.forgeArmoryItemGrade(Number(el.dataset.armGradeDet), true); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-grade-gamble]').forEach((el) => el.addEventListener('click', () => { g.forgeArmoryItemGrade(Number(el.dataset.armGradeGamble), false); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-reforge]').forEach((el) => el.addEventListener('click', () => { g.reforgeArmoryItem(Number(el.dataset.armReforge)); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-arm-masterwork]').forEach((el) => el.addEventListener('click', () => { g.masterworkArmoryItem(Number(el.dataset.armMasterwork)); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-arm-assemble]').forEach((el) => el.addEventListener('click', () => { g.assembleLegendary(el.dataset.armAssemble!); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-arm-rec-hero]').forEach((el) => el.addEventListener('click', () => {
       const [heroId, slotRaw] = el.dataset.armRecHero!.split(':');
@@ -1634,6 +1675,12 @@ export class Hud {
     }
     this.cinematicLayer.classList.remove('hidden');
     this.cinematicLayer.classList.toggle('letterbox', view.letterbox);
+    const portraitHero = view.portraitHeroId && REG.heroes.has(view.portraitHeroId)
+      ? REG.hero(view.portraitHeroId)
+      : null;
+    const portrait = portraitHero
+      ? `<img class="cin-portrait" src="${heroPortrait(portraitHero.palette, portraitHero.name[0], 52, portraitHero.silhouette)}" alt="">`
+      : '';
     this.cinematicLayer.innerHTML = `
       <div class="cin-bar top"></div>
       <div class="cin-card ${view.tier}">
@@ -1644,8 +1691,9 @@ export class Hud {
         ${view.stageText ? `<div class="cin-stage">${view.stageText}</div>` : ''}
         ${view.text ? `
           <div class="cin-line">
-            <b>${view.speaker ?? 'Narration'}</b>
-            <p>${view.revealedText}</p>
+            ${portrait}
+            <div><b>${view.speaker ?? 'Narration'}</b>
+            <p>${view.revealedText}</p></div>
           </div>` : ''}
         ${view.skipProgress > 0 ? `<div class="cin-skip-confirm"><span style="width:${Math.round(view.skipProgress * 100)}%"></span></div>` : ''}
         <div class="cin-controls">

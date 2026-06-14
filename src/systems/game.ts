@@ -1,6 +1,9 @@
 import { TUNING } from '../data/tuning';
 import { DEFAULT_CREEP_DROP_TABLES, qualityOddsByTier } from '../data/creep-drops';
+import { GRADE_UP_COSTS, MASTERWORK_COSTS, REFORGE_COSTS, disenchant, gradeUp, masterwork, reforge } from '../data/forge';
+import { ITEM_GRADES } from '../data/grade';
 import { QUALITY_GRADES, nextQuality, rarityColor } from '../data/quality';
+import { applyLootFilter, DEFAULT_LOOT_FILTER, type LootFilterRule } from './loot-filter';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { Unit } from '../core/unit';
@@ -45,9 +48,9 @@ import { ELITE_DRAFT } from '../data/drafts';
 import { resonanceMods } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroLoadoutSlots, HeroSave, ItemDropTable, ItemQuality, ItemRarity, ItemSave, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, Vec2 } from '../core/types';
+import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, DifficultyTier, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, GambitRule, GameSave, GraphicsSettings, HeroLoadoutSlots, HeroSave, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, Order, QuestProgress, RaidDef, RegionDef, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, Vec2 } from '../core/types';
 import { ProceduralAudio } from '../engine/audio';
-import { CinematicDirector, type CutsceneContext } from '../engine/cinematic';
+import { CinematicDirector, type CinematicView, type CutsceneContext } from '../engine/cinematic';
 import { StoryDetector, type StoryObserveCtx, type StoryTrigger } from '../engine/story-detectors';
 import { GameScene } from '../engine/scene';
 import { LiveGymFight, runGymMatch, type GymMatchHero, type GymMatchResult } from './macro-session';
@@ -65,6 +68,7 @@ const OUTWORLD_CLAIMANT_RAIDS = new Set([
   'lord-of-hatred',
   'forsaken-queen'
 ]);
+const CINEMATIC_STINGERS: ReadonlySet<StingerId> = new Set(['capture', 'merge', 'levelup', 'badge', 'raid-clear']);
 
 /** Top-tier power that only drops from bosses/raids — never vended by any shop or gold sink (§6). */
 export const GATED_TOP_TIER: ReadonlySet<string> = new Set([
@@ -83,6 +87,11 @@ const RARITY_RANK: Record<ItemRarity, number> = {
   immortal: 5,
   arcana: 6
 };
+const MAIN_ITEM_TIERS = new Set(['t1', 't2', 't3', 't4']);
+
+function isMainItemTier(tier: string): boolean {
+  return MAIN_ITEM_TIERS.has(tier);
+}
 
 export function itemAllowedFromSource(itemId: string, source: DropSource): boolean {
   const def = REG.item(itemId);
@@ -92,7 +101,7 @@ export function itemAllowedFromSource(itemId: string, source: DropSource): boole
 function shouldBindDroppedItem(id: string): boolean {
   const def = REG.item(id);
   const rarity = def.rarity ?? 'common';
-  return GATED_TOP_TIER.has(id) || def.tier === 'core' || RARITY_RANK[rarity] >= RARITY_RANK.legendary;
+  return GATED_TOP_TIER.has(id) || isMainItemTier(def.tier) || RARITY_RANK[rarity] >= RARITY_RANK.legendary;
 }
 
 function bindIfNeeded(item: ItemSave): ItemSave {
@@ -297,7 +306,7 @@ export interface SceneLike {
   selectedUid: number;
   terrain: { obstacles: { pos: Vec2; radius: number }[] };
   pushEvent(ev: SimEvent, sim: Sim): void;
-  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number): void;
+  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView?: CinematicView | null): void;
   resetUnitViews?(): void;
   setDungeonRoom?(template: RoomTemplate | null, room?: DungeonRoom | null): void;
   /** Optional (real GameScene only): live graphics-settings hooks (§6). */
@@ -381,6 +390,7 @@ export class Game {
   heldUniques: string[] = [];
   neutralStash: GameSave['neutralStash'] = [];
   lootMarks: GameSave['lootMarks'] = { early: 0, mid: 0, late: 0 };
+  lootFilter: LootFilterRule = { ...DEFAULT_LOOT_FILTER };
   goldSinks: GameSave['goldSinks'] = { buybacks: 0, tomesUsed: 0, respecs: 0, gambleRolls: 0, salvages: 0 };
   essence = 0;
   loadouts: ArmoryLoadouts = {};
@@ -432,6 +442,8 @@ export class Game {
   private liveDungeonTier: DifficultyTier = 'normal';
   private liveDungeonModifiers: string[] = [];
   cinematic = new CinematicDirector();
+  private cinematicSoundBeatKey = '';
+  private pendingAfterCinematic: { label: string; run: () => void } | null = null;
   private story = new StoryDetector();
   /** HUD hook: open the gym pre-fight screen (§3.5). Null in headless. */
   onOpenGymPrefight: ((gymId: string) => void) | null = null;
@@ -891,6 +903,43 @@ export class Game {
     this.cinematic.setFastForward(active);
   }
 
+  private cinematicPresentationView(): CinematicView | null {
+    const view = this.cinematic.view();
+    if (!view) {
+      this.cinematicSoundBeatKey = '';
+      return null;
+    }
+    if (view.beatKey !== this.cinematicSoundBeatKey) {
+      this.cinematicSoundBeatKey = view.beatKey;
+      if (view.sound && CINEMATIC_STINGERS.has(view.sound as StingerId)) {
+        this.audio.playStinger(view.sound as StingerId);
+      }
+    }
+    return view;
+  }
+
+  private isHeadless(): boolean {
+    return this.scene instanceof HeadlessScene;
+  }
+
+  private queueAfterCinematic(label: string, run: () => void): boolean {
+    if (this.isHeadless() || !this.cinematic.active) return false;
+    if (this.pendingAfterCinematic) {
+      this.msg(`${this.pendingAfterCinematic.label} is already waiting on a cut-scene`, 'info');
+      return true;
+    }
+    this.pendingAfterCinematic = { label, run };
+    this.msg(`${label} will begin when the cut-scene ends.`, 'info');
+    return true;
+  }
+
+  private runPendingAfterCinematic(): void {
+    if (this.cinematic.active || !this.pendingAfterCinematic) return;
+    const pending = this.pendingAfterCinematic;
+    this.pendingAfterCinematic = null;
+    pending.run();
+  }
+
   /**
    * STORY §6.6 + §7.3 — feed a live combat event batch to the story detectors and fire any
    * matched beats. Pure read of the sim; never writes sim state (determinism-safe).
@@ -903,6 +952,17 @@ export class Game {
   private fireStoryTrigger(trig: StoryTrigger): void {
     if (trig.kind === 'legend') {
       this.triggerLegendCallout(trig.legendId);
+      return;
+    }
+    if (trig.kind === 'resonance') {
+      const seenKey = 'story:first-resonance';
+      if (!this.journalSeen.has(seenKey)) {
+        this.journalSeen.add(seenKey);
+        this.playCutscene('resonance-first-reaction', {
+          reaction: trig.reaction,
+          echoLine: `${trig.reaction} reaction: the wars you carry have learned to answer each other.`
+        });
+      }
       return;
     }
     // §6.6 boss phase break. Marquee guardians get a bespoke set-piece on their first break,
@@ -919,17 +979,23 @@ export class Game {
   }
 
   private playRegionArrival(): void {
-    if (this.region.arrivalBeat) this.playCutscene(this.region.arrivalBeat);
+    const id = this.region.arrivalBeat;
+    if (!id || this.journalSeen.has(`cinematic:${id}`)) return;
+    this.playCutscene(id);
   }
 
   private playItemFirstHold(itemId: string): void {
-    if (itemId !== 'aegis-of-the-immortal' && itemId !== 'divine-rapier') return;
+    const item = REG.item(itemId);
+    const prestige = RARITY_RANK[item.rarity ?? 'common'] >= RARITY_RANK.legendary || GATED_TOP_TIER.has(itemId);
+    if (!prestige) return;
     const seenKey = `story:item-first-hold:${itemId}`;
     if (this.journalSeen.has(seenKey)) return;
     this.journalSeen.add(seenKey);
-    const item = REG.item(itemId);
     this.codexUnlock('item:' + itemId);
-    this.playCutscene(`item-${itemId}-first-hold`, { item: item.name, itemLore: item.lore });
+    const sceneId = itemId === 'aegis-of-the-immortal' || itemId === 'divine-rapier'
+      ? `item-${itemId}-first-hold`
+      : 'item-chase-first-hold';
+    this.playCutscene(sceneId, { item: item.name, itemLore: item.lore });
   }
 
   private playRaidIntroSetpieces(raidId: string, raidName: string): void {
@@ -1399,7 +1465,7 @@ export class Game {
       this.audio.handleEvent(ev);
     }
     this.audio.update?.({ biome: this.region.biome, dayTime: 0.5, inCombat: true, dt });
-    this.scene.update(fight.sim, fight.cameraFollow(), dt, 0.5);
+    this.scene.update(fight.sim, fight.cameraFollow(), dt, 0.5, this.cinematicPresentationView());
     if (fight.done && fight.result) {
       const id = this.liveGymId!;
       const result = fight.result;
@@ -1480,7 +1546,7 @@ export class Game {
       return { won: false };
     }
     const dryStreak = this.difficulty[bossId]?.dryClears ?? 0;
-    const loot = rollLoot(boss.loot, tier, dryStreak, bossLootSeed(boss, tier, dryStreak), this.lootBandForRegion(boss.region));
+    const loot = rollLoot(boss.loot, tier, dryStreak, bossLootSeed(boss, tier, dryStreak), this.lootBandForRegion(boss.region), 'boss');
     const fullLoot = this.spendResinForLoot(TUNING.resin.bossCost);
     if (fullLoot) {
       this.deliverLoot(loot);
@@ -1563,6 +1629,14 @@ export class Game {
     const clears = prog?.clears ?? 0;
     const aegis = this.aegisReady();
     this.playRaidIntroSetpieces(raidId, def.name);
+    if (this.queueAfterCinematic(def.name, () => this.resolveRaid(raidId, tier, clears, aegis))) {
+      return { won: false };
+    }
+    return this.resolveRaid(raidId, tier, clears, aegis);
+  }
+
+  private resolveRaid(raidId: string, tier: DifficultyTier, clears: number, aegis: boolean): { won: boolean; loot?: LootRoll; result?: RaidEncounterResult } {
+    const def = REG.raid(raidId);
     const result = runRaidEncounter({
       def,
       party: this.gymPlayerTeam(),
@@ -1632,7 +1706,7 @@ export class Game {
     if (this.liveRaidId) {
       this.observeStory(this.frameEvents, { sim: raid.sim, raidId: this.liveRaidId, bossHeroId: REG.raid(this.liveRaidId).boss.heroId });
     }
-    this.scene.update(raid.sim, raid.cameraFollow(), dt, 0.5);
+    this.scene.update(raid.sim, raid.cameraFollow(), dt, 0.5, this.cinematicPresentationView());
     if (raid.done && raid.result) {
       const id = this.liveRaidId!;
       const tier = this.liveRaidTier;
@@ -1767,7 +1841,7 @@ export class Game {
     for (const room of dungeon.drainCompletedRooms()) {
       this.grantDungeonRoomReward(dungeon.def, dungeon.tier, room, dungeon.selectedModifiers());
     }
-    this.scene.update(dungeon.sim, dungeon.cameraFollow(), dt, 0.5);
+    this.scene.update(dungeon.sim, dungeon.cameraFollow(), dt, 0.5, this.cinematicPresentationView());
     if (dungeon.done && dungeon.result) {
       const id = this.liveDungeonId!;
       const tier = this.liveDungeonTier;
@@ -1845,7 +1919,14 @@ export class Game {
     // anchor's `pity: 4`) actually accrues instead of resetting every roll (GAMEPLAY_2.0 §0.2).
     const prev = this.dungeonProgress[def.id];
     const dryStreaks = { ...(prev?.dryStreaks ?? {}) };
-    const roll = rollItemDrops(table, tier, dryStreaks, new Rng(stableContentSeed(`${def.id}:room-reward:${tier}:${room.index}${modSalt}`, Math.round(this.playtime))), this.lootBandForRegion(def.regionId));
+    const roll = rollItemDrops(
+      table,
+      tier,
+      dryStreaks,
+      new Rng(stableContentSeed(`${def.id}:room-reward:${tier}:${room.index}${modSalt}`, Math.round(this.playtime))),
+      this.lootBandForRegion(def.regionId),
+      { source: reward.kind === 'guardian' ? 'boss' : undefined }
+    );
     this.dungeonProgress[def.id] = { ...(prev ?? { clears: 0, wipes: 0, bestDepth: 0, bestTier: 'normal' as DifficultyTier }), dryStreaks: roll.dryStreaks };
     if (roll.items.length === 0) return;
     if (reward.kind === 'guardian' && !this.spendResinForLoot(TUNING.resin.dungeonGuardianCost)) {
@@ -1905,7 +1986,7 @@ export class Game {
       this.msg('Title earned: True Champion — you held the Pit at its hardest.', 'good');
     }
     const dryStreak = this.raidProgress[raidId]?.dryStreak ?? 0;
-    const loot = rollLoot(def.loot, tier, dryStreak, stableContentSeed(`${raidId}:loot:${tier}`, clears), this.currentLootBand());
+    const loot = rollLoot(def.loot, tier, dryStreak, stableContentSeed(`${raidId}:loot:${tier}`, clears), this.currentLootBand(), 'raid');
     const next = { ...(this.raidProgress[raidId] ?? { clears: 0, dryStreak: 0 }) };
     next.clears = clears + 1;
     next.dryStreak = loot.dryStreak;
@@ -1987,7 +2068,16 @@ export class Game {
     const player = opts.playerTeam ?? draft.player;
     if (idx === 0 && this.eliteFive.defeated === 0) this.playCutscene('elite-gauntlet-open');
     this.playCutscene(`elite-persona-${idx}`);
-    const result = runMacroBattle({ seed, teamA: player, teamB: draft.enemy });
+    if (this.queueAfterCinematic(ELITE_DRAFT.members[idx].name, () => {
+      this.resolveEliteMatch(idx, seed, player, draft.enemy);
+    })) {
+      return { won: false, winner: -1, defeated: this.eliteFive.defeated, member: ELITE_DRAFT.members[idx].name };
+    }
+    return this.resolveEliteMatch(idx, seed, player, draft.enemy);
+  }
+
+  private resolveEliteMatch(idx: number, seed: number, player: MacroHeroSetup[], enemy: MacroHeroSetup[]): { won: boolean; winner: 0 | 1 | -1; defeated: number; member: string } {
+    const result = runMacroBattle({ seed, teamA: player, teamB: enemy });
     const member = ELITE_DRAFT.members[idx];
     const won = result.winner === 0;
     if (won) {
@@ -2014,6 +2104,16 @@ export class Game {
     const player = opts.playerTeam ?? this.gymPlayerTeam();
     const champ = ELITE_DRAFT.champion;
     const enemy: MacroHeroSetup[] = Array.isArray(champ) ? champ : [{ heroId: champ.heroId, level: 30, items: ['black-king-bar', 'butterfly', 'heart-of-tarrasque'] }];
+    this.playCutscene('champion-intro');
+    if (this.queueAfterCinematic(ELITE_DRAFT.championName, () => {
+      this.resolveChampion(seed, player, enemy);
+    })) {
+      return { won: false, winner: -1 };
+    }
+    return this.resolveChampion(seed, player, enemy);
+  }
+
+  private resolveChampion(seed: number, player: MacroHeroSetup[], enemy: MacroHeroSetup[]): { won: boolean; winner: 0 | 1 | -1 } {
     const result = runMacroBattle({ seed, teamA: player, teamB: enemy });
     if (result.winner === 0) {
       this.eliteFive.championDown = true;
@@ -2212,7 +2312,7 @@ export class Game {
     for (const item of REG.items.values()) {
       if (!itemAllowedFromSource(item.id, 'gamble')) continue;
       if (['component', 'basic'].includes(item.tier)) add(item.id, 'Black Market', 'Recipe wheel');
-      if (item.tier === 'core' && !GATED_TOP_TIER.has(item.id)) {
+      if (isMainItemTier(item.tier) && !GATED_TOP_TIER.has(item.id)) {
         const rank = RARITY_RANK[item.rarity ?? 'common'];
         if (rank >= RARITY_RANK.rare && rank <= relicCeiling) add(item.id, 'Black Market', 'Relic wheel');
       }
@@ -2350,11 +2450,20 @@ export class Game {
 
   private addDroppedItems(items: ItemSave[], opts: { awardMarks?: boolean } = {}): ItemSave[] {
     const drops: ItemSave[] = [];
-    for (const it of items) {
+    const filtered = applyLootFilter(items.map(bindIfNeeded), (item) => this.itemRarity(item.id), this.lootFilter);
+    for (const junk of filtered.disenchanted) {
+      this.essence += junk.essence;
+      this.goldSinks.salvages += 1;
+    }
+    for (const it of filtered.kept) {
       const drop = bindIfNeeded(it);
       this.inventoryStash.push(drop);
       this.codexUnlock('item:' + drop.id);
       drops.push(drop);
+    }
+    if (filtered.disenchanted.length > 0) {
+      const essence = filtered.disenchanted.reduce((sum, junk) => sum + junk.essence, 0);
+      this.msg(`Loot filter disenchanted ${filtered.disenchanted.length} item${filtered.disenchanted.length === 1 ? '' : 's'} (+${essence} essence)`, 'info');
     }
     if (opts.awardMarks !== false) this.awardLootMarksForItems(drops);
     return drops;
@@ -2767,7 +2876,7 @@ export class Game {
       return null;
     }
     const candidates = [...REG.items.values()]
-      .filter((item) => item.tier === 'core')
+      .filter((item) => isMainItemTier(item.tier))
       .filter((item) => {
         const rank = RARITY_RANK[this.itemRarity(item.id)];
         return rank >= RARITY_RANK.rare && rank <= ceiling;
@@ -2797,7 +2906,7 @@ export class Game {
   private lootMarkPool(band: LootBand): string[] {
     const maxCost = band === 'early' ? 5600 : band === 'mid' ? 6500 : Infinity;
     return [...REG.items.values()]
-      .filter((item) => item.tier === 'core')
+      .filter((item) => isMainItemTier(item.tier))
       .filter((item) => this.itemRarity(item.id) === 'legendary')
       .filter((item) => item.cost <= maxCost)
       .filter((item) => itemAllowedFromSource(item.id, 'gamble'))
@@ -2830,7 +2939,7 @@ export class Game {
 
   private legendaryAssemblyCandidates(): string[] {
     return [...REG.items.values()]
-      .filter((item) => item.tier === 'core')
+      .filter((item) => isMainItemTier(item.tier))
       .filter((item) => this.itemRarity(item.id) === 'legendary')
       .filter((item) => !!item.components && item.components.length > 0)
       .filter((item) => !GATED_TOP_TIER.has(item.id))
@@ -2908,13 +3017,131 @@ export class Game {
       this.msg('Only bound Armory items salvage into essence', 'bad');
       return 0;
     }
-    const rarity = this.itemRarity(saved.id);
-    const amount = TUNING.blackMarket.salvageEssence[rarity];
+    const amount = disenchant(saved);
     this.inventoryStash.splice(stashIdx, 1);
     this.essence += amount;
     this.goldSinks.salvages += 1;
     this.msg(`Salvaged ${REG.item(saved.id).name} (+${amount} essence)`, 'info');
     return amount;
+  }
+
+  private nextItemGrade(item: ItemSave): Exclude<ItemGrade, 'broken'> | null {
+    const current = item.grade ?? 'standard';
+    const next = ITEM_GRADES[ITEM_GRADES.indexOf(current) + 1];
+    return next && next !== 'broken' ? next : null;
+  }
+
+  private forgeableArmoryItem(stashIdx: number): { item: ItemSave; def: ReturnType<typeof REG.item> } | null {
+    const item = this.inventoryStash[stashIdx];
+    if (!item?.bound) return null;
+    const def = REG.item(item.id);
+    if (def.tier === 'consumable' || def.tier === 'special') return null;
+    return { item, def };
+  }
+
+  forgeGradeUpQuote(stashIdx: number, deterministic = true): { from: ItemGrade; to: Exclude<ItemGrade, 'broken'>; gold: number; essence: number; chance: number; deterministic: boolean } | null {
+    const target = this.forgeableArmoryItem(stashIdx);
+    if (!target) return null;
+    const from = target.item.grade ?? 'standard';
+    const to = this.nextItemGrade(target.item);
+    if (!to) return null;
+    const cost = GRADE_UP_COSTS[to];
+    return deterministic
+      ? { from, to, gold: 0, essence: cost.deterministicEssence, chance: 1, deterministic }
+      : { from, to, gold: cost.gambleGold, essence: cost.gambleEssence, chance: cost.chance, deterministic };
+  }
+
+  forgeArmoryItemGrade(stashIdx: number, deterministic = true): boolean {
+    const quote = this.forgeGradeUpQuote(stashIdx, deterministic);
+    const target = this.forgeableArmoryItem(stashIdx);
+    if (!quote || !target) {
+      this.msg('Only bound forgeable Armory items can grade up', 'bad');
+      return false;
+    }
+    if (this.gold < quote.gold) {
+      this.msg(`Need ${quote.gold}g to grade up ${target.def.name}`, 'bad');
+      return false;
+    }
+    if (this.essence < quote.essence) {
+      this.msg(`Need ${quote.essence} essence to grade up ${target.def.name}`, 'bad');
+      return false;
+    }
+    this.gold -= quote.gold;
+    this.essence -= quote.essence;
+    this.goldSinks.gambleRolls += 1;
+    const seed = stableContentSeed(`forge:grade:${target.item.id}:${quote.to}:${this.goldSinks.gambleRolls}`, Math.round(this.playtime));
+    const result = gradeUp(target.item, target.def, new Rng(seed), { deterministic, difficulty: creepCombatTier(this.region.id) });
+    this.inventoryStash[stashIdx] = result.item;
+    this.msg(
+      result.changed
+        ? `${target.def.name} graded up: ${quote.from} → ${quote.to}`
+        : `${target.def.name} grade-up failed; the item is unchanged`,
+      result.changed ? 'good' : 'info'
+    );
+    return result.changed;
+  }
+
+  reforgeArmoryItemQuote(stashIdx: number): { grade: ItemGrade; gold: number; essence: number } | null {
+    const target = this.forgeableArmoryItem(stashIdx);
+    if (!target) return null;
+    const grade = target.item.grade ?? 'standard';
+    if ((target.item.affixes ?? []).length === 0) return null;
+    return { grade, ...REFORGE_COSTS[grade] };
+  }
+
+  reforgeArmoryItem(stashIdx: number): boolean {
+    const quote = this.reforgeArmoryItemQuote(stashIdx);
+    const target = this.forgeableArmoryItem(stashIdx);
+    if (!quote || !target) {
+      this.msg('Only bound Armory items with affixes can be reforged', 'bad');
+      return false;
+    }
+    if (this.gold < quote.gold) {
+      this.msg(`Need ${quote.gold}g to reforge ${target.def.name}`, 'bad');
+      return false;
+    }
+    if (this.essence < quote.essence) {
+      this.msg(`Need ${quote.essence} essence to reforge ${target.def.name}`, 'bad');
+      return false;
+    }
+    this.gold -= quote.gold;
+    this.essence -= quote.essence;
+    this.goldSinks.gambleRolls += 1;
+    const seed = stableContentSeed(`forge:reforge:${target.item.id}:${quote.grade}:${this.goldSinks.gambleRolls}`, Math.round(this.playtime));
+    this.inventoryStash[stashIdx] = reforge(target.item, target.def, new Rng(seed), creepCombatTier(this.region.id));
+    this.msg(`Reforged ${target.def.name}'s affixes`, 'good');
+    return true;
+  }
+
+  masterworkArmoryItemQuote(stashIdx: number): { grade: ItemGrade; gold: number; essence: number } | null {
+    const target = this.forgeableArmoryItem(stashIdx);
+    if (!target) return null;
+    const grade = target.item.grade ?? 'standard';
+    if ((target.item.gradeRoll ?? 0.5) >= 0.995) return null;
+    return { grade, ...MASTERWORK_COSTS[grade] };
+  }
+
+  masterworkArmoryItem(stashIdx: number): boolean {
+    const quote = this.masterworkArmoryItemQuote(stashIdx);
+    const target = this.forgeableArmoryItem(stashIdx);
+    if (!quote || !target) {
+      this.msg('Only bound Armory items below their masterwork cap can be improved', 'bad');
+      return false;
+    }
+    if (this.gold < quote.gold) {
+      this.msg(`Need ${quote.gold}g to masterwork ${target.def.name}`, 'bad');
+      return false;
+    }
+    if (this.essence < quote.essence) {
+      this.msg(`Need ${quote.essence} essence to masterwork ${target.def.name}`, 'bad');
+      return false;
+    }
+    this.gold -= quote.gold;
+    this.essence -= quote.essence;
+    this.goldSinks.gambleRolls += 1;
+    this.inventoryStash[stashIdx] = masterwork(target.item, target.def);
+    this.msg(`Masterworked ${target.def.name}`, 'good');
+    return true;
   }
 
   /** Quote the essence + gold cost to raise a bound Armory item one quality grade (LOOT L5). */
@@ -4553,6 +4780,7 @@ export class Game {
 
   update(realDt: number): void {
     this.cinematic.update(Math.min(realDt, 0.1));
+    this.runPendingAfterCinematic();
     if (this.liveGym) {
       this.updateLiveGym(realDt);
       return;
@@ -4566,7 +4794,7 @@ export class Game {
       return;
     }
     if (this.paused) {
-      this.scene.update(this.sim, this.activeUnit(), 0, this.dayTime);
+      this.scene.update(this.sim, this.activeUnit(), 0, this.dayTime, this.cinematicPresentationView());
       return;
     }
     const dt = Math.min(realDt, 0.1);
@@ -4695,6 +4923,6 @@ export class Game {
     }
 
     this.audio.update?.({ biome: this.region.biome, dayTime: this.dayTime, inCombat: this.inCombat(), dt });
-    this.scene.update(this.sim, this.activeUnit(), dt, this.dayTime);
+    this.scene.update(this.sim, this.activeUnit(), dt, this.dayTime, this.cinematicPresentationView());
   }
 }

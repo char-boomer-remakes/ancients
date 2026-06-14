@@ -26,6 +26,11 @@ const BOSS_ITEM_RARITY: Partial<Record<string, ItemRarity>> = {
   'aghanims-scepter': 'immortal',
   'abyssal-blade': 'immortal',
   bloodthorn: 'immortal',
+  'lotus-orb': 'immortal',
+  'linkens-sphere': 'immortal',
+  nullifier: 'immortal',
+  'helm-of-the-overlord': 'immortal',
+  gleipnir: 'immortal',
   radiance: 'immortal',
   satanic: 'immortal',
   'octarine-core': 'immortal',
@@ -51,13 +56,13 @@ function themedLoot(heroId: string, rank: BossDef['rank']): LootTable {
   if (AGILITY_CARRIES.has(heroId)) {
     guaranteed = ['eaglesong'];
     // crit/attack carries are the efficient home for the crit cores (§3.3: "a Daedalus farms from a crit carry").
-    assembledPool = ['butterfly', 'eye-of-skadi', 'abyssal-blade', 'bloodthorn', 'diffusal-blade', 'daedalus', 'monkey-king-bar', 'mjollnir'];
+    assembledPool = ['butterfly', 'eye-of-skadi', 'abyssal-blade', 'bloodthorn', 'nullifier', 'diffusal-blade', 'daedalus', 'monkey-king-bar', 'mjollnir'];
   } else if (STRENGTH_TITANS.has(heroId)) {
     guaranteed = ['reaver'];
-    assembledPool = ['heart-of-tarrasque', 'satanic', 'radiance', 'assault-cuirass', 'black-king-bar'];
+    assembledPool = ['heart-of-tarrasque', 'satanic', 'radiance', 'helm-of-the-overlord', 'assault-cuirass', 'black-king-bar'];
   } else if (INTELLIGENCE_BOSSES.has(heroId)) {
     guaranteed = ['mystic-staff'];
-    assembledPool = ['scythe-of-vyse', 'refresher-orb', 'octarine-core', 'aghanims-scepter', 'aghanims-blessing'];
+    assembledPool = ['scythe-of-vyse', 'refresher-orb', 'octarine-core', 'lotus-orb', 'linkens-sphere', 'gleipnir', 'aghanims-scepter', 'aghanims-blessing'];
   }
   const dropPct = isMini
     ? {

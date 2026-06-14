@@ -1,4 +1,5 @@
 import { TUNING } from '../data/tuning';
+import { affixDef } from '../data/affixes';
 import { angleOf, dist, dist2, norm, sub, v2 } from './math2d';
 import { EventBus } from './events';
 import { Rng } from './rng';
@@ -24,6 +25,7 @@ import type {
   StatusParams,
   SummonSpec,
   Team,
+  TriggerSpec,
   TriggerEvent,
   Vec2,
   VfxSpec,
@@ -350,8 +352,8 @@ export class Sim {
       for (const it of u.items) {
         if (!it) continue;
         const def = REG.items.get(it.defId);
-        if (!def?.triggers) continue;
-        for (const trig of def.triggers) {
+        if (!def) continue;
+        for (const trig of this.itemTriggers(it, def?.triggers)) {
           if (trig.on !== 'on-nearby-enemy-cast') continue;
           const radius = typeof trig.radius === 'number' ? trig.radius : 1200;
           if (dist2(u.pos, caster.pos) > radius * radius) continue;
@@ -366,39 +368,66 @@ export class Sim {
   /** Generic trigger dispatch for ability-level triggers. */
   runTriggers(u: Unit, event: TriggerEvent, ctx2: { other?: Unit }): void {
     if (!u.alive) return;
+    const fireTrigger = (
+      trig: TriggerSpec,
+      key: string,
+      ctx: EffectCtx,
+      stackKey: string
+    ): void => {
+      if (trig.on !== event) return;
+      if (trig.radius && ctx2.other) {
+        const radius = typeof trig.radius === 'number' ? trig.radius : levelArr(ctx.values?.[trig.radius], ctx.level, 0);
+        if (dist2(u.pos, ctx2.other.pos) > radius * radius) return;
+      }
+      if (trig.cooldown) {
+        const last = this.triggerCooldowns.get(`${u.uid}:${key}`) ?? -999;
+        if (this.time - last < trig.cooldown) return;
+        this.triggerCooldowns.set(`${u.uid}:${key}`, this.time);
+      }
+      if (trig.statStack) {
+        const mods: Record<string, number> = {};
+        for (const k in trig.statStack.mods) {
+          mods[k] = typeof trig.statStack.mods[k] === 'number'
+            ? (trig.statStack.mods[k] as number)
+            : levelArr(ctx.values?.[trig.statStack.mods[k] as string], ctx.level);
+        }
+        const cur = u.triggerStacks.get(stackKey) ?? 0;
+        if (!trig.statStack.max || cur < trig.statStack.max) {
+          u.triggerStacks.set(stackKey, cur + 1);
+          for (const k in mods) u.permanentMods[k] = (u.permanentMods[k] ?? 0) + mods[k];
+          u.markStatsDirty();
+        }
+      }
+      if (trig.effects) {
+        execEffects(this, u, ctx, trig.effects, { target: ctx2.other, point: ctx2.other?.pos ?? u.pos });
+      }
+    };
+
     for (const a of u.abilities) {
       if (a.level <= 0 || !a.def.triggers) continue;
       if (u.summary.broken) continue; // break disables passive triggers
       for (const trig of a.def.triggers) {
-        if (trig.on !== event) continue;
         const ctx = abilityCtx(a.def, a.level);
-        if (trig.cooldown) {
-          const key = `trig:${a.def.id}:${trig.on}`;
-          const last = this.triggerCooldowns.get(`${u.uid}:${key}`) ?? -999;
-          if (this.time - last < trig.cooldown) continue;
-          this.triggerCooldowns.set(`${u.uid}:${key}`, this.time);
-        }
-        if (trig.statStack) {
-          const mods: Record<string, number> = {};
-          for (const k in trig.statStack.mods) {
-            mods[k] = typeof trig.statStack.mods[k] === 'number'
-              ? (trig.statStack.mods[k] as number)
-              : levelArr(a.def.values?.[trig.statStack.mods[k] as string], a.level);
-          }
-          const cur = u.triggerStacks.get(a.def.id) ?? 0;
-          if (!trig.statStack.max || cur < trig.statStack.max) {
-            u.triggerStacks.set(a.def.id, cur + 1);
-            for (const k in mods) u.permanentMods[k] = (u.permanentMods[k] ?? 0) + mods[k];
-            u.markStatsDirty();
-          }
-        }
-        if (trig.effects) {
-          execEffects(this, u, ctx, trig.effects, { target: ctx2.other, point: ctx2.other?.pos ?? u.pos });
-        }
+        fireTrigger(trig, `trig:${a.def.id}:${trig.on}`, ctx, a.def.id);
+      }
+    }
+    for (const it of u.items) {
+      if (!it) continue;
+      const def = REG.items.get(it.defId);
+      if (!def) continue;
+      for (const trig of this.itemTriggers(it, def.triggers)) {
+        fireTrigger(trig, `item:${it.defId}:${trig.on}`, { defId: `item:${it.defId}`, level: 1, vfx: { archetype: 'stun-stars', color: '#ffd86a', scale: 0.45 } }, `item:${it.defId}:${trig.on}`);
       }
     }
   }
   private triggerCooldowns = new Map<string, number>();
+
+  private itemTriggers(it: ItemState, base: TriggerSpec[] = []): TriggerSpec[] {
+    const affixTriggers = (it.affixes ?? [])
+      .map((affix) => affixDef(affix.affixId).trigger)
+      .filter((trigger): trigger is TriggerSpec => !!trigger);
+    return [...base, ...affixTriggers];
+  }
 
   // ---------- projectiles ----------
 
@@ -853,10 +882,18 @@ export class Sim {
       for (const it of u.items) {
         if (!it) continue;
         const def = REG.items.get(it.defId);
-        if (!def?.aura) continue;
-        const mods: Record<string, number> = {};
-        for (const k in def.aura.mods ?? {}) mods[k] = def.aura.mods![k] as number;
-        this.applyAura(u, `aura:${u.uid}:item:${def.id}`, def.aura.radius, def.aura.affects, mods, def.aura.excludeSelf);
+        if (def?.aura) {
+          const mods: Record<string, number> = {};
+          for (const k in def.aura.mods ?? {}) mods[k] = def.aura.mods![k] as number;
+          this.applyAura(u, `aura:${u.uid}:item:${def.id}`, def.aura.radius, def.aura.affects, mods, def.aura.excludeSelf);
+        }
+        for (const affix of it.affixes ?? []) {
+          const aura = affixDef(affix.affixId).aura;
+          if (!aura) continue;
+          const mods: Record<string, number> = {};
+          for (const k in aura.mods ?? {}) mods[k] = aura.mods![k] as number;
+          this.applyAura(u, `aura:${u.uid}:affix:${affix.affixId}`, aura.radius, aura.affects, mods, aura.excludeSelf);
+        }
       }
     }
   }
@@ -902,7 +939,7 @@ export class Sim {
       if (!u.alive) continue;
       const s = u.stats;
       u.hp = Math.min(s.maxHp, u.hp + (s.hpRegen + (s.maxHp * s.hpRegenPctMax) / 100) * this.dt);
-      u.mana = Math.min(s.maxMana, u.mana + s.manaRegen * this.dt);
+      u.mana = Math.min(s.maxMana, u.mana + (s.manaRegen + (s.maxMana * s.manaRegenPctMax) / 100) * this.dt);
       if (u.lifetimeUntil !== undefined && this.time >= u.lifetimeUntil) {
         this.killUnit(u, null, true);
       }
@@ -946,19 +983,10 @@ export class Sim {
       this.runTriggers(killer, 'on-kill', { other: victim });
       if (killer.heroId) emitBark(this, killer); // a hero crows over a kill (§3.13), rate-limited
     }
-    // on-nearby-death triggers (Flesh Heap)
+    // on-nearby-death triggers (Flesh Heap, item/affix triggers)
     for (const u of this.unitsArr) {
       if (!u.alive || u === victim) continue;
-      for (const a of u.abilities) {
-        if (a.level <= 0 || !a.def.triggers) continue;
-        for (const trig of a.def.triggers) {
-          if (trig.on !== 'on-nearby-death') continue;
-          const radius = typeof trig.radius === 'number' ? trig.radius : 450;
-          if (dist2(u.pos, victim.pos) <= radius * radius) {
-            this.runTriggers(u, 'on-nearby-death', { other: victim });
-          }
-        }
-      }
+      this.runTriggers(u, 'on-nearby-death', { other: victim });
     }
   }
 

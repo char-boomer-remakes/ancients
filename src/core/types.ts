@@ -61,6 +61,7 @@ export interface StatMods {
   moveSpeedPct: number;
   hpRegen: number;
   manaRegen: number;
+  manaRegenPctMax: number;
   maxHp: number;
   maxMana: number;
   magicResistPct: number;
@@ -74,6 +75,12 @@ export interface StatMods {
   attackDamageTakenReductionPct: number;  // damage from attacks only (Frost Shield)
   castRange: number;
   visionPct: number;
+  swapCdReductionPct: number;
+  swapInDamagePct: number;
+  swapInHealPct: number;
+  reactionAmpPct: number;
+  elementalGaugeSec: number;
+  staminaBonus: number;
 }
 export type StatModMap = Partial<StatMods>;
 
@@ -255,7 +262,8 @@ export type VfxArchetype =
   // WS-G additions (VFX_OVERHAUL §11): shapes the 12 base archetypes cannot read.
   | 'vortex'   // inward-spiraling pull: Black Hole, Reverse Polarity, Vacuum, Maelstrom
   | 'dome'     // hemispherical containment: Chronosphere, Arena of Blood, Static Storm
-  | 'mine';    // small armed ground charge w/ proximity telegraph: Techies/Remote/Land mines
+  | 'mine'     // small armed ground charge w/ proximity telegraph: Techies/Remote/Land mines
+  | 'cyclone'; // vertical wind column: Eul's, Wind Waker, phase-out lifts
 
 export interface VfxSpec {
   archetype: VfxArchetype;
@@ -274,7 +282,8 @@ export type AnimGesture =
   | 'channel-loop'
   | 'summon-gesture'
   | 'item-use'
-  | 'global-cast';
+  | 'global-cast'
+  | 'toggle-stance';
 
 export type SoundArchetype =
   | 'blade'
@@ -287,7 +296,8 @@ export type SoundArchetype =
   | 'heal'
   | 'summon'
   | 'item'
-  | 'roar';
+  | 'roar'
+  | 'lightning';
 
 export interface AnimProfile {
   rig: string;
@@ -516,11 +526,45 @@ export interface CreepDef {
 }
 
 // ---------- Items ----------
-export type ItemTier = 'consumable' | 'component' | 'basic' | 'core';
+export type ItemTier = 'consumable' | 'component' | 'basic' | 't1' | 't2' | 't3' | 't4' | 'special' | 'core';
 export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'mythical' | 'legendary' | 'immortal' | 'arcana';
 export type ItemQuality = 'standard' | 'inscribed' | 'genuine' | 'frozen' | 'corrupted' | 'unusual';
+export type ItemGrade = 'broken' | 'worn' | 'standard' | 'sharp' | 'refined' | 'pristine';
+export type ItemAffixKind = 'prefix' | 'suffix' | 'signature';
+export type AffixPoolId = 'weapon-like' | 'armor-like' | 'caster-like' | 'mobility' | 'any';
 export type DropSource = 'shop' | 'creep' | 'echo' | 'boss' | 'raid' | 'special-battle' | 'gamble' | 'dungeon';
 export type LootBand = 'early' | 'mid' | 'late';
+
+export interface ItemAffixDef {
+  id: string;
+  name: string;
+  kind: ItemAffixKind;
+  tier: 1 | 2 | 3 | 4 | 5;
+  pools: AffixPoolId[];
+  weight: number;
+  statRanges?: Partial<Record<keyof StatMods, [number, number]>>;
+  attack?: Partial<AttackModSpec>;
+  trigger?: TriggerSpec;
+  aura?: AuraSpec;
+}
+
+export interface RolledAffix {
+  affixId: string;
+  roll: number;
+  resolved: StatModMap;
+}
+
+export interface ItemSetDef {
+  id: string;
+  name: string;
+  pieces: string[];
+  bonuses: { atPieces: number; mods?: StatModMap; aura?: AuraSpec; trigger?: TriggerSpec }[];
+}
+
+export interface HeroAugments {
+  scepter?: boolean;
+  shard?: boolean;
+}
 
 export interface DropEntry {
   id: string;
@@ -560,6 +604,8 @@ export interface ItemDef {
   attackMod?: AttackModSpec;
   aura?: AuraSpec;
   active?: AbilityDef;         // item actives reuse the ability engine
+  set?: string;
+  socketCap?: number;
   charges?: number;            // consumables / wand
   maxCharges?: number;
   consumesAllCharges?: boolean; // Magic Wand: active spends every charge
@@ -695,6 +741,7 @@ export interface CutsceneDef {
 // ---------- Event tie-ins ----------
 export type SeasonalModeKind =
   | 'roshan-candy'
+  | 'damage-race'
   | 'wave-defense'
   | 'endless-descent'
   | 'hazard-survival'
@@ -1178,7 +1225,20 @@ export type SimEvent =
   | { t: 'kill-credit'; victimUid: number; killerUid: number; bounty: { xp: number; gold: number }; lastHitByPlayer: boolean };
 
 // ---------- Saved game ----------
-export interface ItemSave { id: string; charges?: number; cooldownLeft?: number; quality?: ItemQuality; bound?: boolean; inscribedKills?: number }
+export interface ItemSave {
+  id: string;
+  charges?: number;
+  cooldownLeft?: number;
+  quality?: ItemQuality;
+  bound?: boolean;
+  inscribedKills?: number;
+  grade?: ItemGrade;
+  gradeRoll?: number;
+  affixes?: RolledAffix[];
+  sockets?: (string | null)[];
+  resolvedMods?: StatModMap;
+  locked?: boolean;
+}
 export type HeroLoadoutSlots = (string | null)[];
 export type ArmoryLoadouts = Record<string, Record<string, HeroLoadoutSlots>>;
 export interface DungeonProgressSave {
@@ -1200,6 +1260,7 @@ export interface HeroSave {
   xp: number;
   items: (ItemSave | null)[];   // 6 slots
   neutralSlot: ItemSave | null;
+  augments?: HeroAugments;
   gambits?: GambitRule[];
   talentPicks: (0 | 1 | null)[]; // 4 tiers
   echo?: EchoProgress;

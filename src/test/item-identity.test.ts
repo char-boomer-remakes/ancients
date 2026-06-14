@@ -5,6 +5,8 @@ import { Sim } from '../core/sim';
 import { applyDamage, attackImpact } from '../core/combat';
 import { applyStatus } from '../core/effects';
 import { makeItemState, itemReady, sortInventory, computeBuyPlan, executeBuy } from '../core/items';
+import { rollItemDrops } from '../core/phase3';
+import { Rng } from '../core/rng';
 import type { Unit } from '../core/unit';
 
 // ============================================================
@@ -204,6 +206,59 @@ describe('Magic Wand', () => {
     expect(me.hp).toBeGreaterThan(hpBefore + 40);
     expect(me.mana).toBeGreaterThan(manaBefore);
     expect(me.items[slot]!.charges).toBe(0);
+  });
+});
+
+describe('rolled item identity', () => {
+  it('instantiates dropped gear with grade, affixes, sockets, and resolved mods', () => {
+    const roll = rollItemDrops({
+      guaranteed: [],
+      slots: [{
+        id: 'identity',
+        rarity: 'legendary',
+        rolls: 1,
+        chance: { normal: 1, nightmare: 1, hell: 1 },
+        pool: [{ id: 'daedalus', weight: 1 }]
+      }]
+    }, 'hell', {}, new Rng(42), 'late');
+
+    const item = roll.items[0];
+    expect(item.grade).toBeDefined();
+    expect(item.grade).not.toBe('broken');
+    expect(item.affixes?.length).toBeGreaterThan(0);
+    expect(item.resolvedMods && Object.keys(item.resolvedMods).length).toBeGreaterThan(0);
+    expect(item.sockets).toBeDefined();
+  });
+
+  it('percentage clarity restores more mana on larger mana pools', () => {
+    const small = lab().me;
+    const large = lab().me;
+    large.externalMods.maxMana = 1000;
+    large.markStatsDirty();
+    large.refresh(0);
+
+    const clarity = REG.item('clarity').active!;
+    const mod = clarity.effects?.[0].kind === 'status' ? clarity.effects[0].params?.mods?.manaRegenPctMax as number : 0;
+    expect(mod).toBeGreaterThan(0);
+    expect((large.stats.maxMana * mod) / 100).toBeGreaterThan((small.stats.maxMana * mod) / 100);
+  });
+
+  it('applies rolled signature attack payloads to equipped items', () => {
+    const { me } = lab();
+    const item = makeItemState(REG.item('daedalus'));
+    item.affixes = [{ affixId: 'stormcallers', roll: 1, resolved: {} }];
+    me.items[0] = item;
+
+    expect(me.collectAttackMods().some((mod) => mod.spec.procDamage === 120)).toBe(true);
+  });
+
+  it('uses drop source floors when instancing boss loot', () => {
+    const roll = rollItemDrops({
+      guaranteed: ['daedalus'],
+      slots: []
+    }, 'normal', {}, new Rng(7), 'late', { source: 'boss' });
+
+    expect(['sharp', 'refined', 'pristine']).toContain(roll.items[0].grade);
   });
 });
 

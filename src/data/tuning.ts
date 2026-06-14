@@ -177,22 +177,32 @@ export const TUNING = {
   tierRewardMult: { normal: 1.0, nightmare: 1.65, hell: 2.45 },
   creepTierRewardMult: { small: 1.0, medium: 1.35, large: 1.85, ancient: 2.6 },
   creepStarBountyMult: [1.0, 1.75, 2.8],
-  neutralDropPctByTier: { small: 0.10, medium: 0.14, large: 0.20, ancient: 0.28 },
+  neutralDropPctByTier: { small: 0.16, medium: 0.20, large: 0.28, ancient: 0.38 },
   tinkersBench: { rerollCost: 225, reclaimCost: 150, enchantCost: 600 },
   loot: {
-    egCadenceMinByBand: { early: 28, mid: 18, late: 11 },
+    gradeRollVariance: 0.20,
+    egCadenceMinByBand: { early: 6, mid: 4, late: 2 },
     egRaritySplit: {
       early: { legendary: 0.95, immortal: 0.05, arcana: 0.0 },
       mid: { legendary: 0.9, immortal: 0.095, arcana: 0.005 },
       late: { legendary: 0.84, immortal: 0.15, arcana: 0.01 }
     },
     qualityDropChance: { normal: 0.08, nightmare: 0.18, hell: 0.3 },
-    bandMarkQuota: { early: 24, mid: 18, late: 12 }
+    bandMarkQuota: { early: 24, mid: 18, late: 12 },
+    affixTiersByDifficulty: { normal: 2, nightmare: 3, hell: 4 },
+    lootFilterDefaults: { minGrade: 'broken', minRarity: 'common' }
   },
   overworldEgSlotPct: {
-    largeCreep: { normal: 0.02, nightmare: 0.035, hell: 0.05 },
-    ancientCreep: { normal: 0.04, nightmare: 0.055, hell: 0.07 },
+    largeCreep: { normal: 0.15, nightmare: 0.25, hell: 0.35 },
+    ancientCreep: { normal: 0.20, nightmare: 0.32, hell: 0.46 },
     echo: { normal: 0.03, nightmare: 0.045, hell: 0.06 }
+  },
+  eliteSpawnChance: { large: 0.04, ancient: 0.03 },
+  merchantGradeMultiplier: { worn: 1.0, standard: 1.25, sharp: 1.6, refined: 2.2 },
+  merchantRefreshPerVisits: 2,
+  gambleVendor: {
+    pity: 8,
+    tierPrice: { t1: 900, t2: 1800, t3: 3200, t4: 5200 }
   },
   blackMarket: {
     recipeWheelCost: 650,

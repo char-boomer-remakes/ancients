@@ -124,10 +124,12 @@ describe('Gameplay 2.0 loot pacing', () => {
 
   it('keeps representative overworld farming near each band EG cadence', () => {
     const minutes = 60_000;
-    const plans: { band: LootBand; tier: DifficultyTier; sources: { table: ItemDropTable; clearMin: number; seedSalt: number }[] }[] = [
+    const plans: { band: LootBand; tier: DifficultyTier; min: number; max: number; sources: { table: ItemDropTable; clearMin: number; seedSalt: number }[] }[] = [
       {
         band: 'early',
         tier: 'normal',
+        min: 0.18,
+        max: 0.26,
         sources: [
           { table: DEFAULT_CREEP_DROP_TABLES.large, clearMin: 0.75, seedSalt: 1_000_000 },
           { table: echoEgTable(), clearMin: 2.5, seedSalt: 2_000_000 }
@@ -136,6 +138,8 @@ describe('Gameplay 2.0 loot pacing', () => {
       {
         band: 'mid',
         tier: 'nightmare',
+        min: 0.28,
+        max: 0.40,
         sources: [
           { table: DEFAULT_CREEP_DROP_TABLES.large, clearMin: 0.75, seedSalt: 3_000_000 },
           { table: echoEgTable(), clearMin: 5, seedSalt: 4_000_000 }
@@ -144,6 +148,8 @@ describe('Gameplay 2.0 loot pacing', () => {
       {
         band: 'late',
         tier: 'hell',
+        min: 0.55,
+        max: 0.68,
         sources: [
           { table: DEFAULT_CREEP_DROP_TABLES.ancient, clearMin: 0.75, seedSalt: 5_000_000 }
         ]
@@ -152,38 +158,36 @@ describe('Gameplay 2.0 loot pacing', () => {
 
     for (const plan of plans) {
       const rate = simulateDrops({ minutes, ...plan }) / minutes;
-      const floor = 1 / TUNING.loot.egCadenceMinByBand[plan.band];
-      expect(rate).toBeGreaterThanOrEqual(floor);
-      expect(rate).toBeLessThanOrEqual(floor * 1.6);
+      expect(rate).toBeGreaterThanOrEqual(plan.min);
+      expect(rate).toBeLessThanOrEqual(plan.max);
     }
   });
 
   it('keeps boss, raid, and dungeon EG faucets wired into the late-band matrix', () => {
     const minutes = 60_000;
-    const floor = 1 / TUNING.loot.egCadenceMinByBand.late;
     const sources = [
       {
         name: 'regional boss',
         table: lootTableToDropTable(REG.boss('boss-phantom-assassin').loot),
         clearMin: 5,
-        min: floor * 0.45,
-        max: floor * 1.15,
+        min: 0.04,
+        max: 0.09,
         seedSalt: 6_000_000
       },
       {
         name: 'raid',
         table: lootTableToDropTable(REG.raid('lord-of-terror').loot),
         clearMin: 8,
-        min: floor * 0.35,
-        max: floor * 1.1,
+        min: 0.03,
+        max: 0.07,
         seedSalt: 7_000_000
       },
       {
         name: 'dungeon guardian',
         table: REG.dungeon('frost-hollow').loot.boss,
         clearMin: 16,
-        min: floor * 0.2,
-        max: floor * 0.85,
+        min: 0.01,
+        max: 0.04,
         seedSalt: 8_000_000
       }
     ];

@@ -78,29 +78,29 @@ export const DEFAULT_CREEP_DROP_TABLES: Record<CreepTier, ItemDropTable> = {
   small: {
     guaranteed: [],
     slots: [
-      { id: 'creep-common-consumable', rarity: 'common', rolls: 1, chance: { normal: 0.14, nightmare: 0.18, hell: 0.22 }, pool: COMMON_CONSUMABLES, source: 'creep' }
+      { id: 'creep-common-consumable', rarity: 'common', rolls: 1, chance: { normal: 0.30, nightmare: 0.36, hell: 0.42 }, pool: COMMON_CONSUMABLES, source: 'creep' }
     ]
   },
   medium: {
     guaranteed: [],
     slots: [
-      { id: 'creep-common-consumable', rarity: 'common', rolls: 1, chance: { normal: 0.18, nightmare: 0.22, hell: 0.26 }, pool: COMMON_CONSUMABLES, source: 'creep' },
-      { id: 'creep-uncommon-component', rarity: 'uncommon', rolls: 1, chance: { normal: 0.06, nightmare: 0.09, hell: 0.12 }, pool: EARLY_COMPONENTS, source: 'creep' }
+      { id: 'creep-common-consumable', rarity: 'common', rolls: 1, chance: { normal: 0.40, nightmare: 0.46, hell: 0.52 }, pool: COMMON_CONSUMABLES, source: 'creep' },
+      { id: 'creep-uncommon-component', rarity: 'uncommon', rolls: 1, chance: { normal: 0.25, nightmare: 0.32, hell: 0.40 }, pool: EARLY_COMPONENTS, source: 'creep' }
     ]
   },
   large: {
     guaranteed: [],
     slots: [
-      { id: 'creep-common-consumable', rarity: 'common', rolls: 1, chance: { normal: 0.16, nightmare: 0.2, hell: 0.24 }, pool: COMMON_CONSUMABLES, source: 'creep' },
-      { id: 'creep-uncommon-component', rarity: 'uncommon', rolls: 1, chance: { normal: 0.22, nightmare: 0.28, hell: 0.34 }, pool: EARLY_COMPONENTS, source: 'creep' },
+      { id: 'creep-common-consumable', rarity: 'common', rolls: 1, chance: { normal: 0.35, nightmare: 0.42, hell: 0.50 }, pool: COMMON_CONSUMABLES, source: 'creep' },
+      { id: 'creep-uncommon-component', rarity: 'uncommon', rolls: 1, chance: { normal: 0.55, nightmare: 0.64, hell: 0.74 }, pool: EARLY_COMPONENTS, source: 'creep' },
       { id: 'creep-large-endgame', rarity: 'legendary', rolls: 1, chance: TUNING.overworldEgSlotPct.largeCreep, pool: LARGE_ENDGAME_CORES, qualityOddsByTier: qualityOddsByTier(), source: 'creep', raritySplit: true }
     ]
   },
   ancient: {
     guaranteed: [],
     slots: [
-      { id: 'creep-rare-component', rarity: 'rare', rolls: 1, chance: { normal: 0.25, nightmare: 0.32, hell: 0.4 }, pool: DEEP_COMPONENTS, source: 'creep' },
-      { id: 'creep-mythical-component', rarity: 'mythical', rolls: 1, chance: { normal: 0.08, nightmare: 0.12, hell: 0.18 }, pool: DEEP_COMPONENTS, source: 'creep' },
+      { id: 'creep-rare-component', rarity: 'rare', rolls: 1, chance: { normal: 0.60, nightmare: 0.72, hell: 0.84 }, pool: DEEP_COMPONENTS, source: 'creep' },
+      { id: 'creep-mythical-component', rarity: 'mythical', rolls: 1, chance: { normal: 0.28, nightmare: 0.38, hell: 0.50 }, pool: DEEP_COMPONENTS, source: 'creep' },
       { id: 'creep-ancient-endgame', rarity: 'legendary', rolls: 1, chance: TUNING.overworldEgSlotPct.ancientCreep, pool: ANCIENT_ENDGAME_CORES, qualityOddsByTier: qualityOddsByTier(), source: 'creep', raritySplit: true }
     ]
   }
