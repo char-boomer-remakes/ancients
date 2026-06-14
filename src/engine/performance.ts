@@ -36,6 +36,8 @@ export interface QualityPreset {
   smaa: boolean;
   /** 0..1 density multiplier for ambient weather particles. */
   weatherDensity: number;
+  /** 0..1 density multiplier for instanced billboard grass tufts (GRAPHICS_SPEC §13 Phase 2 foliage). 0 keeps low tier tuft-free. */
+  grassDensity: number;
 }
 
 export const QUALITY_PRESETS: Record<QualityTier, QualityPreset> = {
@@ -56,7 +58,8 @@ export const QUALITY_PRESETS: Record<QualityTier, QualityPreset> = {
     grade: false,
     ao: false,
     smaa: false,
-    weatherDensity: 0
+    weatherDensity: 0,
+    grassDensity: 0
   },
   medium: {
     tier: 'medium',
@@ -75,7 +78,8 @@ export const QUALITY_PRESETS: Record<QualityTier, QualityPreset> = {
     grade: false,
     ao: false,
     smaa: true,
-    weatherDensity: 0.4
+    weatherDensity: 0.4,
+    grassDensity: 0.5
   },
   high: {
     tier: 'high',
@@ -94,7 +98,8 @@ export const QUALITY_PRESETS: Record<QualityTier, QualityPreset> = {
     grade: true,
     ao: false,
     smaa: true,
-    weatherDensity: 1
+    weatherDensity: 1,
+    grassDensity: 1
   },
   ultra: {
     tier: 'ultra',
@@ -113,7 +118,8 @@ export const QUALITY_PRESETS: Record<QualityTier, QualityPreset> = {
     grade: true,
     ao: true,
     smaa: true,
-    weatherDensity: 1
+    weatherDensity: 1,
+    grassDensity: 1
   }
 };
 

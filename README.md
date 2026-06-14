@@ -147,3 +147,7 @@ Content is data-driven. Adding heroes, items, creeps, or regions mostly means ad
 - Dota mechanical identity is the bar: a Dota player should recognize a hero's kit and an item's purpose on sight, even when numbers are retuned for action-RPG pacing.
 - All written content is original and in-character. The game evokes Dota and its cousins without copying their text or assets.
 - `npm test` should stay green after content and systems changes.
+
+## Credits
+
+Assets are original, generated, or permissively licensed. Item icons come from [game-icons.net](https://game-icons.net) (Lorc, Delapouite, and contributors) under CC BY 3.0. See [`CREDITS.md`](./CREDITS.md) for attributions and [`ASSETS.md`](./ASSETS.md) for the per-file license record.

@@ -27,6 +27,14 @@ describe('performance quality presets', () => {
     expect(qualityPreset('low').ao).toBe(false);
   });
 
+  it('keeps the grass-tuft layer off on low tier and scales it up with fidelity', () => {
+    expect(qualityPreset('low').grassDensity).toBe(0);
+    expect(qualityPreset('medium').grassDensity).toBeGreaterThan(0);
+    expect(qualityPreset('medium').grassDensity).toBeLessThan(qualityPreset('high').grassDensity);
+    expect(qualityPreset('high').grassDensity).toBe(1);
+    expect(qualityPreset('ultra').grassDensity).toBe(1);
+  });
+
   it('walks quality tiers within the requested ceiling', () => {
     expect(lowerQualityTier('ultra')).toBe('high');
     expect(lowerQualityTier('low')).toBeNull();

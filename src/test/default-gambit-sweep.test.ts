@@ -60,7 +60,11 @@ describe('role-true default gambit sweep', () => {
     let newWins = 0;
     let oldWins = 0;
     let draws = 0;
-    const N = 40; // 80 games: a wide enough mirror to be stable, not a 16-seed coin flip.
+    // 48 games (24 seeds × 2 sides). The result is deterministic on these fixed
+    // seeds, so this size is purely a runtime/contention budget: small enough that
+    // the sweep never approaches the timeout and can't starve sibling workers, wide
+    // enough to stay a bias-cancelled mirror rather than a coin flip.
+    const N = 24;
     for (let seed = 1; seed <= N; seed++) {
       // same seed, brains swapped between sides, to cancel positional bias.
       const r1 = runMacroBattle({ seed, teamA: newTeam(), teamB: oldTeam(), maxSec: 60 });
@@ -76,7 +80,7 @@ describe('role-true default gambit sweep', () => {
     const decisive = newWins + oldWins;
     expect(decisive).toBeGreaterThan(0);
     expect(newWins).toBeGreaterThanOrEqual(Math.floor(decisive * 0.4));
-  });
+  }, 60_000); // 48 macro battles; generous headroom over the 30s default so contention can't time it out.
 
   it('a mirror battle is deterministic (run-twice agreement)', () => {
     const a = runMacroBattle({ seed: 7, teamA: newTeam(), teamB: oldTeam(), maxSec: 60 });

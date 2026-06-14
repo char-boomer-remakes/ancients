@@ -914,8 +914,48 @@ export function chooseUtilityOrder(sim: Sim, u: Unit, focus: Unit | null): Order
   return { kind: 'attack-unit', uid: focus.uid };
 }
 
+/**
+ * Defend a dived ally (the `peel` gambit action, COMBAT_OVERHAUL §3.2). Prefers the
+ * raid frontline-peel target (an add menacing the backline); otherwise finds the
+ * most-pressured friendly hero (lowest HP with an enemy crowding it) and bodies the
+ * nearest enemy to it. Returns null when no ally needs peeling. Deterministic: ties
+ * break by uid.
+ */
+export function peelOrder(sim: Sim, u: Unit): Order | null {
+  const raidAdd = raidPeelTarget(sim, u, combatProfile(u));
+  if (raidAdd) return { kind: 'attack-unit', uid: raidAdd.uid };
+
+  const r = TUNING.ai.peelDiveRadius;
+  let ally: Unit | null = null;
+  let allyPct = Infinity;
+  for (const a of sim.unitsArr) {
+    if (!a.alive || a === u || a.team !== u.team || a.kind !== 'hero') continue;
+    let dived = false;
+    sim.forEachNearbyUnit(a.pos, r + 40, (e) => {
+      if (dived || !enemyCandidate(sim, u, e)) return;
+      if (dist2(e.pos, a.pos) <= r * r) dived = true;
+    });
+    if (!dived) continue;
+    const pct = a.hp / Math.max(1, a.stats.maxHp);
+    if (pct < allyPct || (pct === allyPct && (ally === null || a.uid < ally.uid))) { allyPct = pct; ally = a; }
+  }
+  if (!ally) return null;
+
+  const peerAlly: Unit = ally;
+  let diver: Unit | null = null;
+  let diverD = Infinity;
+  sim.forEachNearbyUnit(peerAlly.pos, r + 40, (e) => {
+    if (!enemyCandidate(sim, u, e)) return;
+    const d = dist2(e.pos, peerAlly.pos);
+    if (d > r * r) return;
+    if (d < diverD || (d === diverD && (diver === null || e.uid < diver.uid))) { diverD = d; diver = e; }
+  });
+  if (diver) return { kind: 'attack-unit', uid: (diver as Unit).uid };
+  return { kind: 'move', point: { ...peerAlly.pos } };
+}
+
 /** Spread response from team-mind: step out if another ally is stacked on top of us. */
-function spreadSpacingOrder(sim: Sim, u: Unit): Order | null {
+export function spreadSpacingOrder(sim: Sim, u: Unit): Order | null {
   let nearestPos: Vec2 | null = null;
   let nearestD = Infinity;
   sim.forEachNearbyUnit(u.pos, 300, (a) => {

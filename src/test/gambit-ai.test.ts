@@ -79,6 +79,69 @@ describe('gambit AI positioning and targeting', () => {
     }
   });
 
+  it('enemy-count-by-role gates on how many enemy heroes carry a role', () => {
+    // teamB has crystal-maiden (support); exactly 1 support, not 2.
+    const enough = simWithRules([
+      { if: [{ k: 'enemy-count-by-role', role: 'support', count: 1 }], then: { k: 'hold' } },
+      { if: [{ k: 'always' }], then: { k: 'attack-focus' } }
+    ]);
+    thinkGambit(enough.sim, enough.hero);
+    expect(enough.hero.order.kind).toBe('hold'); // ≥1 support → first rule fires
+
+    const notEnough = simWithRules([
+      { if: [{ k: 'enemy-count-by-role', role: 'support', count: 2 }], then: { k: 'hold' } },
+      { if: [{ k: 'always' }], then: { k: 'attack-focus' } }
+    ]);
+    thinkGambit(notEnough.sim, notEnough.hero);
+    expect(notEnough.hero.order.kind).not.toBe('hold'); // only 1 support → falls through
+  });
+
+  it('peel bodies the enemy diving a low-HP ally', () => {
+    const teamA: MacroHeroSetup[] = [
+      { heroId: 'sven', level: 18, gambits: [{ if: [{ k: 'always' }], then: { k: 'peel' } }] },
+      { heroId: 'crystal-maiden', level: 18 }
+    ];
+    const teamB: MacroHeroSetup[] = [{ heroId: 'sniper', level: 18 }];
+    const sim = setupMacroSim({ seed: 4242, teamA, teamB, maxSec: 30 });
+    const peeler = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'sven')!;
+    const ally = sim.unitsArr.find((u) => u.team === 0 && u.heroId === 'crystal-maiden')!;
+    const diver = sim.unitsArr.find((u) => u.team === 1)!;
+
+    ally.pos = { x: 2000, y: 2000 };
+    ally.hp = ally.stats.maxHp * 0.3;
+    diver.pos = { x: 2080, y: 2000 }; // crowding the wounded ally
+    peeler.pos = { x: 1500, y: 2000 };
+    sim.rebuildSpatial();
+
+    thinkGambit(sim, peeler);
+
+    expect(peeler.order).toEqual({ kind: 'attack-unit', uid: diver.uid });
+  });
+
+  it('spread steps a stacked unit away from a crowding ally', () => {
+    const teamA: MacroHeroSetup[] = [
+      { heroId: 'sven', level: 18, gambits: [{ if: [{ k: 'always' }], then: { k: 'spread' } }] },
+      { heroId: 'juggernaut', level: 18 }
+    ];
+    const teamB: MacroHeroSetup[] = [{ heroId: 'sniper', level: 18 }];
+    const sim = setupMacroSim({ seed: 77, teamA, teamB, maxSec: 30 });
+    const u = sim.unitsArr.find((x) => x.team === 0 && x.heroId === 'sven')!;
+    const crowd = sim.unitsArr.find((x) => x.team === 0 && x.heroId === 'juggernaut')!;
+    u.pos = { x: 3000, y: 3000 };
+    crowd.pos = { x: 3050, y: 3000 };
+    sim.rebuildSpatial();
+
+    thinkGambit(sim, u);
+
+    expect(u.order.kind).toBe('move');
+    if (u.order.kind === 'move') {
+      const moved = (u.order.point.x - u.pos.x) ** 2 + (u.order.point.y - u.pos.y) ** 2;
+      expect(moved).toBeGreaterThan(0);
+      // moved away from the crowding ally
+      expect(u.order.point.x).toBeLessThan(crowd.pos.x);
+    }
+  });
+
   it('fight-time-gt is relative to the current encounter, not absolute sim time', () => {
     const { sim, hero, enemies } = simWithRules([
       { if: [{ k: 'fight-time-gt', sec: 5 }], then: { k: 'hold' } },

@@ -479,7 +479,7 @@ export class GameScene {
     this.skyDome.renderOrder = -1;
     this.scene.add(this.skyDome);
 
-    this.terrain = buildTerrain(region, () => this.isLive(), { staticPropShadows: qualityCfg.staticPropShadows });
+    this.terrain = buildTerrain(region, () => this.isLive(), { staticPropShadows: qualityCfg.staticPropShadows, grassDensity: qualityCfg.grassDensity });
     this.scene.add(this.terrain.group);
 
     if (qualityCfg.weatherDensity > 0) this.buildWeather(region.biome, qualityCfg.weatherDensity);
@@ -1478,9 +1478,15 @@ export class GameScene {
   private createView(u: Unit): UnitView {
     const { sil, palette } = this.unitVisualSpec(u);
 
+    // Hero-like = a true hero unit, or a non-hero standee (recruit NPC) carrying a
+    // render-only hero identity. Both mount the authored hero GLB over the
+    // procedural floor; the sim never sees `renderHeroId`.
+    const renderHeroId = u.heroId ?? u.renderHeroId;
+    const heroLike = !!renderHeroId && (u.kind === 'hero' || u.kind === 'npc');
+
     const rig = buildUnitRig(sil, palette);
-    if (u.kind === 'hero' && u.heroId) {
-      applyHeroLikeness(rig, u.heroId);
+    if (heroLike) {
+      applyHeroLikeness(rig, renderHeroId);
       this.applyHeroDetail(rig);
     }
     applyItemAppearances(rig, this.itemAppearancesFor(u));
@@ -1490,8 +1496,8 @@ export class GameScene {
     // Pluggable rig (Phase 5): prefer a dedicated hero GLB; otherwise try the
     // shared-base cohort path. If neither asset exists, the procedural rig stays.
     const mountSharedBase = (): void => {
-      if (u.kind !== 'hero' || !u.heroId) return;
-      const base = heroBaseId(u.heroId);
+      if (!heroLike) return;
+      const base = heroBaseId(renderHeroId);
       if (base === 'procedural') return;
       void this.heroAssets.loadBase(base).then((asset) => {
         if (asset && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
@@ -1505,7 +1511,7 @@ export class GameScene {
     const mountHoldoutSignatureFallback = (): void => {
       // If a generated holdout replacement is absent or fails, keep the animated
       // procedural rig live and add the older signature kit over it.
-      const signatureUrl = u.kind === 'hero' ? holdoutSignatureUrl(u.heroId) : null;
+      const signatureUrl = heroLike ? holdoutSignatureUrl(renderHeroId) : null;
       if (!signatureUrl) return;
       void loadModelAsset(signatureUrl).then((asset) => {
         if (asset && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
@@ -1513,8 +1519,8 @@ export class GameScene {
         }
       });
     };
-    const assetEntry = u.kind === 'hero' ? heroAssetEntry(u.heroId) : null;
-    const isHoldoutReplacement = !!(u.kind === 'hero' && u.heroId && ENABLED_HOLDOUT_MODELS.has(u.heroId));
+    const assetEntry = heroLike ? heroAssetEntry(renderHeroId) : null;
+    const isHoldoutReplacement = !!(heroLike && renderHeroId && ENABLED_HOLDOUT_MODELS.has(renderHeroId));
     if (assetEntry) {
       void this.heroAssets.loadHero(assetEntry).then((asset) => {
         if (asset && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
@@ -1522,7 +1528,7 @@ export class GameScene {
           // WS-A within-cohort variation: stretch the shared base to this hero's
           // proportions and layer its innate identity gear over the authored body,
           // before items so the weapon counter-scale reads the final model scale.
-          if (!isHoldoutReplacement) applyAuthoredSilhouette(rig, u.heroId!, palette);
+          if (!isHoldoutReplacement) applyAuthoredSilhouette(rig, renderHeroId!, palette);
           // WS-B: re-apply worn items now that sockets resolved, so the weapon hangs
           // off the authored hand bone instead of the hidden procedural one.
           applyItemAppearances(rig, this.itemAppearancesFor(u));

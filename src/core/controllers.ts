@@ -2,7 +2,7 @@ import { TUNING } from '../data/tuning';
 import { add, closestOnSeg, dist, dist2, norm, pointSegDist, scale, sub, v2 } from './math2d';
 import { nearestEnemy } from './actions';
 import { REG } from './registry';
-import { chooseUtilityOrder, dangerousScore, enemyCastSeen, incomingDisable, pickUtilityFocus } from './utility';
+import { chooseUtilityOrder, dangerousScore, enemyCastSeen, incomingDisable, peelOrder, pickUtilityFocus, spreadSpacingOrder } from './utility';
 import { dominantRole } from './combat-profile';
 import { tauntToTop } from './threat';
 import { pickBossFocus } from './boss-brain';
@@ -264,6 +264,14 @@ function evalCondition(sim: Sim, u: Unit, cond: GambitCondition, focus: Unit | u
       return hostileZoneContaining(sim, u) !== undefined;
     case 'focus-is-role':
       return focus?.heroId ? REG.hero(focus.heroId).roles.includes(cond.role) : false;
+    case 'enemy-count-by-role': {
+      let n = 0;
+      for (const o of sim.unitsArr) {
+        if (!enemyCandidate(sim, u, o) || o.kind !== 'hero' || !o.heroId) continue;
+        if (REG.hero(o.heroId).roles.includes(cond.role)) n++;
+      }
+      return n >= cond.count;
+    }
     case 'distance-to-focus-gt':
       return focus ? dist2(u.pos, focus.pos) > cond.dist * cond.dist : false;
     case 'distance-to-focus-lt':
@@ -432,6 +440,18 @@ function applyAction(sim: Sim, u: Unit, action: GambitAction, focus: Unit | unde
       const point = zoneEscapePoint(z, u);
       if (!point) return false;
       u.order = { kind: 'move', point };
+      return true;
+    }
+    case 'peel': {
+      const order = peelOrder(sim, u);
+      if (!order) return false;
+      u.order = order;
+      return true;
+    }
+    case 'spread': {
+      const order = spreadSpacingOrder(sim, u);
+      if (!order) return false;
+      u.order = order;
       return true;
     }
     case 'retreat': {

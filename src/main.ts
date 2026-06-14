@@ -17,7 +17,13 @@ import { Hud } from './ui/hud';
 import { showTitle } from './ui/title';
 import { withLoading } from './ui/loading';
 import { evictModelAssets, evictTextureAssets, preloadAssetGroups } from './engine/asset-loaders';
-import { ENABLED_HOLDOUT_SIGNATURES, heroAssetEntry, holdoutReplacementUrl } from './engine/assets';
+import { ENABLED_HOLDOUT_SIGNATURES, holdoutReplacementUrl } from './engine/assets';
+import {
+  preloadPathsForRegion,
+  prewarmModelPathsForSave,
+  retainedAssetUrlsForRegion,
+  retainedModelUrlsForSave
+} from './systems/asset-retention';
 import type { GameSave } from './core/types';
 
 registerAllContent();
@@ -30,57 +36,6 @@ let hud: Hud | null = null;
 let rafId = 0;
 let tickTimer = 0;
 let unmountDebug: (() => void) | null = null;
-
-const TERRAIN_PBR_SET: Record<string, string> = {
-  grass: 'Grass001',
-  forest: 'Grass001',
-  coast: 'Grass001',
-  snow: 'Snow010A',
-  desert: 'Ground080',
-  wasteland: 'Ground048'
-};
-
-function preloadPathsForRegion(regionId: string, includeEnv: boolean, includeVfx: boolean): string[] {
-  const region = REG.region(regionId);
-  const set = TERRAIN_PBR_SET[region.biome] ?? TERRAIN_PBR_SET.grass;
-  const paths = [
-    `textures/terrain/${set}_Color.jpg`,
-    `textures/terrain/${set}_NormalGL.jpg`,
-    `textures/terrain/${set}_Roughness.jpg`
-  ];
-  if (includeEnv) paths.push('env/vale_day_1k.hdr');
-  if (includeVfx) paths.push('vfx/vfx_atlas.webp', 'vfx/beam_ramp.webp');
-  return paths;
-}
-
-function retainedAssetUrlsForRegion(regionId: string, includeEnv: boolean, includeVfx: boolean): Set<string> {
-  return new Set(preloadPathsForRegion(regionId, includeEnv, includeVfx).map((path) => `/assets/${path}`));
-}
-
-function prewarmModelPathsForSave(save: GameSave): string[] {
-  const paths = new Set<string>();
-  for (const heroId of save.party) {
-    const entry = heroAssetEntry(heroId);
-    if (!entry) continue;
-    paths.add(entry.modelUrl);
-    if (entry.weaponUrl) paths.add(entry.weaponUrl);
-  }
-  return [...paths];
-}
-
-function assetUrl(path: string): string {
-  return path.startsWith('/assets/') ? path : `/assets/${path}`;
-}
-
-function retainedModelUrlsForSave(save: GameSave): Set<string> {
-  const paths = new Set(prewarmModelPathsForSave(save).map(assetUrl));
-  for (const id of ENABLED_HOLDOUT_SIGNATURES) {
-    paths.add(assetUrl(`holdouts/${id}.glb`));
-    const replacement = holdoutReplacementUrl(id);
-    if (replacement) paths.add(assetUrl(replacement));
-  }
-  return paths;
-}
 
 function teardown(): void {
   cancelAnimationFrame(rafId);

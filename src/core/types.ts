@@ -709,6 +709,31 @@ export interface RaidDef {
   dialogue: string[];          // in-character boss lines (§3.13), original
 }
 
+// ---------- Domains (GAMEPLAY_OVERHAUL §3.5, Pillar P5) ----------
+// Element-themed instanced challenge built on the raid runner: a single scaled
+// boss, a run-wide "disorder" rule (statmod aura + optional periodic element tick),
+// an element entry/clear gate, and a curated loot table paced by resin. Reuses the
+// existing raid encounter engine + LootTable + resonance element vocabulary; no new
+// core mechanic and zero exotics.
+export interface DomainDef {
+  id: string;
+  name: string;
+  title: string;               // original homage subtitle, Dota voice
+  regionId: string;
+  element: ActiveElement;
+  disorder: {
+    mods?: StatModMap;                                       // run-wide aura on the party
+    tick?: { element: ActiveElement; interval: number };     // periodic element on all units
+    note: string;                                            // player-facing disorder description
+  };
+  entry?: { requiresElementHero?: ActiveElement };
+  clear: { kind: 'defeat' | 'time-limit' | 'reaction-count'; param?: number };
+  encounter: RaidBossSetup;    // reuses the raid runner
+  resinCost: number;
+  loot: LootTable;
+  dialogue: string[];          // boss lines, original
+}
+
 // ---------- Lore codex ----------
 export type LoreThreadId = 'loop';
 export type LoreUnlock =
@@ -1263,6 +1288,7 @@ export type GambitCondition =
   | { k: 'fight-time-gt'; sec: number }
   | { k: 'standing-in-zone' }
   | { k: 'focus-is-role'; role: string }
+  | { k: 'enemy-count-by-role'; role: string; count: number }
   | { k: 'distance-to-focus-gt'; dist: number }
   | { k: 'distance-to-focus-lt'; dist: number }
   // reactive reads (AI_OVERHAUL §2): answer what the enemy is doing right now
@@ -1288,6 +1314,8 @@ export type GambitAction =
   | { k: 'focus-fire'; targetMode?: GambitTargetMode }
   | { k: 'kite'; distance?: number }
   | { k: 'dodge-zones' }
+  | { k: 'peel' }
+  | { k: 'spread' }
   | { k: 'retreat' }
   | { k: 'hold' };
 

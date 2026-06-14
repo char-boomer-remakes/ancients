@@ -6,8 +6,9 @@ import { pickBossMechanic } from './boss-brain';
 import { autoPicksForLevel, buildHero } from './hero-setup';
 import { makeItemState } from './items';
 import { raidSetupFromDef } from './phase3';
+import { applyElementAura } from './combat';
 import type { EffectCtx } from './effects';
-import type { DifficultyTier, MacroHeroSetup, RaidBossSetup, RaidDef, Vec2, ZoneSpec } from './types';
+import type { ActiveElement, DifficultyTier, MacroHeroSetup, RaidBossSetup, RaidDef, StatModMap, Vec2, ZoneSpec } from './types';
 import type { Unit } from './unit';
 
 const RAPIER_ID = 'divine-rapier';
@@ -348,6 +349,74 @@ export function runRaidEncounter(setup: RaidEncounterSetup): RaidEncounterResult
 
   const base = runBattleToResult(sim, maxSec, { onTick: mechanics.tick, aegisTeam: setup.aegis ? 0 : undefined });
   return { ...base, cleared: base.winner === 0, fired: mechanics.fired };
+}
+
+// ------------------------------------------------------------------
+// Domain encounter (GAMEPLAY_OVERHAUL §3.5, Pillar P5): an element-themed
+// instanced challenge on the raid runner. A single scaled boss, a run-wide
+// "disorder" rule (statmod aura on the party + optional periodic element tick
+// on every unit), and an element entry/clear gate. Reactions always resolve in
+// a domain (element-themed by design), counted from the captured event history
+// so reaction-count clear conditions are deterministic and headless-testable.
+// ------------------------------------------------------------------
+
+export interface DomainDisorderRule {
+  mods?: StatModMap;
+  tick?: { element: ActiveElement; interval: number };
+}
+
+export interface DomainEncounterSetup {
+  seed: number;
+  party: MacroHeroSetup[];
+  boss: RaidBossSetup;
+  maxSec?: number;
+  disorder?: DomainDisorderRule;
+  clear: { kind: 'defeat' | 'time-limit' | 'reaction-count'; param?: number };
+}
+
+export interface DomainEncounterResult extends MacroResult {
+  cleared: boolean;
+  reactions: number;
+}
+
+export function runDomainEncounter(setup: DomainEncounterSetup): DomainEncounterResult {
+  const maxSec = setup.maxSec ?? TUNING.macroMaxSec;
+  const sim = setupRaidSim({ seed: setup.seed, party: setup.party, boss: setup.boss, maxSec });
+  sim.resonanceEnabled = true;     // domains are element-themed; reactions always resolve here
+  sim.events.captureAll = true;    // count reactions for reaction-count clears
+
+  // Disorder: a run-wide statmod aura applied to the player party.
+  if (setup.disorder?.mods) {
+    for (const u of sim.unitsArr) {
+      if (u.team !== 0 || u.kind !== 'hero') continue;
+      for (const k of Object.keys(setup.disorder.mods) as (keyof StatModMap)[]) {
+        const v = setup.disorder.mods[k];
+        if (typeof v === 'number') u.externalMods[k as string] = (u.externalMods[k as string] ?? 0) + v;
+      }
+      u.markStatsDirty();
+      u.refresh(sim.time);
+    }
+  }
+
+  const tick = setup.disorder?.tick;
+  let nextTickAt = tick ? tick.interval : Infinity;
+  const onTick = (s: Sim) => {
+    if (!tick || s.time < nextTickAt) return;
+    nextTickAt += tick.interval;
+    const src = s.unitsArr.find((x) => x.alive && x.team === 1) ?? null;
+    for (const u of s.unitsArr) {
+      if (!u.alive || u.kind === 'npc' || u.kind === 'ward') continue;
+      applyElementAura(s, src ?? u, u, tick.element, 1, true);
+    }
+  };
+
+  const base = runBattleToResult(sim, maxSec, { onTick });
+  const reactions = sim.events.history.filter((e) => e.t === 'reaction').length;
+  const won = base.winner === 0;
+  let cleared = won;
+  if (setup.clear.kind === 'time-limit') cleared = won && base.timeSec <= (setup.clear.param ?? maxSec);
+  else if (setup.clear.kind === 'reaction-count') cleared = won && reactions >= (setup.clear.param ?? 0);
+  return { ...base, cleared, reactions };
 }
 
 export function createRaidMechanicRunner(def: RaidDef, sim: Sim, boss: Unit): RaidMechanicRunner {

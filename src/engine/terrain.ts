@@ -22,6 +22,8 @@ export interface TerrainInfo {
 type SceneLiveCheck = () => boolean;
 interface TerrainBuildOptions {
   staticPropShadows?: boolean;
+  /** 0..1 tuft-density multiplier from the quality preset; 0 (low tier) skips the grass layer entirely. */
+  grassDensity?: number;
 }
 
 function markStaticShadowCaster(obj: THREE.Object3D, enabled: boolean): void {
@@ -65,6 +67,159 @@ function makeGroundDetail(rng: Rng): THREE.Texture | null {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   return tex;
+}
+
+// ------------------------------------------------------------------
+// Billboard grass tufts (GRAPHICS_SPEC §13 Phase 2 — the last foliage
+// item). Deterministic instanced cross-quads scattered over the open
+// ground, tier-gated (low tier = none) and biome-weighted so arid maps
+// stay sparse. Placement is a pure function so it can be unit-tested
+// headlessly; the mesh/texture build is browser-guarded like the rest.
+// ------------------------------------------------------------------
+
+export interface GrassTuft {
+  x: number; // sim-units
+  y: number; // sim-units
+  scale: number;
+  rot: number; // radians about Y
+}
+
+// How lush each biome reads. Lawns/woods are dense; snow/sand/ash are sparse.
+const GRASS_BIOME_SCALE: Record<RegionDef['biome'], number> = {
+  grass: 1,
+  forest: 0.85,
+  coast: 0.7,
+  snow: 0.22,
+  desert: 0.12,
+  wasteland: 0.2
+};
+
+/**
+ * Deterministic grass-tuft placement. Pure (no three/DOM): given a region and
+ * the quality preset's `density` (0..1), returns the world-plane positions to
+ * instance. Empty when density is 0 (low tier) so the no-tuft floor is exact.
+ * Keeps clearings around town/camps/spawns/dungeons so tufts never poke through
+ * structures or fight markers.
+ */
+export function planGrassTufts(region: RegionDef, density: number): GrassTuft[] {
+  if (density <= 0) return [];
+  const biomeScale = GRASS_BIOME_SCALE[region.biome] ?? 0.6;
+  // Vegetation correlates with tree density, so lean on it (half floor, half
+  // scaled) to keep the count proportional to how green the region already is.
+  const target = Math.floor(1100 * density * biomeScale * (0.5 + region.props.treeDensity * 0.5));
+  if (target <= 0) return [];
+  const clearings = [
+    { x: region.town.pos.x, y: region.town.pos.y, r: region.town.radius + 150 },
+    ...region.camps.map((c) => ({ x: c.pos.x, y: c.pos.y, r: c.radius + 120 })),
+    ...region.heroSpawns.map((h) => ({ x: h.pos.x, y: h.pos.y, r: 240 })),
+    ...(region.dungeons ?? []).map((d) => ({ x: d.pos.x, y: d.pos.y, r: d.radius + 150 }))
+  ];
+  const isClear = (x: number, y: number): boolean =>
+    clearings.every((c) => Math.hypot(x - c.x, y - c.y) > c.r);
+  // Dedicated seed offset so grass placement is independent of tree/rock RNG.
+  const rng = new Rng(region.seed + 5150);
+  const tufts: GrassTuft[] = [];
+  for (let i = 0; i < target * 4 && tufts.length < target; i++) {
+    const x = rng.range(300, region.size - 300);
+    const y = rng.range(300, region.size - 300);
+    if (!isClear(x, y)) continue;
+    tufts.push({ x, y, scale: rng.range(0.7, 1.55), rot: rng.range(0, Math.PI) });
+  }
+  return tufts;
+}
+
+// A small alpha-tested grass-blade sprite (a few tapered blades), green baked in
+// so it reads even before any material tint multiplies it. Browser-only.
+function makeGrassTexture(): THREE.Texture | null {
+  if (typeof document === 'undefined') return null;
+  const size = 64;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return null;
+  ctx.clearRect(0, 0, size, size);
+  const blades = [
+    { x: 0.5, sway: 0.0, w: 0.1, top: 0.06, hue: '#5c9447' },
+    { x: 0.34, sway: -0.14, w: 0.085, top: 0.16, hue: '#4a7c3a' },
+    { x: 0.66, sway: 0.14, w: 0.085, top: 0.14, hue: '#6fae57' },
+    { x: 0.22, sway: -0.06, w: 0.07, top: 0.28, hue: '#42703a' },
+    { x: 0.78, sway: 0.07, w: 0.07, top: 0.26, hue: '#79b863' }
+  ];
+  for (const b of blades) {
+    const baseX = b.x * size;
+    const halfW = (b.w * size) / 2;
+    const topX = (b.x + b.sway) * size;
+    const topY = b.top * size;
+    const grad = ctx.createLinearGradient(0, size, 0, topY);
+    grad.addColorStop(0, '#2f5a2c');
+    grad.addColorStop(1, b.hue);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(baseX - halfW, size);
+    ctx.quadraticCurveTo(baseX - halfW * 0.5, size * 0.5, topX, topY);
+    ctx.quadraticCurveTo(baseX + halfW * 0.5, size * 0.5, baseX + halfW, size);
+    ctx.closePath();
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 2;
+  return tex;
+}
+
+// Two perpendicular quads crossing at the stem so a tuft reads from any camera
+// angle without per-frame billboarding. Base sits on y=0; grows up +Y.
+function crossQuadGeometry(w: number, h: number): THREE.BufferGeometry {
+  const hw = w / 2;
+  const positions = [
+    -hw, 0, 0, hw, 0, 0, hw, h, 0, -hw, h, 0,
+    0, 0, -hw, 0, 0, hw, 0, h, hw, 0, h, -hw
+  ];
+  const uv = [0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0];
+  const index = [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(index);
+  g.computeVertexNormals();
+  return g;
+}
+
+function buildGrassTufts(
+  tufts: GrassTuft[],
+  heightAt: (x: number, y: number) => number,
+  colors: BiomePalette
+): THREE.InstancedMesh | null {
+  if (tufts.length === 0) return null;
+  const geo = crossQuadGeometry(2.0, 1.7);
+  const mat = new THREE.MeshStandardMaterial({
+    map: makeGrassTexture(),
+    color: new THREE.Color(colors.tree).lerp(new THREE.Color(colors.high), 0.35),
+    alphaTest: 0.42,
+    transparent: false,
+    side: THREE.DoubleSide,
+    roughness: 0.95,
+    metalness: 0,
+    flatShading: false
+  });
+  const inst = new THREE.InstancedMesh(geo, mat, tufts.length);
+  const m4 = new THREE.Matrix4();
+  const yUp = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < tufts.length; i++) {
+    const t = tufts[i];
+    const q = new THREE.Quaternion().setFromAxisAngle(yUp, t.rot);
+    m4.compose(
+      new THREE.Vector3(t.x / WORLD_SCALE, heightAt(t.x, t.y), t.y / WORLD_SCALE),
+      q,
+      new THREE.Vector3(t.scale, t.scale, t.scale)
+    );
+    inst.setMatrixAt(i, m4);
+  }
+  inst.instanceMatrix.needsUpdate = true;
+  inst.castShadow = false;
+  inst.receiveShadow = false;
+  inst.userData.grassTufts = true;
+  return inst;
 }
 
 function valueNoise(rng: Rng, gridN: number): number[][] {
@@ -539,6 +694,10 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
   markStaticShadowCaster(rocks, staticPropShadows);
   group.add(rocks);
   swapToInstancedModels(group, [rocks], modelUrls(FOLIAGE_BASE, ROCK_MODELS), rockMatrices, 1.5, isLive, staticPropShadows);
+
+  // grass tufts: tier-gated instanced billboards over the open ground
+  const grass = buildGrassTufts(planGrassTufts(region, opts.grassDensity ?? 0), heightAt, colors);
+  if (grass) group.add(grass);
 
   // town: stone circle + simple huts + shrine crystal
   const town = buildTown(region, heightAt, isLive, staticPropShadows);

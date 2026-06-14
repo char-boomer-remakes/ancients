@@ -48,13 +48,13 @@ import { dungeonDailySeed, dungeonWeeklySeed } from '../core/dungeon';
 import { type QualityTier } from '../engine/performance';
 import { mergeCreeps, newCreepInstanceId, validateEntourage } from '../core/capture';
 import { computeBuyPlan, executeBuy, itemReady, itemSaveOf, itemStateFromSave, sellValue, sortInventory } from '../core/items';
-import { runRaidBattle, runRaidEncounter, runMacroBattle, type RaidEncounterResult } from '../core/macro';
+import { runDomainEncounter, runRaidBattle, runRaidEncounter, runMacroBattle, type RaidEncounterResult } from '../core/macro';
 import { ELITE_DRAFT } from '../data/drafts';
-import { resonanceMods } from '../core/resonance';
+import { resonanceMods, elementForHero } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { abilityMaxLevel, abilityRankRequiredHeroLevel, autoAbilityLevels, canLearnAbilityRank, normalizeAbilityLevels } from '../core/values';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, EchoSpawnDef, GambitRule, GameSave, GraphicsSettings, GroundItemDrop, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, NeutralStashEntry, Order, QuestDef, QuestKind, QuestProgress, QuestReward, QuestSave, QuestStatus, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, Vec2 } from '../core/types';
+import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DomainDef, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, EchoSpawnDef, GambitRule, GameSave, GraphicsSettings, GroundItemDrop, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, NeutralStashEntry, Order, QuestDef, QuestKind, QuestProgress, QuestReward, QuestSave, QuestStatus, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, Vec2 } from '../core/types';
 import { advance as questAdvance, claim as questClaim, normalizeQuestSave, refreshAvailability, type QuestContext, type QuestEvent } from '../core/quests';
 import { migratePhase7Save } from '../core/phase7';
 import { ProceduralAudio, type CinematicMixMode } from '../engine/audio';
@@ -2252,6 +2252,93 @@ export class Game {
     return { won: true, result };
   }
 
+  // ---------- domains (GAMEPLAY_OVERHAUL §3.5, Pillar P5) ----------
+  // Element-themed instanced challenges on the raid runner, paced by resin. Pity
+  // streak is per-session (in-memory) so the save schema is untouched; resin (the
+  // pacing economy) is the persisted part.
+  private domainDryStreak: Record<string, number> = {};
+  private domainClearCount: Record<string, number> = {};
+
+  /** Domains for the current region whose entry condition the party can satisfy. */
+  availableDomains(): { def: DomainDef; ready: boolean; reason?: string }[] {
+    return [...REG.domains.values()]
+      .filter((def) => def.regionId === this.region.id)
+      .map((def) => {
+        if (this.party.length < 5) return { def, ready: false, reason: 'needs a full party of 5' };
+        const need = def.entry?.requiresElementHero;
+        if (need && !this.partyHasElementHero(need)) return { def, ready: false, reason: `field a ${need} hero` };
+        return { def, ready: true };
+      });
+  }
+
+  private partyHasElementHero(element: ActiveElement): boolean {
+    return this.party.some((rec) => elementForHero(REG.hero(rec.heroId)) === element);
+  }
+
+  /**
+   * Run an element-themed domain on the raid runner: a run-wide disorder rule, an
+   * element entry/clear gate, and a curated, resin-paced loot table with pity.
+   * Clears always complete; resin only modulates whether the curated loot drops or
+   * is converted to dry gold (soft pacing, §3.5 / §7 open decision).
+   */
+  runDomain(domainId: string): { won: boolean; cleared: boolean; reactions: number; loot?: LootRoll } {
+    const def = REG.domains.get(domainId);
+    if (!def) { this.msg('Unknown domain', 'bad'); return { won: false, cleared: false, reactions: 0 }; }
+    if (this.party.length < 5) {
+      this.msg('A domain needs a full party of 5 heroes', 'bad');
+      return { won: false, cleared: false, reactions: 0 };
+    }
+    const need = def.entry?.requiresElementHero;
+    if (need && !this.partyHasElementHero(need)) {
+      this.msg(`${def.name} bars entry — field a ${need} hero.`, 'bad');
+      return { won: false, cleared: false, reactions: 0 };
+    }
+    const clears = this.domainClears(domainId);
+    const result = runDomainEncounter({
+      seed: stableContentSeed(`domain:${domainId}`, clears) + Math.round(this.playtime),
+      party: this.gymPlayerTeam(),
+      boss: def.encounter,
+      disorder: { mods: def.disorder.mods, tick: def.disorder.tick },
+      clear: def.clear
+    });
+    if (!result.cleared) {
+      const why = result.winner !== 0
+        ? `${def.name} holds — regroup and return.`
+        : def.clear.kind === 'time-limit'
+          ? `${def.name} resisted the clear condition (too slow).`
+          : `${def.name} resisted the clear condition (too few reactions: ${result.reactions}).`;
+      this.msg(why, 'bad');
+      this.autosave('domain');
+      return { won: result.winner === 0, cleared: false, reactions: result.reactions };
+    }
+    const dryStreak = this.domainDryStreak[domainId] ?? 0;
+    const loot = rollLoot(def.loot, 'normal', dryStreak, stableContentSeed(`domain:${domainId}:loot`, clears), this.currentLootBand(), 'raid', {
+      gradeFloorBump: this.regionalGradeFloorBump(),
+      gradeFloorMin: this.regionalGradeFloorMin(this.region.id, 'raid'),
+      regionId: this.region.id,
+      endgameUnlocked: this.endgameAffixUnlocked('normal')
+    });
+    this.domainDryStreak[domainId] = loot.dryStreak;
+    this.domainClearCount[domainId] = clears + 1;
+    const fullLoot = this.spendResinForLoot(def.resinCost);
+    if (fullLoot) {
+      this.deliverLoot(loot);
+      const drop = loot.assembled ? `dropped ${REG.item(loot.assembled.id).name}${loot.pityUsed ? ' (pity!)' : ''}!` : `${loot.guaranteed.length} component${loot.guaranteed.length === 1 ? '' : 's'}`;
+      this.msg(`${def.name} cleared — ${drop} (${result.reactions} reactions)`, 'good');
+    } else {
+      const dryItems = [...loot.guaranteed, ...(loot.assembled ? [loot.assembled] : [])];
+      const gold = this.grantDryLootGold(dryItems, 'resin-dry', this.activeUnit()?.pos);
+      this.msg(`${def.name} cleared, but the Moonflow is dry — loot converted to ${gold}g.`, 'info');
+    }
+    this.playPresentationStinger('raid-clear');
+    this.autosave('domain');
+    return { won: true, cleared: true, reactions: result.reactions, loot };
+  }
+
+  private domainClears(domainId: string): number {
+    return this.domainClearCount[domainId] ?? 0;
+  }
+
   startLiveRaid(raidId: string, tier: DifficultyTier = 'normal', opts: { maxSec?: number; festivalMode?: SeasonalEventDef['mode'] } = {}): boolean {
     if (this.liveGym || this.liveRaid) return false;
     const def = REG.raid(raidId);
@@ -3053,7 +3140,7 @@ export class Game {
 
   /** Board view-model: every quest the player can see (not locked, not terminal-claimed). */
   questBoard(): {
-    id: string; name: string; kind: QuestKind; summary: string; giver?: string; region?: string;
+    id: string; name: string; kind: QuestKind; summary: string; giver?: string; region?: string; regionId?: string;
     status: QuestStatus; objectives: { text: string; have: number; need: number }[];
     rewards: string[]; dialogue?: string[]; claimable: boolean; cooldownLeft?: number;
   }[] {
@@ -3069,6 +3156,7 @@ export class Game {
         summary: def.summary,
         giver: def.giver,
         region: def.regionId ? REG.regions.get(def.regionId)?.name : undefined,
+        regionId: def.regionId,
         status: save.status,
         objectives: def.objectives.map((obj, i) => ({ text: obj.text, have: save.progress[i] ?? 0, need: obj.count })),
         rewards: def.rewards.map((r) => this.rewardLabel(r)),
@@ -3077,8 +3165,17 @@ export class Game {
         cooldownLeft: save.status === 'cooldown' && save.availableAt !== undefined ? Math.max(0, Math.ceil(save.availableAt - this.playtime)) : undefined
       });
     }
+    // Order: ready-to-claim first (never miss a reward), then the region you are
+    // standing in (its bounties are the ones you can act on now), then chapters
+    // before bounties, then everything else stably.
     const rank = (s: QuestStatus): number => (s === 'complete' ? 0 : s === 'active' ? 1 : 2);
-    out.sort((a, b) => rank(a.status) - rank(b.status) || (a.kind === b.kind ? 0 : a.kind === 'event' ? -1 : 1));
+    const here = this.region.id;
+    const local = (rid?: string): number => (rid === here ? 0 : 1);
+    out.sort((a, b) =>
+      rank(a.status) - rank(b.status) ||
+      local(a.regionId) - local(b.regionId) ||
+      (a.kind === b.kind ? 0 : a.kind === 'event' ? -1 : 1)
+    );
     return out;
   }
 
@@ -4956,6 +5053,10 @@ export class Game {
         radius: TUNING.unitRadiusHero
       });
       u.visual = { silhouette: def.silhouette, palette: def.palette };
+      // Render-only hero identity: the scene mounts this hero's authored GLB so
+      // the townstanding recruit reads as the same character it becomes once on
+      // the team, instead of a flat procedural placeholder. Sim/AI ignore it.
+      u.renderHeroId = spawn.heroId;
       u.ctrl = { kind: 'none' };
       u.refresh(0);
       u.hp = u.stats.maxHp;
@@ -6426,6 +6527,51 @@ export class Game {
         const camp = this.region.camps.find((c) => c.id === id)!;
         st.uids = [];
         st.respawnAt = this.sim.time + camp.respawnSec;
+        if (camp.leyLine) this.payLeyLine(camp.leyLine, camp.pos);
+      }
+    }
+  }
+
+  /**
+   * Ley-line outcrop payout (GAMEPLAY_OVERHAUL §3.5, Pillar P5): a cleared outcrop
+   * camp pays a resin-gated gold/XP bump. Soft pacing — with enough resin (or resin
+   * disabled) it pays in full; otherwise it still pays, just a reduced dry amount.
+   */
+  private payLeyLine(ley: { resinCost: number; bonusGold: number; bonusXp: number }, pos: Vec2): void {
+    const full = this.spendResinForLoot(ley.resinCost);
+    if (full) {
+      this.awardGold(ley.bonusGold, 'leyline', pos, true);
+      this.awardPartyXp(ley.bonusXp);
+      this.msg(`Ley-line outcrop tapped: +${ley.bonusGold}g and a surge of XP.`, 'good');
+    } else {
+      const gold = Math.round(ley.bonusGold * TUNING.resin.dryLootGoldPct);
+      this.awardGold(gold, 'leyline-dry', pos, true);
+      this.msg(`Ley-line outcrop tapped, but the Moonflow is dry: +${gold}g only.`, 'info');
+    }
+  }
+
+  /** Distribute XP across the whole party (used by ley-line outcrops, §3.5). */
+  private awardPartyXp(xp: number): void {
+    if (xp <= 0) return;
+    const cap = this.recruitLevelCap();
+    for (const rec of this.party) {
+      if (rec.unit) {
+        const gained = rec.unit.addXp(xp, cap);
+        if (gained > 0) {
+          rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.unit.level);
+          rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.unit.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
+          rec.unit.refresh(this.sim.time);
+        }
+        rec.level = rec.unit.level;
+        rec.xp = rec.unit.xp;
+      } else {
+        rec.xp = Math.min(rec.xp + xp, xpForLevel(TUNING.levelCap));
+        const newLevel = Math.min(levelFromXp(rec.xp), cap);
+        if (newLevel > rec.level) {
+          rec.level = newLevel;
+          rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.level);
+          rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
+        }
       }
     }
   }

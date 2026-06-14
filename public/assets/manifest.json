@@ -1,17 +1,17 @@
 {
   "version": 1,
-  "hash": "41d950978c72",
-  "generatedAt": "2026-06-14T12:36:20.534Z",
+  "hash": "07389f795bf9",
+  "generatedAt": "2026-06-14T13:11:50.961Z",
   "assetRoot": "/assets/",
-  "totalBytes": 139499604,
+  "totalBytes": 139710817,
   "groups": {
     "audio": {
       "count": 51,
       "bytes": 14379904
     },
     "creep": {
-      "count": 20,
-      "bytes": 3059336
+      "count": 23,
+      "bytes": 3186344
     },
     "env": {
       "count": 2,
@@ -34,8 +34,8 @@
       "bytes": 822752
     },
     "ui": {
-      "count": 6,
-      "bytes": 33288
+      "count": 62,
+      "bytes": 117493
     },
     "vfx": {
       "count": 2,
@@ -568,6 +568,16 @@
       "source": null
     },
     {
+      "path": "creeps/bear.glb",
+      "url": "/assets/creeps/bear.glb",
+      "bytes": 44700,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
       "path": "creeps/bull.glb",
       "url": "/assets/creeps/bull.glb",
       "bytes": 344844,
@@ -601,6 +611,16 @@
       "path": "creeps/dragonevolved.glb",
       "url": "/assets/creeps/dragonevolved.glb",
       "bytes": 138560,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/flier.glb",
+      "url": "/assets/creeps/flier.glb",
+      "bytes": 31492,
       "type": "model",
       "group": "creep",
       "preloadGroup": "creep",
@@ -711,6 +731,16 @@
       "path": "creeps/stag.glb",
       "url": "/assets/creeps/stag.glb",
       "bytes": 317028,
+      "type": "model",
+      "group": "creep",
+      "preloadGroup": "creep",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "creeps/treant.glb",
+      "url": "/assets/creeps/treant.glb",
+      "bytes": 50816,
       "type": "model",
       "group": "creep",
       "preloadGroup": "creep",
@@ -2211,6 +2241,566 @@
       "path": "ui/frames/portrait-frame.svg",
       "url": "/assets/ui/frames/portrait-frame.svg",
       "bytes": 824,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/armor.svg",
+      "url": "/assets/ui/items/armor.svg",
+      "bytes": 2627,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/axe.svg",
+      "url": "/assets/ui/items/axe.svg",
+      "bytes": 1230,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/band.svg",
+      "url": "/assets/ui/items/band.svg",
+      "bytes": 765,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/bar.svg",
+      "url": "/assets/ui/items/bar.svg",
+      "bytes": 569,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/belt.svg",
+      "url": "/assets/ui/items/belt.svg",
+      "bytes": 579,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/blade.svg",
+      "url": "/assets/ui/items/blade.svg",
+      "bytes": 1200,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/boot.svg",
+      "url": "/assets/ui/items/boot.svg",
+      "bytes": 2349,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/bow.svg",
+      "url": "/assets/ui/items/bow.svg",
+      "bytes": 1090,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/bracer.svg",
+      "url": "/assets/ui/items/bracer.svg",
+      "bytes": 3896,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/branch.svg",
+      "url": "/assets/ui/items/branch.svg",
+      "bytes": 1760,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/broach.svg",
+      "url": "/assets/ui/items/broach.svg",
+      "bytes": 3143,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/burst.svg",
+      "url": "/assets/ui/items/burst.svg",
+      "bytes": 975,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/chain.svg",
+      "url": "/assets/ui/items/chain.svg",
+      "bytes": 4197,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/cheese.svg",
+      "url": "/assets/ui/items/cheese.svg",
+      "bytes": 1599,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/cloak.svg",
+      "url": "/assets/ui/items/cloak.svg",
+      "bytes": 1229,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/cloud.svg",
+      "url": "/assets/ui/items/cloud.svg",
+      "bytes": 1386,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/crown.svg",
+      "url": "/assets/ui/items/crown.svg",
+      "bytes": 1603,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/cyclone.svg",
+      "url": "/assets/ui/items/cyclone.svg",
+      "bytes": 2324,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/dagger.svg",
+      "url": "/assets/ui/items/dagger.svg",
+      "bytes": 1049,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/disc.svg",
+      "url": "/assets/ui/items/disc.svg",
+      "bytes": 1332,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/drum.svg",
+      "url": "/assets/ui/items/drum.svg",
+      "bytes": 3458,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/eye.svg",
+      "url": "/assets/ui/items/eye.svg",
+      "bytes": 2668,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/fang.svg",
+      "url": "/assets/ui/items/fang.svg",
+      "bytes": 1919,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/fist.svg",
+      "url": "/assets/ui/items/fist.svg",
+      "bytes": 540,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/flask.svg",
+      "url": "/assets/ui/items/flask.svg",
+      "bytes": 1651,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/flower.svg",
+      "url": "/assets/ui/items/flower.svg",
+      "bytes": 3154,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/gear.svg",
+      "url": "/assets/ui/items/gear.svg",
+      "bytes": 1220,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/gem.svg",
+      "url": "/assets/ui/items/gem.svg",
+      "bytes": 468,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/ghost.svg",
+      "url": "/assets/ui/items/ghost.svg",
+      "bytes": 1439,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/hammer.svg",
+      "url": "/assets/ui/items/hammer.svg",
+      "bytes": 620,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/hand.svg",
+      "url": "/assets/ui/items/hand.svg",
+      "bytes": 950,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/heart.svg",
+      "url": "/assets/ui/items/heart.svg",
+      "bytes": 336,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/helm.svg",
+      "url": "/assets/ui/items/helm.svg",
+      "bytes": 1331,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/leaf.svg",
+      "url": "/assets/ui/items/leaf.svg",
+      "bytes": 467,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/lens.svg",
+      "url": "/assets/ui/items/lens.svg",
+      "bytes": 1206,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/locket.svg",
+      "url": "/assets/ui/items/locket.svg",
+      "bytes": 1127,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/mantle.svg",
+      "url": "/assets/ui/items/mantle.svg",
+      "bytes": 804,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/mask.svg",
+      "url": "/assets/ui/items/mask.svg",
+      "bytes": 1931,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/medal.svg",
+      "url": "/assets/ui/items/medal.svg",
+      "bytes": 887,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/mirror.svg",
+      "url": "/assets/ui/items/mirror.svg",
+      "bytes": 578,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/orb.svg",
+      "url": "/assets/ui/items/orb.svg",
+      "bytes": 1347,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/pipe.svg",
+      "url": "/assets/ui/items/pipe.svg",
+      "bytes": 1604,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/relic.svg",
+      "url": "/assets/ui/items/relic.svg",
+      "bytes": 2007,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/ring.svg",
+      "url": "/assets/ui/items/ring.svg",
+      "bytes": 765,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/scope.svg",
+      "url": "/assets/ui/items/scope.svg",
+      "bytes": 1509,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/scythe.svg",
+      "url": "/assets/ui/items/scythe.svg",
+      "bytes": 587,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/shard.svg",
+      "url": "/assets/ui/items/shard.svg",
+      "bytes": 2199,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/shield.svg",
+      "url": "/assets/ui/items/shield.svg",
+      "bytes": 625,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/shovel.svg",
+      "url": "/assets/ui/items/shovel.svg",
+      "bytes": 1716,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/spear.svg",
+      "url": "/assets/ui/items/spear.svg",
+      "bytes": 947,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/staff.svg",
+      "url": "/assets/ui/items/staff.svg",
+      "bytes": 2303,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/sun.svg",
+      "url": "/assets/ui/items/sun.svg",
+      "bytes": 1990,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/urn.svg",
+      "url": "/assets/ui/items/urn.svg",
+      "bytes": 1844,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/veil.svg",
+      "url": "/assets/ui/items/veil.svg",
+      "bytes": 1443,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/wand.svg",
+      "url": "/assets/ui/items/wand.svg",
+      "bytes": 1021,
+      "type": "svg",
+      "group": "ui",
+      "preloadGroup": "ui",
+      "sourceSpec": null,
+      "source": null
+    },
+    {
+      "path": "ui/items/wing.svg",
+      "url": "/assets/ui/items/wing.svg",
+      "bytes": 642,
       "type": "svg",
       "group": "ui",
       "preloadGroup": "ui",

@@ -35,7 +35,10 @@ export const TRANQUIL_VALE: RegionDef = {
     { id: 'tv-vhoul-2', creepId: 'vhoul-assassin', count: 2, pos: { x: 7400, y: 9000 }, radius: 260, respawnSec: 100 },
     { id: 'tv-hellbear-1', creepId: 'hellbear', count: 2, pos: { x: 2200, y: 8800 }, radius: 300, respawnSec: 150 },
     { id: 'tv-hellbear-2', creepId: 'hellbear', count: 1, pos: { x: 9600, y: 8200 }, radius: 260, respawnSec: 150 },
-    { id: 'tv-golem-1', creepId: 'granite-golem', count: 1, pos: { x: 9800, y: 2600 }, radius: 300, respawnSec: 300 }
+    { id: 'tv-golem-1', creepId: 'granite-golem', count: 1, pos: { x: 9800, y: 2600 }, radius: 300, respawnSec: 300 },
+    // Ley-line outcrop (GAMEPLAY_OVERHAUL §3.5): a farm node that pays a resin-gated
+    // gold/XP surge on each clear. Soft-paced — pays reduced dry gold when resin is short.
+    { id: 'tv-leyline-dawnmote', creepId: 'hill-troll', count: 3, pos: { x: 5200, y: 2600 }, radius: 280, respawnSec: 120, leyLine: { resinCost: 12, bonusGold: 240, bonusXp: 220 } }
   ],
   heroSpawns: [
     { heroId: 'pudge', pos: { x: 6350, y: 7050 } },

@@ -6,6 +6,27 @@ The throughline matches the rest of the project. **The headless deterministic co
 
 ---
 
+## STATUS — shipped as of 2026-06-14
+
+Most of the overhaul has landed. The Genshin-by-systems spine (Approach A, §2) held: the overworld now reads as traverse → discover → solve → fight → bank, not just `fight camp → walk → fight camp`.
+
+| Slice | State | Notes |
+|-------|-------|-------|
+| G0 — timing contract | **Held** (standing gate) | The sim owns timing; the renderer animates it. Dash respects the windup/backswing rules and is root-stopped. The only gap is a dedicated "dash mid-windup deals no damage" assertion (see §6). |
+| G1 — locomotion ladder & stamina | **Shipped** | Run baseline, hold-to-sprint with stamina drain/regen, tap-dash (root-stopped, no projectile disjoint, no iframes). Stamina persists; item stamina bonuses raise the cap. `src/test/gameplay-overhaul.test.ts`. |
+| G2 — discovery & curiosity | **Shipped** | Tiered chests (open + gated), shard collectibles → shrine offering, per-region exploration % with threshold payouts, discoverable waypoints, and `fastTravelToWaypoint`. Tested + data-linted. |
+| G3 — verticality & traversal | **Data + authoring only — deferred** | `RegionDef` carries `elevation` / `climbPoints` / `glidePoints` / `waterZones`, but the runtime climb/glide/swim locomotion states are not built. `updateLocomotion` handles sprint/dash; the connector navigation and height-aware render are the remaining work. |
+| G4 — elemental sandbox | **Shipped** | `elementSources` apply auras to units in radius (`updateWorldElements`); the puzzle kinds (`brazier-chain`, `freeze-platform`, `burn-brush`, `relay`, `wind-seed`) are authored and solvable; world-applied elements seed reactions with Resonance on. |
+| G5 — enemy elemental design | **Shipped** | `CreepDef.elementalShield` + a runtime shield layer on `Unit`; damage routes to the shield, multiplied by the weak element, only with Resonance on (plain bonus EHP otherwise). Tested in `gameplay-overhaul.test.ts`. |
+| G6 — domains, ley lines & resin | **Shipped** | `DomainDef` + `Game.runDomain` on the raid runner with a disorder aura and an element entry/clear gate; ley-line outcrop camps pay a resin-gated bump; resin is soft pacing (off by default, zero-resin clears still complete and pay dry gold). `src/test/domains.test.ts`. |
+| G7 — support & ambience | **Deferred** | No cooking/dish consumables; weather is cosmetic ambient particles (`GRAPHICS_SPEC §5.6`), not elemental. The §3.4 field path exists to carry it when it ships. |
+
+**Save versioning note:** §4 below proposes a v4 → v5 bump; the live `SAVE_VERSION` is now **7** (subsequent overhauls bumped it further). The migration discipline it describes is the one that was followed — old saves default the new fields and load clean.
+
+The sections below are the original design rationale, preserved as authored.
+
+---
+
 ## 0. WHERE WE ARE — the three-way blend, measured honestly
 
 We pitched Ancients as Dota 2 × Diablo 2 × Genshin. Two of those three are deeply realized. The third is half-built, and the half that exists is the wrong half to make the *overworld* feel like Genshin.
@@ -398,16 +419,16 @@ Slices G1, G2, and G7 have **no core touch and no new region geometry**, so they
 
 ## 6. ACCEPTANCE — each slice is done when (testable, `PROGRESS.md` style)
 
-| Slice | Done when |
-|-------|-----------|
-| G0 | The boundary test stays green (timing in core, animation in engine); every dodge-check attack added in later slices has a visible windup ≥ its fair-reaction window; dash cancels backswing but never the windup-into-free-damage. A test asserts a dash issued mid-windup does not deal the attack's damage. |
-| G1 | A stamina bar shows in the HUD and persists across save/load; **run** is the unchanged baseline, **sprint** drains stamina for more speed and regenerates after a delay, **dash** spends a stamina burst for a fast reposition that grants **no** damage immunity, does **not** disjoint a homing projectile (it travels, so it only sidesteps skillshots), and is stopped by a root; each state drives its own animation. A unit test asserts a homing projectile still hits after a dash (disjoint stays premium to Blink/Eul's) and that a rooted unit cannot dash; `boundary.test.ts` stays green (stamina + locomotion state are systems-side). |
-| G2 | A region has discoverable waypoints (walk-in to activate), tiered chests (open + camp-gated), and a shard→shrine offering; opening/discovering ticks a per-region exploration % shown on the map; map view fast-travels between discovered waypoints; all of it round-trips through save v5. Data-lint resolves every chest/waypoint/discovery reference. |
-| G3 | A region has ≥2 elevation tiers with climb points (ascend, stamina-drained), a glide launch (arc to a lower tier), and a swim zone (slower, stamina-drained); a chest is reachable only by climbing and a waypoint only by gliding; the pather routes through connectors deterministically. |
-| G4 | Element sources apply the matching aura to a unit in radius (verified headless via the existing `element-apply` event); a brazier-chain and a freeze-platform puzzle each open a reward when solved; with Resonance on, a world-applied element seeds a reaction on a nearby enemy through the unchanged `REACTION_TABLE`; with Resonance off, puzzles still solve and nothing seeds combat. |
-| G5 | A shielded creep takes reduced damage until its `weakTo` element/reaction is applied, then is briefly vulnerable (headless damage-path test, fixed seed, deterministic); with Resonance off the same creep reads as plain bonus EHP; the macro layer never spawns shielded units (layer-split test). |
-| G6 | `Game.runDomain` clears an element-themed instanced challenge on the raid runner with a disorder aura active and an element entry/clear condition enforced, rolling its `LootTable` with pity (headless, mirrors the existing raid tests); a ley-line outcrop pays a resin-gated reward; resin caps, regenerates on the playtime clock, and round-trips through save; a clear with zero resin still completes but pays reduced/no curated loot. |
-| G7 | A cooked "dish" consumable grants an out-of-combat heal/revive/buff via the existing statmod path; a weather state applies an element outdoors through the §3.4 field path and is gated by the day/night clock. |
+| Slice | Status | Done when |
+|-------|--------|-----------|
+| G0 | ⏳ Held, one test gap | The boundary test stays green (timing in core, animation in engine); every dodge-check attack added in later slices has a visible windup ≥ its fair-reaction window; dash cancels backswing but never the windup-into-free-damage. *Remaining:* a test asserting a dash issued mid-windup does not deal the attack's damage. |
+| G1 | ✅ Done | A stamina bar shows in the HUD and persists across save/load; **run** is the unchanged baseline, **sprint** drains stamina for more speed and regenerates after a delay, **dash** spends a stamina burst for a fast reposition that grants **no** damage immunity, does **not** disjoint a homing projectile, and is stopped by a root. A unit test asserts a homing projectile still hits after a dash and that a rooted unit cannot dash; `boundary.test.ts` stays green. |
+| G2 | ✅ Done | A region has discoverable waypoints (walk-in to activate), tiered chests (open + gated), and a shard→shrine offering; opening/discovering ticks a per-region exploration % with threshold payouts; `fastTravelToWaypoint` jumps between discovered waypoints; all of it round-trips through save. Data-lint resolves every chest/waypoint/discovery/puzzle reference. |
+| G3 | ⏳ Data + authoring only — deferred | `RegionDef` carries elevation tiers, climb/glide/water data, but the runtime climb/glide/swim locomotion states and the height-aware render/connector navigation are not built. The pather still only sprints/dashes on the flat plane. |
+| G4 | ✅ Done | Element sources apply the matching aura to a unit in radius (`updateWorldElements`, via `element-apply`); brazier-chain, freeze-platform, burn-brush, relay, and wind-seed puzzle kinds are authored and solvable; with Resonance on a world-applied element seeds a reaction through the unchanged `REACTION_TABLE`; with Resonance off, puzzles still solve and nothing seeds combat. |
+| G5 | ✅ Done | A shielded creep takes reduced damage until its `weakTo` element is applied (headless damage-path test, deterministic); with Resonance off the same creep reads as plain bonus EHP; the macro layer never spawns shielded units. |
+| G6 | ✅ Done | `Game.runDomain` clears an element-themed instanced challenge on the raid runner with a disorder aura active and an element entry/clear condition enforced, rolling its `LootTable` with pity; a ley-line outcrop pays a resin-gated reward; resin caps, regenerates on the playtime clock, and round-trips through save; a zero-resin clear still completes but pays reduced dry gold. `src/test/domains.test.ts`. |
+| G7 | ⏳ Deferred | A cooked "dish" consumable grants an out-of-combat heal/revive/buff via the existing statmod path; a weather state applies an element outdoors through the §3.4 field path, gated by the day/night clock. Neither is built (weather is cosmetic only today). |
 
 Cross-cutting gates (every slice): `npm test` + `npm run build` green; `boundary.test.ts` green (no `three`/DOM in core); save migration v4 → v5 defaults cleanly; no exotic slots spent; gyms/Elite Five play identically with all of this toggled on or off.
 

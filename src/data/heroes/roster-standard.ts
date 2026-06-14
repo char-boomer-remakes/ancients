@@ -1,6 +1,7 @@
 import type { AbilityDef, HeroBaseStats, HeroDef, StatModMap, VfxArchetype } from '../../core/types';
 import { gestureForAbility, soundForAbility } from '../../core/gestures';
 import { echoLoopNote } from './loop-note';
+import { buildSeedAghanim } from './seed-aghanim';
 
 type HeroInput = {
   id: string;
@@ -77,7 +78,7 @@ function hero(input: HeroInput): HeroDef {
       { id: `${input.id}-facet-pressure`, name: 'Pressure', description: 'Sharper early fights for the authored roster pass.', mods: input.attribute === 'agi' ? { agi: 6 } : { str: 6 } },
       { id: `${input.id}-facet-reach`, name: 'Reach', description: 'A small cast-range package for macro fights.', mods: { castRange: 75 } }
     ],
-    aghanim: { name: `${input.name}'s Scepter`, description: 'A future Scepter variant is logged after the base kit pass.', implemented: false },
+    aghanim: buildSeedAghanim(input.name, abilities),
     silhouette: {
       build: input.silhouette?.build ?? (input.roles.includes('durable') ? 'brute' : 'biped'),
       scale: input.silhouette?.scale ?? (input.roles.includes('durable') ? 1.08 : 1),

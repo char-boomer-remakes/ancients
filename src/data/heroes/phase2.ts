@@ -1,4 +1,4 @@
-import type { AbilityDef, HeroBaseStats, HeroDef, StatModMap } from '../../core/types';
+import type { AbilityDef, AghanimDef, HeroBaseStats, HeroDef, StatModMap } from '../../core/types';
 import { gestureForAbility, soundForAbility } from '../../core/gestures';
 import { buildSeedAghanim } from './seed-aghanim';
 import { echoLoopNote } from './loop-note';
@@ -84,7 +84,7 @@ function hero(seed: HeroSeed, talentA: [string, string], talentB: [string, strin
         mods: { castRange: 75 }
       }
     ],
-    aghanim: buildSeedAghanim(seed.name, abilities),
+    aghanim: AUTHORED_PHASE2_AGHANIMS[seed.id] ?? buildSeedAghanim(seed.name, abilities),
     silhouette: { build: 'biped', scale: 1, bodyShape: seed.bodyShape ?? 'slim', head: seed.head ?? 'bare', weapon: seed.weapon, extras: seed.extras ?? [] },
     palette: seed.palette,
     barks: [
@@ -131,6 +131,95 @@ const meleeBase = (attr: HeroDef['attribute']): HeroBaseStats => ({
   baseArmor: attr === 'agi' ? 4 : 2,
   moveSpeed: 305
 });
+
+const O = (abilityId: string, valueKey: string, mode: 'add' | 'mul' | 'set', amount: number) => ({ abilityId, valueKey, mode, amount });
+const C = (abilityId: string, amount: number) => ({ abilityId, amount });
+
+/**
+ * Hand-authored, identity-true Aghanim's payloads for the Phase 2 marquee heroes.
+ * Each targets the value its kit's effects actually consume (verified against the
+ * ability defs below), mirroring the hero's canonical Scepter/Shard rather than the
+ * generic `buildSeedAghanim` fallback.
+ */
+const AUTHORED_PHASE2_AGHANIMS: Partial<Record<string, AghanimDef>> = {
+  mirana: {
+    name: "Mirana's Scepter",
+    description: 'Moonlight Shadow cloaks the team far longer and recasts sooner; Shard rains a heavier Starstorm.',
+    implemented: true,
+    scepter: { abilityValueOverrides: [O('mir-moonlight-shadow', 'duration', 'add', 3)], cooldownAdds: [C('mir-moonlight-shadow', -20)] },
+    shard: { abilityValueOverrides: [O('mir-starstorm', 'damage', 'mul', 1.4)] }
+  },
+  lina: {
+    name: "Lina's Scepter",
+    description: 'Laguna Blade strikes with lethal overcharge and recharges faster; Shard scorches Light Strike Array.',
+    implemented: true,
+    scepter: { abilityValueOverrides: [O('lina-laguna', 'damage', 'mul', 1.4)], cooldownAdds: [C('lina-laguna', -15)] },
+    shard: { abilityValueOverrides: [O('lina-lsa', 'damage', 'mul', 1.4), O('lina-lsa', 'stun', 'add', 0.5)] }
+  },
+  zeus: {
+    name: "Zeus's Scepter",
+    description: "Thundergod's Wrath crashes down with greater fury, more often; Shard supercharges Lightning Bolt.",
+    implemented: true,
+    scepter: { abilityValueOverrides: [O('zeus-wrath', 'damage', 'mul', 1.3)], cooldownAdds: [C('zeus-wrath', -25)] },
+    shard: { abilityValueOverrides: [O('zeus-bolt', 'damage', 'mul', 1.4)] }
+  },
+  'drow-ranger': {
+    name: "Drow Ranger's Scepter",
+    description: 'Marksmanship sharpens into deadlier precision; Shard looses a thicker Multishot volley.',
+    implemented: true,
+    scepter: { mods: { damage: 45, attackSpeed: 30 } },
+    shard: { abilityValueOverrides: [O('drow-multishot', 'damage', 'mul', 1.4)] }
+  },
+  jakiro: {
+    name: "Jakiro's Scepter",
+    description: 'Macropyre burns hotter and lingers longer; Shard freezes Ice Path a beat longer.',
+    implemented: true,
+    scepter: { abilityValueOverrides: [O('jak-macropyre', 'dps', 'mul', 1.3), O('jak-macropyre', 'duration', 'add', 2)], cooldownAdds: [C('jak-macropyre', -20)] },
+    shard: { abilityValueOverrides: [O('jak-ice-path', 'duration', 'add', 0.8)] }
+  },
+  'witch-doctor': {
+    name: "Witch Doctor's Scepter",
+    description: 'Death Ward channels longer and hits harder; Shard deepens the Maledict curse.',
+    implemented: true,
+    scepter: { abilityValueOverrides: [O('wd-death-ward', 'damage', 'mul', 1.4), O('wd-death-ward', 'duration', 'add', 1)], cooldownAdds: [C('wd-death-ward', -20)] },
+    shard: { abilityValueOverrides: [O('wd-maledict', 'dps', 'mul', 1.4)] }
+  },
+  omniknight: {
+    name: "Omniknight's Scepter",
+    description: 'Guardian Angel shields the team longer and recharges faster; Shard empowers Purification.',
+    implemented: true,
+    scepter: { abilityValueOverrides: [O('omni-guardian-angel', 'duration', 'add', 2)], cooldownAdds: [C('omni-guardian-angel', -25)] },
+    shard: { abilityValueOverrides: [O('omni-purification', 'heal', 'mul', 1.4)] }
+  },
+  windranger: {
+    name: "Windranger's Scepter",
+    description: 'Focus Fire reaches a frenzied tempo and lasts longer; Shard punches Powershot through for more.',
+    implemented: true,
+    scepter: { abilityValueOverrides: [O('wr-focus-fire', 'attackSpeed', 'add', 150), O('wr-focus-fire', 'duration', 'add', 2)], cooldownAdds: [C('wr-focus-fire', -15)] },
+    shard: { abilityValueOverrides: [O('wr-powershot', 'damage', 'mul', 1.4)] }
+  },
+  'phantom-assassin': {
+    name: "Phantom Assassin's Scepter",
+    description: 'Coup de Grace lands devastating blows more often; Shard makes Stifling Dagger cut deeper.',
+    implemented: true,
+    scepter: { abilityValueOverrides: [O('pa-coup', 'critMult', 'add', 75), O('pa-coup', 'critChance', 'add', 5)] },
+    shard: { abilityValueOverrides: [O('pa-dagger', 'damage', 'mul', 1.5)] }
+  },
+  tusk: {
+    name: "Tusk's Scepter",
+    description: 'Walrus Punch lands with bone-cracking force and stuns longer; Shard sharpens Ice Shards.',
+    implemented: true,
+    scepter: { abilityValueOverrides: [O('tusk-walrus-punch', 'damage', 'mul', 1.3), O('tusk-walrus-punch', 'stun', 'add', 0.4)], cooldownAdds: [C('tusk-walrus-punch', -4)] },
+    shard: { abilityValueOverrides: [O('tusk-shards', 'damage', 'mul', 1.4)] }
+  },
+  'ancient-apparition': {
+    name: "Ancient Apparition's Scepter",
+    description: 'Ice Blast freezes a wider front for more damage; Shard makes Cold Feet gnaw harder.',
+    implemented: true,
+    scepter: { abilityValueOverrides: [O('aa-ice-blast', 'damage', 'mul', 1.3), O('aa-ice-blast', 'radius', 'add', 120)], cooldownAdds: [C('aa-ice-blast', -15)] },
+    shard: { abilityValueOverrides: [O('aa-cold-feet', 'dps', 'mul', 1.4)] }
+  }
+};
 
 export const MIRANA = hero({
   id: 'mirana',

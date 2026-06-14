@@ -20,6 +20,50 @@ This doc is direction, not a gate, on the same crunch-mode footing as `SPEC.md`
 
 ---
 
+## STATUS — 2026-06-14
+
+Most of 2.0 has shipped. State of each item:
+
+- **§A Render/GPU.** A.1 (profile harness), A.2 (instancing), A.4 (shadow
+  budget + caster cull), A.5 (adaptive quality 2.0), A.6 (off-screen cull): done.
+  A.3: half-res bloom done; **ground-contact AO is now a real GTAO pass** gated to
+  ultra and the `ambientOcclusion` override (the dial used to be a no-op). The
+  grade→OutputPass collapse stays open: it's profiling-gated (§A.1) and a blind
+  GLSL tonemap rewrite risks a visual regression we can't measure on target HW.
+- **§B Animation/views.** B.1–B.4: done (mixer gating, crowd impostors, no shared
+  material mutation, visual-epoch counter).
+- **§C Simulation.** C.2 effectively done (auras are grid-routed + 0.5 s
+  staggered; resonance is event-driven and gated, never a per-frame scan). C.1's
+  safe half (skip rebuild when the index isn't dirty) is in; the dirty-moved-only
+  rebuild stays measurement-gated for ~0 gain in active fights and real hash risk.
+  C.4 done (`scaleCeilings` + enforced summon/illusion caps, tested). **C.3 (sim in
+  a Web Worker): boundary shipped + determinism-proven** (`SimWorkerHost`,
+  protocol, entry, round-trip hash test). The live-loop migration is **deferred**:
+  `game.ts` reads `this.sim` synchronously 126× (plus HUD/input/sessions), so
+  moving it off-thread needs a full view-model snapshot + async everywhere — a
+  large refactor that trades a working, deterministic game for unverifiable risk.
+- **§D Assets/memory.** D.1 + D.3 done (eviction, GPU-byte accounting, scene
+  tokens). D.5 satisfied (`prewarm()` runs `composer.render()`, compiling the full
+  post stack). D.2 (KTX2) stays profile-gated. **D.4 (code-split) deferred** for
+  the same reason as C.3's live loop: the synchronous headless test/boot contract
+  (`startDungeon`/`runRaid` return synchronously and are asserted as such; the
+  registry + prologue fire at boot) blocks real lazy `import()`, and app-code
+  `manualChunks` risks chunk-init-order bugs the headless suite can't catch. `three`
+  is already split; the loading screen + prewarm already cover warm-up.
+- **§F Player options.** F.0/F.1 done. **F.2: overworld battle-scale dial added**
+  (`graphics.battleScale`, scales the overworld summon/illusion ceiling only —
+  macro/gym/raid sims stay at 1 per §E.6 fairness). **F.3: colorblind-safe loot
+  palette added** (`graphics.colorblind`, an Okabe–Ito rarity set). Both persist +
+  validate; reduced-motion and screen-shake already shipped.
+- **§G Testing.** G.1/G.2/G.4 done. **G.3: leak guard landed as a headless
+  retained-set test** (`asset-retention.test.ts`) plus a gated WebGL spec
+  (`npm run test:e2e:leak`). The literal A→B→A WebGL rebuild loop can't run under
+  CI's SwiftShader (repeatedly recreating a renderer on one canvas destabilises its
+  GPU process), so the always-on guard asserts the eviction *policy* that prevents
+  the leak; the WebGL spec is a real-GPU manual tool.
+
+---
+
 ## 0. WHERE 1.0 LANDED (so 2.0 starts honest)
 
 The first optimization pass and the graphics/asset work that followed it changed
@@ -382,6 +426,8 @@ solved.
 | Draw distance | how far units/props render before cull | A.6, E.3 | medium | scene cull radius |
 | Army / crowd detail | full rigs / near-full + far impostors / reduced | B.2 | auto | view builder |
 | VFX density | particle + transient cap scale (0.5×–1.5×) | E.5 | tier | `vfx` cap |
+| Overworld battle scale | scales the overworld summon/illusion ceiling (0.5×–1.5×); macro sims ignore it | F.2, C.4 | 1× | `sim.summonCapScale` via `applyGraphics` |
+| Colorblind loot palette | swaps the rarity palette for an Okabe–Ito colorblind-safe set | F.3 | off | `setColorblindPalette` |
 | Frame target | 30 / 60 / uncapped (drives the adaptive setpoint) | A.5 | 60 | controller setpoint |
 
 These extend `GraphicsSettings`. Most map onto preset flags that already exist in
@@ -397,10 +443,10 @@ from §E.6: **anything that affects a macro (gym / Elite) outcome stays fixed an
 off-limits to these toggles.** Player-tunable scale applies to the overworld and
 optional content only.
 
-- **Overworld battle scale** (E.1, C.4): caps on simultaneous wild spawns, summon
-  army size, and illusion count. A `TUNING`-backed ceiling the player can lower for
-  perf or raise for spectacle. Gym/Elite/raid rosters are fixed by design and
-  ignore it.
+- **Overworld battle scale** (E.1, C.4) — *shipped 2026-06-14*: `graphics.battleScale`
+  (0.5×–1.5×) scales the per-owner summon/illusion ceiling via `Sim.summonCapScale`.
+  `applyGraphics` sets it on the overworld sim only; gym/Elite/raid/dungeon sims keep
+  their own sims at 1, so a perf dial can never move a macro outcome (§E.6).
 - **Companion / entourage cap**: how many fielded creeps follow in the overworld.
 - **Reduced ambient life**: fewer non-combat props, weather, and idle critters for
   a cleaner, cheaper world (overlaps reduced-motion but is about count, not motion).
@@ -414,7 +460,10 @@ silently "makes it easier."
 Reduced motion and limit-flashes exist. Round them out as first-class options:
 global screen-shake intensity (the `shakeTrauma` envelope in `scene.ts`), flash
 caps outside cut-scenes, and a colorblind-safe rarity/telegraph palette. These are
-fidelity-down dials too, so they live beside the graphics options.
+fidelity-down dials too, so they live beside the graphics options. *Shipped
+2026-06-14:* `graphics.colorblind` swaps `rarityColor()`'s palette for an
+Okabe–Ito colorblind-safe set (`setColorblindPalette`), covering every loot
+toast/border/beam at once since they all read the one function.
 
 ### F.4 Persisting and validating it
 

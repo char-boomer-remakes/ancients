@@ -6,6 +6,22 @@ Same footing as the rest of the project. **The headless deterministic core (`src
 
 ---
 
+## STATUS — shipped as of 2026-06-14
+
+This document is now largely a record of work done, not a forward plan. The §0 findings (Captain's Call was not control, the gambit AI was shallow, raids were not played) have all been addressed.
+
+| Slice | State | Where it landed |
+|-------|-------|-----------------|
+| C0 — active combat context | **Shipped** | `Game` routes input/camera/orders through `controlledUnit()` / `inputSim()` instead of the formal `CombatContext` interface in §2 — same seam, different name. Overworld plays identically; `boundary.test.ts` green. |
+| C1 — real Captain's Call | **Shipped** | A live gym seize hands full player control of the chosen hero (move/ability/item) for `captainCallSec`; the enemy still auto-calls and the headless `runGymMatch` still steers both sides. |
+| C2 — deeper gambit AI | **Shipped, and superseded by `AI_OVERHAUL.md`** | The grammar grew the conditions, target modes, positioning actions, shared team focus, and role-true defaults this slice proposed (`enemy-cast-seen`, `most-dangerous`, `focus-fire`, `kite`, `dodge-zones`, `peel`, `spread`, `enemy-count-by-role`, …). The full brain — utility scorer, combat profiles, team-mind, threat rebuild, boss phase-FSM — is recorded in `AI_OVERHAUL.md`, which is the system of record for everything in §3.2 and §3.3's AI half. The one proposed `by-role` target mode was deliberately dropped in favor of the `focus-is-role` condition + `most-dangerous` (no save-shape churn). |
+| C3 — live raids | **Shipped** | `LiveRaid` (`src/systems/raid-session.ts`) steps a rendered raid: drive one of five, `1–5` swaps drivers, allies run gambits, the boss runs its threat table, scripted beats fire live, a held Aegis revives once. The headless `runRaidEncounter` is unchanged and still the balance reference. |
+| C4 — readability & feedback | **Partial — the remaining slice** | The windup/anticipation/telegraph contract is honored and tracked in `PRESENTATION_SPEC.md`. Still to build as a dedicated readability layer: cast bars on enemy channels/big ults, a boss aggro/threat marker, the shared-focus indicator, an "ult ready → seize" Captain's Call prompt, and the live-raid HUD overlay. |
+
+The sections below are preserved as the original design rationale. Read §3.2 and §3.3's AI half through `AI_OVERHAUL.md` for the as-built brain.
+
+---
+
 ## 0. WHERE WE ARE — measured honestly
 
 The combat core is in good shape and well tested. A full 5v5 or 5v1 resolves headlessly in milliseconds, deterministically, with kits, items, statuses, threat, and taunt all working. The gap is the live layer on top. In team battles and raids, the player is mostly a spectator, because the interactive paths were either stubbed or never built.
@@ -159,6 +175,8 @@ The unit is already a `player` unit during the call; the core already honors pla
 
 ### 3.2 Deeper gambit AI (helps the spectator and the four you do not drive)
 
+> **Shipped and superseded.** Everything in this subsection landed and then grew well past it. The as-built brain — utility scorer, combat profiles, team-mind, reactive reads, threat rebuild, and the boss phase-FSM — is the system of record in `AI_OVERHAUL.md`. The prose below is the original sketch.
+
 A real seize fixes the moment you act. The rest of the fight, and the four heroes beside the one you seize, still run gambits. Deepening that AI is what makes a fight worth watching and a team worth building. Everything here is additive and headless-testable; it changes data and `src/core/controllers.ts`, not the combat resolution.
 
 **New conditions** (extend `GambitCondition`):
@@ -276,13 +294,13 @@ C0, C1, and C4 carry no grammar change and no new region content, so they land q
 
 ## 6. ACCEPTANCE — each slice is done when (testable, `PROGRESS.md` style)
 
-| Slice | Done when |
-|-------|-----------|
-| C0 | Input, camera, and every order/cast method read the active `CombatContext`. With only the overworld context installed, the game plays identically and the full existing suite stays green, including `boundary.test.ts` (no `three`/DOM in core) and the fixed-seed determinism tests. A unit test asserts that orders issued through `Game` land on `ctx.sim` / `ctx.driven()`, and that the overworld context resolves to the current active party hero. |
-| C1 | In a live gym fight, spending a Captain's Call gives the player full control of the chosen hero in the fight sim for `captainCallSec`: a move order, an ability cast, and an item active all resolve on the seized hero, and the camera locks to it; when the window expires, control reverts to `gambit` and the charge is spent. The player's active call is no longer auto-steered in the live path. The enemy still auto-calls, the headless `runGymMatch` still steers both sides, and the gym-winnable test (test 6) and captain-call-live test (test 7 in `src/test/gyms.test.ts`) stay green. |
-| C2 | The gambit grammar carries the new conditions, target modes, and actions, each with a headless test on a fixed seed: `enemy-cast-seen` fires a rule when the flagged cast is observed; `most-dangerous` targets the highest-threat enemy; `focus-fire` makes a team converge on one target; `kite` keeps a ranged hero at range while attacking; `dodge-zones` moves a unit out of a telegraphed area effect. A default five built by `buildDefaultGambit` beats a baseline opponent more often than the old defaults on a seed sweep. The gambit editor lists the new options. `boundary.test.ts` stays green. |
-| C3 | `LiveRaid` steps a rendered raid where the player drives one hero, 1–5 swaps drivers, the four allies run gambits, and the boss runs its threat table; the scheduled beats (phase zones, add wave, signature, enrage) fire live and are dodgeable; a taunt redirects the boss; a held Aegis revives once. The headless `runRaidEncounter` is unchanged and still drives the raid tests and the M10 playthrough. A test asserts the live session and the headless encounter agree on a clear for a fixed seed and scripted (or absent) player input. |
-| C4 | Every dodge-check beat shows a ground telegraph during a windup at least as long as its fair-reaction window; enemy channels and big ults show a cast bar; the boss's current aggro and the team's shared focus are shown; a Captain's Call prompt appears when a seize-worthy ult is ready. None of it changes a combat result (the determinism tests stay green). |
+| Slice | Status | Done when |
+|-------|--------|-----------|
+| C0 | ✅ Done | Input, camera, and every order/cast method read the active control context (shipped as `controlledUnit()` / `inputSim()`). With only the overworld context installed, the game plays identically and the full existing suite stays green, including `boundary.test.ts` (no `three`/DOM in core) and the fixed-seed determinism tests. Orders issued through `Game` land on the controlled unit's sim, and the overworld context resolves to the current active party hero. |
+| C1 | ✅ Done | In a live gym fight, spending a Captain's Call gives the player full control of the chosen hero in the fight sim for `captainCallSec`: a move order, an ability cast, and an item active all resolve on the seized hero, and the camera locks to it; when the window expires, control reverts to `gambit` and the charge is spent. The player's active call is no longer auto-steered in the live path. The enemy still auto-calls, the headless `runGymMatch` still steers both sides, and the gym tests stay green. |
+| C2 | ✅ Done (recorded in `AI_OVERHAUL.md`) | The gambit grammar carries the new conditions, target modes, and actions, each with a headless test on a fixed seed: `enemy-cast-seen` fires when the flagged cast is observed; `most-dangerous` targets the highest-threat enemy; `focus-fire` converges the team; `kite` holds range; `dodge-zones`/`spread` reposition; `peel` defends a dived ally; `enemy-count-by-role` gates on composition. `buildDefaultGambit` produces role-true defaults guarded by a seed sweep (`src/test/default-gambit-sweep.test.ts`). The gambit editor lists the new options by category. `boundary.test.ts` stays green. |
+| C3 | ✅ Done | `LiveRaid` steps a rendered raid where the player drives one hero, 1–5 swaps drivers, the four allies run gambits, and the boss runs its threat table; the scheduled beats (phase zones, add wave, signature, enrage) fire live and are dodgeable; a taunt redirects the boss; a held Aegis revives once. The headless `runRaidEncounter` is unchanged and still drives the raid tests and the M10 playthrough; `src/test/raid-ai.test.ts` checks live-versus-headless agreement. |
+| C4 | ⏳ Partial — remaining | Telegraph/windup anticipation is honored (`PRESENTATION_SPEC.md`). Still to build: a cast bar on enemy channels and big ults, a boss aggro/threat marker, the shared-focus indicator, an "ult ready → seize" Captain's Call prompt, and the live-raid HUD overlay. None of it changes a combat result (the determinism tests stay green). |
 
 Cross-cutting gates (every slice): `npm test` and `npm run build` green; `boundary.test.ts` green; the headless auto-resolve paths remain the system of record and agree with their live siblings; no exotic slots spent; the overworld and the gym/Elite/raid layers all behave identically with the changes toggled through their normal entry points.
 

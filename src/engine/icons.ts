@@ -4,8 +4,44 @@
 // ------------------------------------------------------------------
 
 import type { AbilityDef, ItemDef, SilhouetteSpec } from '../core/types';
+import { ITEM_GLYPH_PATHS, ITEM_GLYPH_VIEWBOX } from './item-glyphs.generated';
 
 const cache = new Map<string, string>();
+
+// Parsed once per glyph token. game-icons paths are single-path 512² silhouettes;
+// we fill them tinted into the slot, which beats the hand-drawn glyph and stops the
+// ~30 unmapped tokens from collapsing into the generic gem diamond. Procedural
+// ITEM_GLYPHS stays the fallback for any token without a vendored silhouette (and
+// for environments without Path2D), so the empty-assets floor is preserved.
+const silhouetteCache = new Map<string, Path2D | null>();
+
+function itemSilhouette(token: string): Path2D | null {
+  if (silhouetteCache.has(token)) return silhouetteCache.get(token)!;
+  const d = ITEM_GLYPH_PATHS[token];
+  const p = d && typeof Path2D !== 'undefined' ? new Path2D(d) : null;
+  silhouetteCache.set(token, p);
+  return p;
+}
+
+// Fit the 512² silhouette into the slot with a soft drop for depth, then fill the
+// tint. The brass/rarity read still comes from the slot background drawn by bg().
+function drawSilhouette(ctx: CanvasRenderingContext2D, s: number, path: Path2D, color: string): void {
+  const pad = s * 0.18;
+  const span = s - pad * 2;
+  const scale = span / ITEM_GLYPH_VIEWBOX;
+  ctx.save();
+  ctx.translate(pad, pad + s * 0.015);
+  ctx.scale(scale, scale);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fill(path, 'evenodd');
+  ctx.restore();
+  ctx.save();
+  ctx.translate(pad, pad);
+  ctx.scale(scale, scale);
+  ctx.fillStyle = color;
+  ctx.fill(path, 'evenodd');
+  ctx.restore();
+}
 
 function draw(size: number, fn: (ctx: CanvasRenderingContext2D, s: number) => void): string {
   const canvas = document.createElement('canvas');
@@ -598,8 +634,13 @@ export function itemIcon(def: ItemDef, size = 64): string {
   const color = TIER_COLORS[def.tier] ?? '#ffffff';
   const url = draw(size, (ctx, s) => {
     bg(ctx, s, color, '#141a26');
-    const glyph = (def.glyph && ITEM_GLYPHS[def.glyph]) || ITEM_GLYPHS.gem;
-    glyph(ctx, s, color);
+    const sil = def.glyph ? itemSilhouette(def.glyph) : null;
+    if (sil) {
+      drawSilhouette(ctx, s, sil, color);
+    } else {
+      const glyph = (def.glyph && ITEM_GLYPHS[def.glyph]) || ITEM_GLYPHS.gem;
+      glyph(ctx, s, color);
+    }
   });
   cache.set(key, url);
   return url;

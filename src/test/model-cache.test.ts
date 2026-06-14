@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, buildUnitRig, heroProportions, modelGeometryCacheSize, mountHeroModel, recolorToPalette } from '../engine/models';
-import { ENABLED_HERO_MODELS, ENABLED_HERO_BASES, ENABLED_HOLDOUT_MODELS, ENABLED_HOLDOUT_SIGNATURES, HERO_BASE, heroAssetEntry, heroBaseId, heroBaseUrl, holdoutReplacementUrl, holdoutSignatureUrl, PHASE5_STARTER_ASSETS } from '../engine/assets';
+import { ENABLED_HERO_MODELS, ENABLED_HERO_BASES, ENABLED_HOLDOUT_MODELS, ENABLED_HOLDOUT_SIGNATURES, HERO_BASE, creepCreatureUrl, heroAssetEntry, heroBaseId, heroBaseUrl, holdoutReplacementUrl, holdoutSignatureUrl, PHASE5_STARTER_ASSETS } from '../engine/assets';
 import { ALL_HEROES } from '../data/index';
 
 /** A stand-in mounted base: a 2×6×2 box the loader would normally fit + seat. */
@@ -191,10 +191,15 @@ describe('shared hero bases (WS-A0)', () => {
   });
 
   it('resolves shared base URLs only for shipped creature hero cohorts', () => {
-    expect(ENABLED_HERO_BASES.size).toBe(12);
+    expect(ENABLED_HERO_BASES.size).toBe(15);
     expect(heroBaseUrl(heroBaseId('broodmother'))).toBe('/assets/creeps/spider.glb');
     expect(heroBaseUrl(heroBaseId('doom'))).toBe('/assets/creeps/demon.glb');
     expect(heroBaseUrl(heroBaseId('spirit-breaker'))).toBe('/assets/creeps/bull.glb');
+    // Generated P1.3 families: ursa rides the bear, treant-protector the treant;
+    // the sea leviathan reads through crabenemy.glb.
+    expect(heroBaseUrl(heroBaseId('ursa'))).toBe('/assets/creeps/bear.glb');
+    expect(heroBaseUrl(heroBaseId('treant-protector'))).toBe('/assets/creeps/treant.glb');
+    expect(heroBaseUrl(heroBaseId('tidehunter'))).toBe('/assets/creeps/crabenemy.glb');
     expect(heroBaseUrl(heroBaseId('juggernaut'))).toBeNull(); // humanoids use per-hero GLBs.
     expect(heroBaseUrl(heroBaseId('io'))).toBeNull(); // holdouts stay procedural.
   });
@@ -256,6 +261,23 @@ describe('shared hero bases (WS-A0)', () => {
         `${heroId} replacement manifest entry`
       ).toBe(true);
     }
+  });
+
+  it('ships the generated P1.3 creature families and wires them to creeps + hero bases', () => {
+    // Each generated family file exists on disk with real bytes.
+    for (const family of ['flier', 'bear', 'treant']) {
+      const file = path.join(process.cwd(), 'public', 'assets', 'creeps', `${family}.glb`);
+      expect(existsSync(file), `${family} family file`).toBe(true);
+      expect(statSync(file).size, `${family} family size`).toBeGreaterThan(0);
+    }
+    // Harpies fly, owlbears/hellbear read as bears (not raptors/giants).
+    expect(creepCreatureUrl('harpy-stormcrafter', 'bird')).toBe('/assets/creeps/flier.glb');
+    expect(creepCreatureUrl('harpy-scout', undefined)).toBe('/assets/creeps/flier.glb');
+    expect(creepCreatureUrl('enraged-wildkin', undefined)).toBe('/assets/creeps/bear.glb');
+    expect(creepCreatureUrl('hellbear', 'brute')).toBe('/assets/creeps/bear.glb');
+    // Bear/treant hero bases resolve to the generated files.
+    expect(heroBaseUrl(heroBaseId('ursa'))).toBe('/assets/creeps/bear.glb');
+    expect(heroBaseUrl(heroBaseId('treant-protector'))).toBe('/assets/creeps/treant.glb');
   });
 
   it('recolors a cloned base to a palette without sharing tint across clones', () => {

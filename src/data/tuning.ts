@@ -78,6 +78,7 @@ export const TUNING = {
     kiteActionRangeFrac: 0.85,  // gambit `kite` default distance = attackRange × this
     kiteActionStepBonus: 160,   // gambit `kite` extra step past the desired distance
     retreatArriveDist: 100,     // gambit `retreat` counts as arrived within this of home
+    peelDiveRadius: 520,        // gambit `peel` action: an ally is "dived" if an enemy is this close
     comboWindowSec: 4,          // default combo follow-up window
     comboWeight: 1.25,          // default combo score multiplier
     ultHoldDiscount: 0.45,      // AoE-ult discount slope below holdClusterMin (scaled by depth)

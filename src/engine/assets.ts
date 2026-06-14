@@ -27,7 +27,8 @@ export interface HeroAssetManifestEntry {
 export type HeroBaseId =
   | 'knight' | 'mage' | 'barbarian' | 'rogue'
   | 'spider' | 'dragonevolved' | 'demon' | 'wolf' | 'giant' | 'golelingevolved'
-  | 'goblin' | 'velociraptor' | 'bull' | 'fox' | 'yeti' | 'ghost'
+  | 'goblin' | 'velociraptor' | 'bull' | 'fox' | 'yeti' | 'crab' | 'ghost'
+  | 'bear' | 'treant'
   | 'procedural';
 
 const HERO_COHORTS: Record<Exclude<HeroBaseId, 'procedural'>, string[]> = {
@@ -44,13 +45,18 @@ const HERO_COHORTS: Record<Exclude<HeroBaseId, 'procedural'>, string[]> = {
   dragonevolved: ['jakiro', 'viper', 'puck'],
   demon: ['doom', 'shadow-demon', 'shadow-fiend', 'night-stalker', 'terrorblade', 'visage'],
   wolf: ['lycan'],
-  giant: ['tidehunter', 'primal-beast', 'ursa', 'treant-protector'],
+  // Sea leviathan reads more aquatic on the crab base than a generic giant.
+  giant: ['primal-beast'],
   golelingevolved: ['tiny', 'elder-titan', 'earth-spirit'],
   goblin: ['techies', 'gyrocopter', 'tinker'],
   velociraptor: ['venomancer', 'snapfire'],
   bull: ['spirit-breaker', 'centaur-warrunner'],
   fox: ['hoodwink'],
   yeti: ['tusk'],
+  crab: ['tidehunter'],
+  // P1.3 generated creature families (original animated GLBs, runtime-recolored).
+  bear: ['ursa'],
+  treant: ['treant-protector'],
   ghost: ['spectre']
 };
 
@@ -94,8 +100,14 @@ export const ENABLED_HERO_COHORTS: ReadonlySet<HeroBaseId> = new Set<HeroBaseId>
 
 const CREATURE_HERO_BASES: ReadonlySet<HeroBaseId> = new Set<HeroBaseId>([
   'spider', 'dragonevolved', 'demon', 'wolf', 'giant', 'golelingevolved',
-  'goblin', 'velociraptor', 'bull', 'fox', 'yeti', 'ghost'
+  'goblin', 'velociraptor', 'bull', 'fox', 'yeti', 'crab', 'bear', 'treant', 'ghost'
 ]);
+
+// A few creature bases reuse a vendored creep GLB whose filename differs from the
+// base id (e.g. the crab base reads through the shipped `crabenemy.glb`).
+const CREATURE_BASE_FILE: Partial<Record<HeroBaseId, string>> = {
+  crab: 'crabenemy'
+};
 
 // After the build renames KayKit's 76-clip universal rig down to our six logical
 // clips, every shipped GLB exposes the same names; only the mage cohort ships a
@@ -177,7 +189,7 @@ export const ENABLED_HERO_BASES: ReadonlySet<HeroBaseId> = CREATURE_HERO_BASES;
 
 export function heroBaseUrl(base: HeroBaseId): string | null {
   if (base === 'procedural' || !ENABLED_HERO_BASES.has(base)) return null;
-  if (CREATURE_HERO_BASES.has(base)) return `/assets/creeps/${base}.glb`;
+  if (CREATURE_HERO_BASES.has(base)) return `/assets/creeps/${CREATURE_BASE_FILE[base] ?? base}.glb`;
   return `/assets/bases/${base}.glb`;
 }
 
@@ -198,7 +210,8 @@ const CREATURE_BY_ID: Record<string, string> = {
   'rock-golem': 'golelingevolved',
   'mud-golem': 'golelingevolved',
   'black-dragon': 'dragonevolved',
-  hellbear: 'giant',
+  // Hellbear is a bear — the generated bear family (P1.3) beats the humanoid giant.
+  hellbear: 'bear',
   'hill-troll': 'orc',
   kobold: 'goblin',
   'kobold-foreman': 'goblin',
@@ -206,11 +219,13 @@ const CREATURE_BY_ID: Record<string, string> = {
   'vhoul-assassin': 'goblin',
   'satyr-banisher': 'demon',
   'satyr-mindstealer': 'demon',
-  'harpy-stormcrafter': 'velociraptor',
-  'harpy-scout': 'velociraptor',
-  wildwing: 'velociraptor',
-  'wildwing-ripper': 'velociraptor',
-  'enraged-wildkin': 'velociraptor',
+  // Harpies are fliers; the winged family (P1.3) reads airborne, not ground-bound.
+  'harpy-stormcrafter': 'flier',
+  'harpy-scout': 'flier',
+  // Wildkin/wildwing are owlbears — the bear family reads closer than a raptor.
+  wildwing: 'bear',
+  'wildwing-ripper': 'bear',
+  'enraged-wildkin': 'bear',
   'ice-shaman': 'tribal',
   'ogre-frostmage': 'tribal',
   'prowler-shaman': 'tribal',
@@ -222,7 +237,9 @@ const CREATURE_BY_ID: Record<string, string> = {
   thunderhide: 'bull',
   'ancient-thunderhide': 'bull',
   'elder-jungle-stalker': 'stag',
-  'ogre-bruiser': 'orc',
+  // Route the ogre bruiser to the second orc variant so same-archetype brutes
+  // aren't all the identical orc.glb (uses the otherwise-unreferenced file).
+  'ogre-bruiser': 'orcenemy',
   'ogre-magi-large': 'orc'
 };
 

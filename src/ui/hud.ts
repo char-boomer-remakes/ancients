@@ -1398,7 +1398,7 @@ export class Hud {
     { label: 'General', kinds: ['always', 'fight-time-gt', 'allies-alive'] },
     { label: 'My state', kinds: ['self-hp-below', 'self-mana-above', 'self-mana-below', 'self-disabled', 'standing-in-zone'] },
     { label: 'Allies', kinds: ['ally-hp-below'] },
-    { label: 'Enemies', kinds: ['enemy-hp-below', 'enemies-within', 'focus-is-role', 'distance-to-focus-gt', 'distance-to-focus-lt'] },
+    { label: 'Enemies', kinds: ['enemy-hp-below', 'enemies-within', 'focus-is-role', 'enemy-count-by-role', 'distance-to-focus-gt', 'distance-to-focus-lt'] },
     { label: 'Reactions', kinds: ['enemy-cast-seen', 'incoming-disable'] },
     { label: 'Abilities', kinds: ['ability-ready'] }
   ];
@@ -1407,14 +1407,14 @@ export class Hud {
     'always': 'Always', 'self-hp-below': 'My HP <', 'ally-hp-below': 'Ally HP <', 'enemy-hp-below': 'Enemy HP <',
     'self-mana-above': 'My mana >', 'self-mana-below': 'My mana <', 'enemies-within': 'Enemies within',
     'allies-alive': 'Allies alive ≥', 'ability-ready': 'Ability ready', 'fight-time-gt': 'Fight time >',
-    'standing-in-zone': 'Standing in zone', 'focus-is-role': 'Focus role is',
+    'standing-in-zone': 'Standing in zone', 'focus-is-role': 'Focus role is', 'enemy-count-by-role': 'Enemy role count ≥',
     'distance-to-focus-gt': 'Focus farther than', 'distance-to-focus-lt': 'Focus closer than',
     'enemy-cast-seen': 'Enemy casting', 'self-disabled': "I'm disabled", 'incoming-disable': 'Disable incoming'
   };
-  private static readonly ACT_KINDS = ['cast', 'use-item', 'attack-focus', 'focus-fire', 'kite', 'dodge-zones', 'retreat', 'hold'];
+  private static readonly ACT_KINDS = ['cast', 'use-item', 'attack-focus', 'focus-fire', 'kite', 'peel', 'spread', 'dodge-zones', 'retreat', 'hold'];
   private static readonly ACT_LABEL: Record<string, string> = {
     'cast': 'Cast ability', 'use-item': 'Use item', 'attack-focus': 'Attack focus', 'focus-fire': 'Focus-fire',
-    'kite': 'Kite', 'dodge-zones': 'Dodge zones', 'retreat': 'Retreat', 'hold': 'Hold'
+    'kite': 'Kite', 'peel': 'Peel for ally', 'spread': 'Spread out', 'dodge-zones': 'Dodge zones', 'retreat': 'Retreat', 'hold': 'Hold'
   };
   private static readonly TARGET_MODES = [
     'focus', 'lowest-hp-enemy', 'lowest-hp-in-range', 'most-clustered', 'most-dangerous',
@@ -1463,6 +1463,7 @@ export class Hud {
       case 'fight-time-gt': return { k: 'fight-time-gt', sec: 5 };
       case 'standing-in-zone': return { k: 'standing-in-zone' };
       case 'focus-is-role': return { k: 'focus-is-role', role: 'carry' };
+      case 'enemy-count-by-role': return { k: 'enemy-count-by-role', role: 'carry', count: 2 };
       case 'distance-to-focus-gt': return { k: 'distance-to-focus-gt', dist: 700 };
       case 'distance-to-focus-lt': return { k: 'distance-to-focus-lt', dist: 500 };
       case 'enemy-cast-seen': return { k: 'enemy-cast-seen', category: 'ult' };
@@ -1478,6 +1479,8 @@ export class Hud {
       case 'use-item': return { k: 'use-item', itemId: itemId ?? '', targetMode: 'focus' };
       case 'focus-fire': return { k: 'focus-fire', targetMode: 'focus' };
       case 'kite': return { k: 'kite', distance: 500 };
+      case 'peel': return { k: 'peel' };
+      case 'spread': return { k: 'spread' };
       case 'dodge-zones': return { k: 'dodge-zones' };
       case 'retreat': return { k: 'retreat' };
       case 'hold': return { k: 'hold' };
@@ -1494,6 +1497,7 @@ export class Hud {
       case 'ability-ready': return [{ key: 'slot', label: 'slot 0-3' }];
       case 'fight-time-gt': return [{ key: 'sec', label: 'sec' }];
       case 'focus-is-role': return [{ key: 'role', label: 'role' }];
+      case 'enemy-count-by-role': return [{ key: 'role', label: 'role' }, { key: 'count', label: 'count' }];
       case 'distance-to-focus-gt': case 'distance-to-focus-lt': return [{ key: 'dist', label: 'dist' }];
       case 'enemy-cast-seen': return [{ key: 'category', label: 'blink/ult/channel/any' }];
       default: return [];

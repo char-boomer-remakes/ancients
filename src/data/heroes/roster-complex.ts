@@ -1,6 +1,7 @@
 import type { AbilityDef, HeroBaseStats, HeroDef, StatModMap, SummonSpec, VfxArchetype } from '../../core/types';
 import { gestureForAbility, soundForAbility } from '../../core/gestures';
 import { echoLoopNote } from './loop-note';
+import { buildSeedAghanim } from './seed-aghanim';
 
 type HeroInput = {
   id: string;
@@ -77,7 +78,7 @@ function hero(input: HeroInput): HeroDef {
       { id: `${input.id}-facet-pressure`, name: 'Pressure', description: 'Sharper fights around the hero signature.', mods: input.attribute === 'agi' ? { agi: 6 } : input.attribute === 'int' ? { int: 6 } : { str: 6 } },
       { id: `${input.id}-facet-command`, name: 'Command', description: 'Improves AI-driven doubles, illusions, and summons through basic stats.', mods: { damage: 8, maxHp: 80 } }
     ],
-    aghanim: { name: `${input.name}'s Scepter`, description: 'A future Scepter variant can deepen the signature mechanic after the base complex pass.', implemented: false },
+    aghanim: buildSeedAghanim(input.name, abilities),
     silhouette: {
       build: input.silhouette?.build ?? (input.roles.includes('durable') ? 'brute' : 'biped'),
       scale: input.silhouette?.scale ?? (input.roles.includes('durable') ? 1.08 : 1),

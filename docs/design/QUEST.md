@@ -70,8 +70,11 @@ interface QuestPrereq {
   raidClears?: number;       // ≥ this many total raid clears
   region?: string;           // must have reached this region
   quests?: string[];         // these quest ids must be claimed first (chain)
+  anyOf?: QuestPrereq[];     // OR-gate: at least one branch must also hold
 }
 ```
+
+The named gates are all **AND** — every one listed must hold. `anyOf` adds an **OR** on top: when present, at least one of its branches must also be satisfied. That is how a chapter can read "after the Lost Echo **and** (eight badges **or** a raid clear)" without a new prereq kind.
 
 The reward and objective lists are intentionally small and **already-supported**: every reward maps to an existing `Game` faucet (`awardGold`, `addXp`/recruit ceiling, `lootMarks`, `inventoryStash`, `essence`, `recruitHero`, a codex title), and every objective maps to a `SimEvent`/`Game` milestone we already fire. Nothing here needs a new sim primitive.
 
@@ -122,6 +125,8 @@ The state machine, in one line: `locked → active → complete → claimed` (ev
 
 `Game` owns `quests: Record<string, QuestSave>` and a thin set of wrappers: `refreshQuests()` (loop all defs through `refreshAvailability`), `advanceQuests(ev)` (refresh, then `advance` every quest, toast on `justCompleted`), `claimQuest(id)` (claim + `grantQuestReward` for each reward), and `questBoard()` (the view-model). Rewards are **claimed explicitly** at the board, never silently granted — a free recruit or a guaranteed item is a moment, and explicit claim keeps it deterministic for headless tests.
 
+`next` is load-bearing, not decoration: `claimQuest` reads the claimed quest's `next`, and once the refresh unlocks that successor it raises a "New chapter available" toast. The chain itself is gated by the successor listing its predecessor in `prereq.quests`, and a data-lint rule keeps the two ends honest — every `next` must point at a real, unique quest whose `prereq.quests` names the predecessor, and the chain must not cycle. So a dropped or mismatched link fails the lint instead of silently breaking the spine.
+
 ---
 
 ## 3. WIRING (one call site per milestone)
@@ -152,12 +157,14 @@ The state machine, in one line: `locked → active → complete → claimed` (ev
 
 ## 5. CONTENT (original, in the game's voice)
 
-Shipping set, all authored and original. **Bounties** (recurring, region-agnostic unless noted):
+Shipping set, all authored and original. **Global bounties** (recurring, region-agnostic, available from the first step out of the Vale):
 
 - **Cull the Wilds** — defeat 12 wild creeps. → gold + XP.
 - **The Binder's Due** — capture 2 creeps. → gold + an early loot-mark.
 - **Echo Hunt** — defeat 3 hero echoes. → gold + XP.
 - **Pit Contract** — clear any regional boss once (prereq: 1 badge, 6h cooldown). → gold + a mid loot-mark.
+
+**Per-region bounties** (recurring, one pair per region, built from `REGION_BOUNTY_META` in `board.ts`). Each region posts to its own town board, gates behind `prereq: { region }` so it only appears once you have reached the place, and homes via `regionId` so the journal shows where it was posted. Every region gets a region-scoped **cull** bounty (`kill-creeps`) plus a **themed** bounty matching its character — capture (Tranquil Vale, Icewrack, Hidden Wood), echo hunt (Nightsilver Woods, Vile Reaches, Quoidge, Mad Moon Crater), or a cooldown-paced boss contract (Devarshi Desert, Shadeshore, Mount Joerlak — the regions with anchor bosses). Rewards (gold/XP/loot-mark band) scale with the region's depth in the descent via a shared `scale`/`lootBandFor` helper, so a new region is one authored `RegionBountyMeta` entry, not new code.
 
 **Chapters** (event, chained — the "Mending the Moon" spine):
 
@@ -169,18 +176,29 @@ Shipping set, all authored and original. **Bounties** (recurring, region-agnosti
 
 The chapter spine intentionally lags the badge run by a beat, so it reads as "the story catching up to what you just did" rather than a second to-do list to grind.
 
+Side chapters branch off the spine instead of chaining inside it — each is a **leaf** (no `next`), gated after First Light, paying a one-time reward the recurring board never gives:
+
+- **The Wider Loop** (after First Light) — `reach-region` Nightsilver Woods, the first region past the Vale's north pass. → gold + an early loot-mark. It carries `regionId: tranquil-vale`, so the board shows where it was posted.
+- **Hands Enough to Mend** — recruit 4 heroes. → gold, party XP, a mid loot-mark.
+- **The Frostbound Vow** (prereq: reached Icewrack) — capture 5 creeps in Icewrack. → essence + a Point Booster.
+- **The Pit Ledger** (prereq: 4 badges) — clear 4 regional bosses. → a Demon Edge + essence.
+- **The Echo Archive** (prereq: reached Quoidge) — defeat 8 echoes in Quoidge. → a Mystic Staff + a late loot-mark.
+
 ---
 
 ## 6. UI
 
-The **Quest Journal** (`J`) gains a **Bounties & Chapters** section above Recruitment: each available/active quest shows its objectives with `progress/count`, and a completed quest shows a **Claim** button that grants the reward and refreshes. A `complete` quest also raises a HUD toast ("Quest ready to claim: …") so the player knows to open the board. The board is read straight from `questBoard()`; all gating lives in `Game`/core, the HUD stays presentational.
+The **Quest Journal** (`J`) gains a **Bounties & Chapters** section above Recruitment: each available/active quest shows its giver and home region, a flavor line from its `dialogue`, its objectives with `progress/count`, and its rewards. A completed quest shows a **Claim** button that grants the reward and refreshes the row in place. A `complete` quest also raises a HUD toast ("Quest ready to claim: …") so the player knows to open the board. The board is read straight from `questBoard()`; all gating lives in `Game`/core, the HUD stays presentational.
+
+`questBoard()` orders the rows so the useful ones rise: **ready-to-claim first** (never miss a reward), then the **region you are currently standing in** (its bounties are the ones you can act on now), then chapters before bounties. As you travel, the local board floats to the top without hiding anything you have already unlocked elsewhere.
 
 ---
 
 ## 7. TESTS
 
-- `src/test/quests.test.ts` — pure: `advance` clamps and completes; `claim` on event → `claimed`, on recurring → `cooldown`/re-arm; `refreshAvailability` honors `prereq` and cooldown elapse; `next` chains. Integration: a headless `Game` kills creeps → bounty completes → `claimQuest` pays gold; an event chapter unlocks its `next` on claim; a `recruit` reward adds the hero to `recruited`; a v6→v7 save round-trips with quest state intact.
-- `data-lint` — every reward `itemId`/`recruit heroId` and objective/prereq `targetId`/`quests`/`next` reference real registered content; objective counts are positive; recurring quests are `repeatable`, event quests are not.
+- `src/test/quests.test.ts` — pure: `advance` clamps and completes; `claim` on event → `claimed`, on recurring → `cooldown`/re-arm; `refreshAvailability` honors `prereq` and cooldown elapse; the Mad Moon `anyOf` gate opens on badges **or** a raid clear; the Pit Contract re-arms only after its full 6h cooldown. Integration (headless `Game`): kills complete a bounty and `claimQuest` pays gold; an event chapter unlocks its `next` on claim; each reward faucet lands on claim — gold, XP, a stashed item, an early loot-mark, essence, a codex title, and a `recruit` that adds the hero to `recruited`; a v6→v7 save round-trips with quest state intact.
+- `data-lint` — every reward `itemId`/`recruit heroId` and objective/prereq `targetId`/`quests`/`anyOf`/`next`/`regionId` reference real registered content; objective counts are positive; recurring quests are `repeatable`, event quests are not; `next` chains are unique, acyclic, and consistent with each successor's `prereq.quests`.
+- `e2e/quests.spec.ts` — drives the board through the live `Game`, plus a full UI loop: open the Journal over the headless scene, click a bounty's **Claim** button, and assert the gold paid out and the row re-armed.
 
 ---
 

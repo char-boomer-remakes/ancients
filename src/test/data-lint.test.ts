@@ -701,6 +701,16 @@ describe('data lint: Phase 3 registries', () => {
       for (const id of [...raid.loot.guaranteed, ...raid.loot.assembledPool]) expect(REG.items.has(id), `${raid.id}: loot ${id}`).toBe(true);
       if (raid.signatureExotic) expect(REG.exotics.has(raid.signatureExotic), `${raid.id}: exotic`).toBe(true);
     }
+    // Domains (GAMEPLAY_OVERHAUL §3.5): the encounter boss, region, loot, and any
+    // element entry gate must all resolve to known content.
+    for (const domain of REG.domains.values()) {
+      expect(REG.heroes.has(domain.encounter.heroId), `${domain.id}: boss hero`).toBe(true);
+      expect(REG.regions.has(domain.regionId), `${domain.id}: region`).toBe(true);
+      expect(domain.resinCost, `${domain.id}: resinCost`).toBeGreaterThan(0);
+      expect(domain.dialogue.length, `${domain.id}: dialogue`).toBeGreaterThanOrEqual(2);
+      for (const id of [...domain.loot.guaranteed, ...domain.loot.assembledPool]) expect(REG.items.has(id), `${domain.id}: loot ${id}`).toBe(true);
+      for (const id of domain.encounter.items ?? []) expect(REG.items.has(id), `${domain.id}: boss item ${id}`).toBe(true);
+    }
     expect(ALL_DUNGEONS.length).toBeGreaterThanOrEqual(4);
     expect(ALL_ROOM_TEMPLATES.length).toBeGreaterThanOrEqual(ALL_DUNGEONS.length * 3);
     for (const template of ALL_ROOM_TEMPLATES) {

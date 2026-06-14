@@ -1,4 +1,4 @@
-import type { BossDef, CreepDef, CutsceneDef, DraftDef, DungeonDef, GymDef, HeroDef, ItemDef, LegendDef, LoreEntryDef, NeutralItemDef, QuestDef, RaidDef, RecruitmentQuestDef, RegionDef, RoomTemplate, SeasonalEventDef, TrainerDef, TrialDef } from './types';
+import type { BossDef, CreepDef, CutsceneDef, DomainDef, DraftDef, DungeonDef, GymDef, HeroDef, ItemDef, LegendDef, LoreEntryDef, NeutralItemDef, QuestDef, RaidDef, RecruitmentQuestDef, RegionDef, RoomTemplate, SeasonalEventDef, TrainerDef, TrialDef } from './types';
 
 // ---------------------------------------------------------------
 // Content registry. Data files register themselves; systems are
@@ -19,6 +19,7 @@ class Registry {
   questDefs = new Map<string, QuestDef>();
   bosses = new Map<string, BossDef>();
   raids = new Map<string, RaidDef>();
+  domains = new Map<string, DomainDef>();
   loreEntries = new Map<string, LoreEntryDef>();
   cutscenes = new Map<string, CutsceneDef>();
   seasonalEvents = new Map<string, SeasonalEventDef>();
@@ -59,6 +60,9 @@ class Registry {
   }
   registerRaid(def: RaidDef): void {
     this.raids.set(def.id, def);
+  }
+  registerDomain(def: DomainDef): void {
+    this.domains.set(def.id, def);
   }
   registerLoreEntry(def: LoreEntryDef): void {
     this.loreEntries.set(def.id, def);
@@ -141,6 +145,11 @@ class Registry {
     if (!d) throw new Error(`unknown raid: ${id}`);
     return d;
   }
+  domain(id: string): DomainDef {
+    const d = this.domains.get(id);
+    if (!d) throw new Error(`unknown domain: ${id}`);
+    return d;
+  }
   loreEntry(id: string): LoreEntryDef {
     const d = this.loreEntries.get(id);
     if (!d) throw new Error(`unknown lore entry: ${id}`);
@@ -197,6 +206,7 @@ class Registry {
     this.questDefs.clear();
     this.bosses.clear();
     this.raids.clear();
+    this.domains.clear();
     this.loreEntries.clear();
     this.cutscenes.clear();
     this.seasonalEvents.clear();

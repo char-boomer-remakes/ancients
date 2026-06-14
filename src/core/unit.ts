@@ -167,6 +167,12 @@ export class Unit {
   aggroRadius?: number;
   /** renderer hint for summons/wards (heroes and creeps resolve via REG) */
   visual?: { silhouette: SilhouetteSpec; palette: [string, string, string] };
+  /**
+   * Render-only hero identity for non-hero units (e.g. recruit-NPC standees) so
+   * the scene mounts the authored hero GLB without touching sim/AI behavior. The
+   * sim never reads this; only the renderer's hero-model path does.
+   */
+  renderHeroId?: string;
   elementalShield?: { element: ActiveElement; hp: number; maxHp: number; weakTo: ActiveElement[]; weakMult: number; vulnerableUntil: number };
 
   attribute: Attribute;

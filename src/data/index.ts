@@ -25,6 +25,7 @@ import { ALL_QUEST_DEFS } from './quests/board';
 import { ALL_NEUTRAL_ITEMS } from './neutral-items';
 import { ALL_BOSSES } from './bosses';
 import { ALL_RAIDS } from './raids';
+import { ALL_DOMAINS } from './domains';
 import { ALL_LORE_ENTRIES } from './lore';
 import { ALL_CUTSCENES } from './cutscenes';
 import { ALL_LEGENDS, ALL_SEASONAL_EVENTS } from './events';
@@ -145,6 +146,7 @@ export function registerAllContent(): void {
   for (const n of ALL_NEUTRAL_ITEMS) REG.registerNeutralItem(n);
   for (const b of ALL_BOSSES) REG.registerBoss(b);
   for (const r of ALL_RAIDS) REG.registerRaid(r);
+  for (const d of ALL_DOMAINS) REG.registerDomain(d);
   for (const l of ALL_LORE_ENTRIES) REG.registerLoreEntry(l);
   for (const c of ALL_CUTSCENES) REG.registerCutscene(c);
   for (const e of ALL_SEASONAL_EVENTS) REG.registerSeasonalEvent(e);
