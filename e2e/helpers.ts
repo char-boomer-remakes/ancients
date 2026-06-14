@@ -1,4 +1,6 @@
-import type { Page } from '@playwright/test';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { expect, type Page, type TestInfo } from '@playwright/test';
 
 // Thin wrappers over the in-page ?test harness (src/systems/test-harness.ts).
 // All gameplay assertions go through window.__test / window.__game, which the
@@ -52,6 +54,8 @@ export interface GameState {
   };
 }
 
+const SCREENSHOT_DIR = join('test-results', 'e2e-screenshots');
+
 /** Navigate to the game in test mode and wait for the harness to be live. */
 export async function boot(page: Page, opts: BootOpts = {}): Promise<void> {
   const q = new URLSearchParams({ test: '1' });
@@ -63,6 +67,43 @@ export async function boot(page: Page, opts: BootOpts = {}): Promise<void> {
   await page.waitForFunction(() => Boolean((window as any).__test?.ready?.()), null, {
     timeout: 30_000
   });
+}
+
+export function watchPageErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') errors.push(msg.text());
+  });
+  return errors;
+}
+
+export function expectNoPageErrors(errors: string[]): void {
+  expect(errors).toEqual([]);
+}
+
+export async function waitForPlayableUi(page: Page): Promise<void> {
+  await page.locator('#top-bar .region').waitFor({ state: 'visible', timeout: 30_000 });
+  await page.waitForFunction(() => {
+    const loading = document.getElementById('loading-screen');
+    return !loading || loading.style.display === 'none' || loading.classList.contains('hide');
+  }, null, { timeout: 30_000 });
+}
+
+export async function skipActiveCinematic(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const g = (window as any).__game;
+    let guard = 0;
+    while (g?.cinematic?.active && guard++ < 100) g.cinematicSkip();
+  });
+}
+
+export async function attachScreenshot(page: Page, testInfo: TestInfo, name: string): Promise<string> {
+  await mkdir(SCREENSHOT_DIR, { recursive: true });
+  const path = join(SCREENSHOT_DIR, `${name}.png`);
+  await page.screenshot({ path });
+  await testInfo.attach(name, { path, contentType: 'image/png' });
+  return path;
 }
 
 export async function state(page: Page): Promise<GameState> {

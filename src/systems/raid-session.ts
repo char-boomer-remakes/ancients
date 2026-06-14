@@ -40,6 +40,8 @@ export class LiveRaid {
     this.def = def;
     this.tier = tier;
     this.festivalMode = opts?.festivalMode;
+    if (this.festivalMode === 'linear-crawl' || this.festivalMode === 'wave-defense') this.nextFestivalPressureAt = 4;
+    else if (this.festivalMode === 'damage-race') this.nextFestivalPressureAt = 6;
     this.festivalCtx = { defId: `festival:${opts?.festivalMode ?? def.id}`, level: def.boss.level ?? 30, vfx: { archetype: 'summon-pop', color: '#ffd86a' } };
     const rs = raidSetupFromDef(def, party, tier, seed);
     const limit = opts?.maxSec ?? rs.maxSec;
@@ -141,7 +143,8 @@ export class LiveRaid {
       this.spawnFestivalAdds(2 + Math.min(3, this.festivalTributeTicks));
       this.nextFestivalPressureAt += 18;
     } else if (this.festivalMode === 'wave-defense') {
-      this.spawnFestivalAdds(3);
+      this.festivalTributeTicks += 1;
+      this.spawnFestivalAdds(3 + Math.min(2, this.festivalTributeTicks));
       this.nextFestivalPressureAt += 16;
     } else if (this.festivalMode === 'damage-race') {
       this.boss.externalMods.damagePct = (this.boss.externalMods.damagePct ?? 0) + 8;
@@ -149,6 +152,12 @@ export class LiveRaid {
       this.boss.refresh(this.sim.time);
       this.festivalTributeTicks += 1;
       this.nextFestivalPressureAt += 15;
+    } else if (this.festivalMode === 'linear-crawl') {
+      // Campaign crawls use the raid room as a staged route: fresh patrols arrive
+      // at checkpoints instead of the fight reading as a plain one-room boss.
+      this.festivalTributeTicks += 1;
+      this.spawnFestivalAdds(2 + Math.min(2, this.festivalTributeTicks));
+      this.nextFestivalPressureAt += 20;
     }
   }
 

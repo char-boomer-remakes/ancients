@@ -3,6 +3,7 @@ import { DEFAULT_CREEP_DROP_TABLES, qualityOddsByTier } from '../data/creep-drop
 import { GRADE_UP_COSTS, IMPRINT_COSTS, MASTERWORK_COSTS, REFORGE_COSTS, REROLL_AFFIX_COSTS, addSocket, disenchant, gradeUp, imprintAffix, masterwork, reforge, refreshResolvedMods, rerollAffix, socketAddCost } from '../data/forge';
 import { rollAffixesFor } from '../data/affixes';
 import { fuseGems, gemDef, isGemId, socketsForDrop } from '../data/gems';
+import { setBonusEffects } from '../data/sets';
 import { ITEM_GRADES, levelReq, percentileForGrade, rollGrade, statMultiplier, type GradeFloorSource } from '../data/grade';
 import { QUALITY_GRADES, nextQuality, rarityColor } from '../data/quality';
 import { applyLootFilter, DEFAULT_LOOT_FILTER, type LootFilterRule } from './loot-filter';
@@ -1136,6 +1137,20 @@ export class Game {
     return [...REG.bosses.values()].find((b) => b.heroId === heroId)?.dialogue[index];
   }
 
+  private bossPhaseThresholdsForBossId(bossId: string): number[] {
+    return REG.bosses.get(bossId)?.phases?.map((phase) => phase.atHpPct) ?? [];
+  }
+
+  private raidPhaseThresholds(raidId: string): number[] {
+    const raid = REG.raid(raidId);
+    const thresholds = [
+      ...raid.addWaves.map((wave) => wave.atHpPct),
+      ...raid.zones.map((zone) => zone.atHpPct),
+      ...(raid.signatureExotic ? [50] : [])
+    ];
+    return [...new Set(thresholds)].sort((a, b) => b - a);
+  }
+
   private playRegionArrival(): void {
     const id = this.region.arrivalBeat;
     if (!id || this.journalSeen.has(`cinematic:${id}`)) return;
@@ -1249,7 +1264,7 @@ export class Game {
     if (!this.festivalLaunchable(event.id)) return false;
     const ok = map.kind === 'raid'
       ? this.startLiveRaid(map.id, 'normal', { maxSec: map.maxSec, festivalMode: map.mode })
-      : this.startDungeon(map.id, 'normal', { endless: map.endless, maxSec: map.maxSec, modifiers: map.modifiers });
+      : this.startDungeon(map.id, 'normal', { endless: map.endless, maxSec: map.maxSec, modifiers: map.modifiers, festivalMode: map.mode });
     return ok;
   }
 
@@ -1966,7 +1981,12 @@ export class Game {
       this.audio.handleEvent(ev);
     }
     if (this.liveRaidId) {
-      this.observeStory(this.frameEvents, { sim: raid.sim, raidId: this.liveRaidId, bossHeroId: REG.raid(this.liveRaidId).boss.heroId });
+      this.observeStory(this.frameEvents, {
+        sim: raid.sim,
+        raidId: this.liveRaidId,
+        bossHeroId: REG.raid(this.liveRaidId).boss.heroId,
+        bossPhaseHpPct: this.raidPhaseThresholds(this.liveRaidId)
+      });
     }
     this.scene.update(raid.sim, raid.cameraFollow(), dt, 0.5, this.cinematicPresentationView());
     if (raid.done && raid.result) {
@@ -2034,7 +2054,7 @@ export class Game {
   startDungeon(
     dungeonId: string,
     tier: DifficultyTier = 'normal',
-    opts: { seed?: number; maxSec?: number; modifiers?: string[]; endless?: boolean; endlessLevel?: number; seedMode?: 'daily' | 'weekly' } = {}
+    opts: { seed?: number; maxSec?: number; modifiers?: string[]; endless?: boolean; endlessLevel?: number; seedMode?: 'daily' | 'weekly'; festivalMode?: SeasonalEventDef['mode'] } = {}
   ): boolean {
     if (this.liveGym || this.liveRaid || this.liveDungeon) return false;
     const def = REG.dungeon(dungeonId);
@@ -2066,7 +2086,7 @@ export class Game {
     this.liveDungeonId = dungeonId;
     this.liveDungeonTier = tier;
     this.liveDungeonModifiers = modifiers;
-    this.liveDungeon = new DungeonSession(def, this.gymPlayerTeam(), tier, seed, { maxSec: opts.maxSec, modifiers, endless, endlessLevel });
+    this.liveDungeon = new DungeonSession(def, this.gymPlayerTeam(), tier, seed, { maxSec: opts.maxSec, modifiers, endless, endlessLevel, festivalMode: opts.festivalMode });
     this.story.beginEncounter();
     this.queuedOrders = [];
     this.scene.resetUnitViews();
@@ -2099,7 +2119,12 @@ export class Game {
         if (victim?.kind === 'creep' && victim.tier) this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid, dungeon.tier);
       }
     }
-    this.observeStory(this.frameEvents, { sim: dungeon.sim, bossHeroId: REG.heroes.has(dungeon.def.guardian) ? dungeon.def.guardian : undefined });
+    const guardian = REG.bosses.get(dungeon.def.guardian);
+    this.observeStory(this.frameEvents, {
+      sim: dungeon.sim,
+      bossHeroId: guardian?.heroId,
+      bossPhaseHpPct: this.bossPhaseThresholdsForBossId(dungeon.def.guardian)
+    });
     for (const room of dungeon.drainCompletedRooms()) {
       this.grantDungeonRoomReward(dungeon.def, dungeon.tier, room, dungeon.selectedModifiers());
     }
@@ -4247,6 +4272,12 @@ export class Game {
       u.items[i] = s ? itemStateFromSave(s, this.sim.time) : null;
     });
     u.items = sortInventory(u.items);
+    const setEffects = setBonusEffects(rec.items);
+    for (const [k, v] of Object.entries(setEffects.mods)) {
+      u.externalMods[k] = (u.externalMods[k] ?? 0) + v;
+    }
+    u.setAuras = setEffects.auras;
+    u.setTriggers = setEffects.triggers;
     if (rec.fleshStacks) {
       for (const k in rec.fleshStacks) u.triggerStacks.set(k, rec.fleshStacks[k]);
     }

@@ -19,6 +19,7 @@ import type {
   ActiveElement,
   AttackModSpec,
   Attribute,
+  AuraSpec,
   CreepDef,
   CreepTier,
   DifficultyTier,
@@ -188,6 +189,8 @@ export class Unit {
   elementAuras: Partial<Record<Exclude<import('./types').ElementId, 'neutral'>, { gauge: number; until: number; sourceUid: number }>> = {};
   permanentMods: Record<string, number> = {};  // Flesh Heap stacks etc.
   externalMods: Record<string, number> = {};   // talents + facets, applied at setup
+  setAuras: AuraSpec[] = [];                    // auras granted by active set bonuses (ITEM_REHAUL §7)
+  setTriggers: TriggerSpec[] = [];              // triggers granted by active set bonuses (ITEM_REHAUL §7)
   triggers: TriggerRuntime[] = [];
   triggerStacks = new Map<string, number>();   // stacks per ability id (Flesh Heap)
 

@@ -1470,7 +1470,13 @@ const SET_OVERRIDES: Partial<Record<string, string>> = {
   'wind-waker': 'frostforged',
   satanic: 'bloodbound',
   bloodthorn: 'bloodbound',
-  'heart-of-tarrasque': 'bloodbound'
+  'heart-of-tarrasque': 'bloodbound',
+  mjollnir: 'stormforged',
+  'monkey-king-bar': 'stormforged',
+  daedalus: 'stormforged',
+  'octarine-core': 'arcanist',
+  'scythe-of-vyse': 'arcanist',
+  'ethereal-blade': 'arcanist'
 };
 
 function socketCapFor(item: ItemDef, tier: ItemTier): number | undefined {

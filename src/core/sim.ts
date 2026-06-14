@@ -419,6 +419,11 @@ export class Sim {
         fireTrigger(trig, `item:${it.defId}:${trig.on}`, { defId: `item:${it.defId}`, level: 1, vfx: { archetype: 'stun-stars', color: '#ffd86a', scale: 0.45 } }, `item:${it.defId}:${trig.on}`);
       }
     }
+    if (!u.summary.broken) {
+      u.setTriggers.forEach((trig, i) => {
+        fireTrigger(trig, `set:${i}:${trig.on}`, { defId: `set:${i}`, level: 1, vfx: { archetype: 'stun-stars', color: '#a8e6ff', scale: 0.4 } }, `set:${i}:${trig.on}`);
+      });
+    }
   }
   private triggerCooldowns = new Map<string, number>();
 
@@ -895,6 +900,13 @@ export class Sim {
           this.applyAura(u, `aura:${u.uid}:affix:${affix.affixId}`, aura.radius, aura.affects, mods, aura.excludeSelf);
         }
       }
+      // set-bonus auras (ITEM_REHAUL §7)
+      u.setAuras.forEach((aura, i) => {
+        if (u.summary.broken) return;
+        const mods: Record<string, number> = {};
+        for (const k in aura.mods ?? {}) mods[k] = aura.mods![k] as number;
+        this.applyAura(u, `aura:${u.uid}:set:${i}`, aura.radius, aura.affects, mods, aura.excludeSelf);
+      });
     }
   }
 

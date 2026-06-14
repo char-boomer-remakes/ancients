@@ -167,14 +167,18 @@ describe('STORY §7.3 legend detector', () => {
 // STORY §6.6 — boss phase-break detector
 // ----------------------------------------------------------------
 describe('STORY §6.6 boss phase detector', () => {
-  it('fires once when an enemy boss crosses half health, then not again that encounter', () => {
-    const boss: FakeUnit = { uid: 9, team: 1, pos: { x: 0, y: 0 }, alive: true, hp: 40, stats: { maxHp: 100 }, ctrl: { kind: 'boss' } };
+  it('fires authored phase thresholds one at a time, not just the generic midpoint', () => {
+    const boss: FakeUnit = { uid: 9, team: 1, pos: { x: 0, y: 0 }, alive: true, hp: 70, stats: { maxHp: 100 }, ctrl: { kind: 'boss' } };
     const sim = fakeSim([boss]);
     const det = new StoryDetector();
     det.beginEncounter();
-    const first = det.observe([], { sim, nowSec: 1, playerTeam: 0, raidId: 'last-eldwurm', bossHeroId: 'dragon-knight' });
+    expect(det.observe([], { sim, nowSec: 1, playerTeam: 0, raidId: 'last-eldwurm', bossHeroId: 'dragon-knight', bossPhaseHpPct: [66, 33] })).toHaveLength(0);
+    boss.hp = 60;
+    const first = det.observe([], { sim, nowSec: 2, playerTeam: 0, raidId: 'last-eldwurm', bossHeroId: 'dragon-knight', bossPhaseHpPct: [66, 33] });
     expect(first).toContainEqual({ kind: 'boss-phase', bossHeroId: 'dragon-knight', raidId: 'last-eldwurm' });
-    expect(det.observe([], { sim, nowSec: 2, playerTeam: 0, raidId: 'last-eldwurm', bossHeroId: 'dragon-knight' })).toHaveLength(0);
+    expect(det.observe([], { sim, nowSec: 3, playerTeam: 0, raidId: 'last-eldwurm', bossHeroId: 'dragon-knight', bossPhaseHpPct: [66, 33] })).toHaveLength(0);
+    boss.hp = 20;
+    expect(det.observe([], { sim, nowSec: 4, playerTeam: 0, raidId: 'last-eldwurm', bossHeroId: 'dragon-knight', bossPhaseHpPct: [66, 33] })).toContainEqual({ kind: 'boss-phase', bossHeroId: 'dragon-knight', raidId: 'last-eldwurm' });
   });
 
   it('marks a non-marquee boss without a marquee raid id', () => {
@@ -451,12 +455,48 @@ describe('STORY gallery, titles & content', () => {
     expect(g.liveRaid!.sim.unitsArr.some((u) => u.kind === 'summon' && u.team === 1)).toBe(true);
   });
 
+  it('runs the remaining raid-backed festival modes with live objective pressure', () => {
+    const cycle = fullPartyGame('mad-moon-crater');
+    expect(cycle.runSeasonalEvent('cycle-beast')).toBe(true);
+    const dmgBefore = cycle.liveRaid!.boss.externalMods.damagePct ?? 0;
+    cycle.liveRaid!.step(16);
+    expect(cycle.liveRaid!.festivalObjective()?.mode).toBe('damage-race');
+    expect(cycle.liveRaid!.festivalObjective()?.tributeTicks).toBeGreaterThan(0);
+    expect(cycle.liveRaid!.boss.externalMods.damagePct ?? 0).toBeGreaterThan(dmgBefore);
+
+    const reef = fullPartyGame('shadeshore');
+    expect(reef.runSeasonalEvent('dark-reef-crawl')).toBe(true);
+    reef.liveRaid!.step(22);
+    expect(reef.liveRaid!.festivalObjective()?.mode).toBe('linear-crawl');
+    expect(reef.liveRaid!.festivalObjective()?.wavesSpawned).toBeGreaterThan(0);
+  });
+
   it('starts a dungeon-backed festival in its target region with event modifiers', () => {
     const g = fullPartyGame('vile-reaches');
     expect(g.festivalLaunchable('crowns-fall')).toBe(true);
     expect(g.runSeasonalEvent('crowns-fall')).toBe(true);
     expect(g.liveDungeon?.def.id).toBe('worldstone-vault');
     expect(g.liveDungeon?.selectedModifiers()).toEqual(['champion-sigil', 'deep-map']);
+  });
+
+  it('runs dungeon-backed festival modes with live pulse objectives', () => {
+    const hollow = fullPartyGame('mad-moon-crater');
+    expect(hollow.runSeasonalEvent('collapsing-hollow')).toBe(true);
+    hollow.liveDungeon!.step(15);
+    expect(hollow.liveDungeon!.festivalObjective()?.mode).toBe('hazard-survival');
+    expect(hollow.liveDungeon!.festivalObjective()?.pulses).toBeGreaterThan(0);
+
+    const crown = fullPartyGame('vile-reaches');
+    expect(crown.runSeasonalEvent('crowns-fall')).toBe(true);
+    crown.liveDungeon!.step(19);
+    expect(crown.liveDungeon!.festivalObjective()?.mode).toBe('act-trials');
+    expect(crown.liveDungeon!.festivalObjective()?.actRooms).toBeGreaterThan(0);
+
+    const continuum = fullPartyGame('quoidge');
+    expect(continuum.runSeasonalEvent('continuum-descent')).toBe(true);
+    continuum.liveDungeon!.step(21);
+    expect(continuum.liveDungeon!.festivalObjective()?.mode).toBe('endless-descent');
+    expect(continuum.liveDungeon!.festivalObjective()?.pulses).toBeGreaterThan(0);
   });
 
   it('registers the full STORY §7 festival and legend roster', () => {

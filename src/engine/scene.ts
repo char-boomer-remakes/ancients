@@ -231,7 +231,7 @@ function heroDetailTexture(): THREE.Texture | null {
   return (HERO_DETAIL = tex);
 }
 
-interface GradeTarget { tint: [number, number, number]; sat: number; contrast: number; }
+interface GradeTarget { tint: [number, number, number]; sat: number; contrast: number; brightness?: number; vignette?: number; }
 const BIOME_GRADE: Record<string, GradeTarget> = {
   grass: { tint: [1.03, 1.01, 0.94], sat: 1.12, contrast: 1.06 },
   forest: { tint: [0.98, 1.04, 0.96], sat: 1.14, contrast: 1.07 },
@@ -241,6 +241,21 @@ const BIOME_GRADE: Record<string, GradeTarget> = {
   coast: { tint: [0.98, 1.01, 1.05], sat: 1.1, contrast: 1.05 }
 };
 const NIGHT_GRADE: GradeTarget = { tint: [0.82, 0.9, 1.14], sat: 0.78, contrast: 1.06 };
+const CINEMATIC_GRADES: { re: RegExp; grade: GradeTarget; strength: number }[] = [
+  { re: /lightless|black|shadow|dark|severed|void/i, grade: { tint: [0.78, 0.82, 1.08], sat: 0.82, contrast: 1.24, brightness: 0.9, vignette: 0.5 }, strength: 0.48 },
+  { re: /cryo|frost|ice|snow|banshee|blue|moon|silver|night|zet|violet/i, grade: { tint: [0.78, 0.92, 1.2], sat: 0.98, contrast: 1.14, brightness: 0.95, vignette: 0.56 }, strength: 0.42 },
+  { re: /hell|rift|red|blood|terror|dragon|ember|fire|rot|wasteland/i, grade: { tint: [1.18, 0.84, 0.72], sat: 1.12, contrast: 1.18, brightness: 0.96, vignette: 0.52 }, strength: 0.44 },
+  { re: /fel|green|jungle|old green|wild|toxic/i, grade: { tint: [0.82, 1.16, 0.78], sat: 1.1, contrast: 1.11, brightness: 0.98, vignette: 0.62 }, strength: 0.38 },
+  { re: /gold|dawn|radiant|badge|crown|sun|pit|aegis|victory|warm/i, grade: { tint: [1.17, 1.05, 0.78], sat: 1.12, contrast: 1.1, brightness: 1.02, vignette: 0.66 }, strength: 0.36 },
+  { re: /sepia|sand|star|desert|amber|hollow/i, grade: { tint: [1.12, 0.98, 0.74], sat: 1.0, contrast: 1.12, brightness: 0.98, vignette: 0.58 }, strength: 0.4 },
+  { re: /teal|reef|coast|drowned|water|salt/i, grade: { tint: [0.78, 1.02, 1.1], sat: 1.02, contrast: 1.12, brightness: 0.96, vignette: 0.58 }, strength: 0.38 },
+  { re: /desaturated|memory|history|flashback|ghost/i, grade: { tint: [0.92, 0.94, 1.02], sat: 0.62, contrast: 1.18, brightness: 0.94, vignette: 0.52 }, strength: 0.52 }
+];
+
+function cinematicGradeFor(shot: CinematicView['shot']): { grade: GradeTarget; strength: number } | null {
+  const text = `${shot.palette} ${shot.mood}`;
+  return CINEMATIC_GRADES.find((entry) => entry.re.test(text)) ?? null;
+}
 
 const HP_BAR_GEOMETRY = new THREE.PlaneGeometry(1, 1);
 const HP_BAR_WIDTH = 1.5;
@@ -293,6 +308,8 @@ export class GameScene {
   private cinematicTarget = new THREE.Vector3();
   private cinematicLookAt = new THREE.Vector3();
   private cinematicBeatKey = '';
+  private cinematicGrade: GradeTarget | null = null;
+  private cinematicGradeStrength = 0;
   private camZoom = 1; // user wheel zoom within mode
   private modeBlend = 0; // 0 = follow, 1 = map
   selectedUid = -1;
@@ -1289,15 +1306,32 @@ export class GameScene {
       const night = Math.min(0.9, Math.max(0, 1 - sunI / 1.0));
       const bg = BIOME_GRADE[this.biome] ?? BIOME_GRADE.grass;
       const lerp = (x: number, y: number) => x + (y - x) * night;
-      (u.uTint.value as THREE.Color).setRGB(
-        lerp(bg.tint[0], NIGHT_GRADE.tint[0]),
-        lerp(bg.tint[1], NIGHT_GRADE.tint[1]),
-        lerp(bg.tint[2], NIGHT_GRADE.tint[2])
-      );
-      u.uSaturation.value = lerp(bg.sat, NIGHT_GRADE.sat);
-      u.uContrast.value = lerp(bg.contrast, NIGHT_GRADE.contrast);
-      u.uBrightness.value = lerp(1.0, 0.92);
-      u.uVignette.value = lerp(0.82, 0.6);
+      let tintR = lerp(bg.tint[0], NIGHT_GRADE.tint[0]);
+      let tintG = lerp(bg.tint[1], NIGHT_GRADE.tint[1]);
+      let tintB = lerp(bg.tint[2], NIGHT_GRADE.tint[2]);
+      let sat = lerp(bg.sat, NIGHT_GRADE.sat);
+      let contrast = lerp(bg.contrast, NIGHT_GRADE.contrast);
+      let brightness = lerp(bg.brightness ?? 1.0, NIGHT_GRADE.brightness ?? 0.92);
+      let vignette = lerp(bg.vignette ?? 0.82, NIGHT_GRADE.vignette ?? 0.6);
+
+      // STORY §4.1 / Appendix A: cut-scene palettes are not just captions.
+      // Blend the authored shot grade over the biome grade while a cinematic beat owns the frame.
+      if (this.cinematicGrade && this.cinematicGradeStrength > 0) {
+        const cg = this.cinematicGrade;
+        const s = this.cinematicGradeStrength;
+        tintR = tintR * (1 - s) + cg.tint[0] * s;
+        tintG = tintG * (1 - s) + cg.tint[1] * s;
+        tintB = tintB * (1 - s) + cg.tint[2] * s;
+        sat = sat * (1 - s) + cg.sat * s;
+        contrast = contrast * (1 - s) + cg.contrast * s;
+        brightness = brightness * (1 - s) + (cg.brightness ?? brightness) * s;
+        vignette = vignette * (1 - s) + (cg.vignette ?? vignette) * s;
+      }
+      (u.uTint.value as THREE.Color).setRGB(tintR, tintG, tintB);
+      u.uSaturation.value = sat;
+      u.uContrast.value = contrast;
+      u.uBrightness.value = brightness;
+      u.uVignette.value = vignette;
 
       // WS-H per-element accent: nudge the whole frame toward the dominant cast's
       // hue without darkening (the accent is normalized to unit luminance), so a
@@ -1383,8 +1417,13 @@ export class GameScene {
   private applyCinematicStage(view: CinematicView | null, sim: Sim, follow: Unit | null): void {
     if (!view) {
       this.cinematicBeatKey = '';
+      this.cinematicGrade = null;
+      this.cinematicGradeStrength = 0;
       return;
     }
+    const grade = cinematicGradeFor(view.shot);
+    this.cinematicGrade = grade?.grade ?? null;
+    this.cinematicGradeStrength = view.reducedMotion || view.photosensitive ? Math.min(0.32, grade?.strength ?? 0) : (grade?.strength ?? 0);
     const firstFrameOfBeat = view.beatKey !== this.cinematicBeatKey;
     if (firstFrameOfBeat) {
       this.cinematicBeatKey = view.beatKey;

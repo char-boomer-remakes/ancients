@@ -190,8 +190,12 @@ function setProgressLines(item: ItemSave, equipped: (ItemSave | null)[] = []): s
   const pieceNames = set.pieces.map((id) => `${equippedIds.has(id) ? '+' : '-'} ${REG.item(id).name}`).join(' · ');
   const bonuses = set.bonuses
     .map((bonus) => {
-      const mods = bonus.mods ? statLines(bonus.mods, 5).join(', ') : 'special bonus';
-      return `${bonus.atPieces}p ${pieces >= bonus.atPieces ? 'active' : 'locked'}: ${mods}`;
+      const parts = [
+        ...(bonus.mods ? statLines(bonus.mods, 5) : []),
+        ...(bonus.aura ? ['aura'] : []),
+        ...(bonus.trigger ? ['on-combat effect'] : [])
+      ];
+      return `${bonus.atPieces}p ${pieces >= bonus.atPieces ? 'active' : 'locked'}: ${parts.join(', ') || 'special bonus'}`;
     });
   return [`Set: ${set.name} ${pieces}/${set.pieces.length}`, ...bonuses, `Pieces: ${pieceNames}`];
 }

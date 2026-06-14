@@ -14,7 +14,7 @@ const DREAM_COIL_ID = 'puck-dream-coil';
 const HOOK_WINDOW_SEC = 5;       // a death this long after a hook still counts as "hooked home"
 const AXE_CALL_WINDOW_SEC = 6;
 const RAMPAGE_WINDOW_SEC = 8;
-const PHASE_BREAK_PCT = 0.5;     // §6.6: the boss "breaks" at half health
+const FALLBACK_PHASE_BREAK_PCT = 50; // §6.6 fallback when encounter data has no authored phase threshold
 
 export interface StoryObserveCtx {
   sim: Sim;
@@ -22,6 +22,7 @@ export interface StoryObserveCtx {
   playerTeam: number;
   raidId?: string;       // set inside a raid encounter
   bossHeroId?: string;   // the boss/guardian hero in this encounter
+  bossPhaseHpPct?: readonly number[]; // authored phase/mechanic thresholds for this encounter
   townPos?: Vec2;        // the player's base/fountain zone (overworld only)
   townRadius?: number;
 }
@@ -41,7 +42,7 @@ export class StoryDetector {
   private recentHooks: { atSec: number; casterUid: number; targetUid?: number }[] = [];
   private recentAxeCalls: { atSec: number; casterUid: number }[] = [];
   private recentKills = new Map<number, number[]>();
-  private phaseFired = new Set<number>(); // boss uids whose break already fired this encounter
+  private phaseFired = new Set<string>(); // boss uid + authored HP threshold
 
   /** Reset per-encounter state when a live fight begins. */
   beginEncounter(): void {
@@ -157,11 +158,16 @@ export class StoryDetector {
     for (const u of ctx.sim.unitsArr) {
       if (u.team === ctx.playerTeam || u.ctrl.kind !== 'boss') continue;
       if (!u.alive) continue;
-      if (this.phaseFired.has(u.uid)) continue;
-      const frac = u.hp / Math.max(1, u.stats.maxHp);
-      if (frac <= PHASE_BREAK_PCT) {
-        this.phaseFired.add(u.uid);
-        out.push({ kind: 'boss-phase', bossHeroId: ctx.bossHeroId, raidId: ctx.raidId });
+      const hpPct = 100 * u.hp / Math.max(1, u.stats.maxHp);
+      const thresholds = [...(ctx.bossPhaseHpPct?.length ? ctx.bossPhaseHpPct : [FALLBACK_PHASE_BREAK_PCT])]
+        .filter((pct) => pct > 0 && pct < 100)
+        .sort((a, b) => b - a);
+      for (const threshold of thresholds) {
+        const key = `${u.uid}:${threshold}`;
+        if (this.phaseFired.has(key) || hpPct > threshold) continue;
+        this.phaseFired.add(key);
+        out.push({ kind: 'boss-phase', bossHeroId: ctx.bossHeroId ?? u.heroId, raidId: ctx.raidId });
+        break;
       }
     }
     return out;

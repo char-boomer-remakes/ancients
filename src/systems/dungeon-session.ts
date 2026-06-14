@@ -8,7 +8,7 @@ import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { makeItemState, sortInventory } from '../core/items';
 import { TUNING } from '../data/tuning';
-import type { AffixDef, BossDef, DifficultyTier, DungeonDef, DungeonLayout, DungeonRoom, MacroHeroSetup, PlannedPack, RoomTemplate } from '../core/types';
+import type { AffixDef, BossDef, DifficultyTier, DungeonDef, DungeonLayout, DungeonRoom, EffectNode, MacroHeroSetup, PlannedPack, RoomTemplate, SeasonalModeKind, Vec2 } from '../core/types';
 import type { Unit } from '../core/unit';
 
 const FALLBACK_ROOM_SIZE = { x: 4200, y: 3000 };
@@ -66,6 +66,15 @@ export interface DungeonSessionResult {
   hash: string;
 }
 
+export interface DungeonFestivalObjective {
+  mode: SeasonalModeKind;
+  pulses: number;
+  choiceRooms: number;
+  actRooms: number;
+  timerSec: number;
+  nextPressureAt: number;
+}
+
 export class DungeonSession {
   readonly def: DungeonDef;
   readonly tier: DifficultyTier;
@@ -76,6 +85,7 @@ export class DungeonSession {
   private readonly maxTicks: number;
   private readonly affixes: Map<string, AffixDef>;
   private readonly roomTemplates: Map<string, RoomTemplate>;
+  private readonly festivalMode?: SeasonalModeKind;
   private currentRoomIndex = 0;
   private readonly cleared = new Set<number>();
   private readonly completedRooms: DungeonRoom[] = [];
@@ -88,15 +98,22 @@ export class DungeonSession {
   private nextPackAt = 0;
   private pacingPhase: DungeonPacingPhase = 'idle';
   private readonly enemyWeight = new Map<number, number>();
+  private festivalPulses = 0;
+  private festivalChoiceRooms = 0;
+  private festivalActRooms = 0;
+  private nextFestivalPressureAt = 12;
+  private readonly festivalChoiceSeen = new Set<number>();
+  private readonly festivalActSeen = new Set<number>();
 
   driverIdx = 0;
   done = false;
   result: DungeonSessionResult | null = null;
   guardianMechanicsFired: string[] = [];
 
-  constructor(def: DungeonDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number, opts?: { maxSec?: number; modifiers?: string[]; endless?: boolean; endlessLevel?: number }) {
+  constructor(def: DungeonDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number, opts?: { maxSec?: number; modifiers?: string[]; endless?: boolean; endlessLevel?: number; festivalMode?: SeasonalModeKind }) {
     this.def = def;
     this.tier = tier;
+    this.festivalMode = opts?.festivalMode;
     const templates = registeredTemplates(def);
     this.layout = generateDungeon(def, tier, seed, { modifiers: opts?.modifiers, roomTemplates: templates, endless: opts?.endless, endlessLevel: opts?.endlessLevel });
     this.roomTemplates = templateMap(def, templates);
@@ -176,6 +193,18 @@ export class DungeonSession {
     return { active: !!this.layout.endless, level: this.layout.endlessLevel ?? 0, progress: this.endlessProgress() };
   }
 
+  festivalObjective(): DungeonFestivalObjective | null {
+    if (!this.festivalMode) return null;
+    return {
+      mode: this.festivalMode,
+      pulses: this.festivalPulses,
+      choiceRooms: this.festivalChoiceRooms,
+      actRooms: this.festivalActRooms,
+      timerSec: Math.max(0, this.maxTicks * this.sim.dt - this.sim.time),
+      nextPressureAt: this.nextFestivalPressureAt
+    };
+  }
+
   chooseExit(index: number): boolean {
     if (this.done || !this.awaitingExit || !this.room.exits.includes(index)) return false;
     this.awaitingExit = false;
@@ -197,6 +226,7 @@ export class DungeonSession {
     for (let i = 0; i < ticks && !this.done; i++) {
       this.sim.tick();
       this.tickGuardianMechanics();
+      this.tickFestivalPressure();
       this.checkDone();
     }
   }
@@ -380,6 +410,98 @@ export class DungeonSession {
       this.guardianPhaseKeys.add(key);
       this.guardianMechanicsFired.push(key);
     }
+  }
+
+  private tickFestivalPressure(): void {
+    if (!this.festivalMode) return;
+    if (this.awaitingExit && this.festivalMode === 'endless-descent' && !this.festivalChoiceSeen.has(this.room.index)) {
+      this.festivalChoiceSeen.add(this.room.index);
+      this.festivalChoiceRooms += Math.max(1, this.room.exits.length);
+    }
+    if (this.festivalMode === 'act-trials' && !this.festivalActSeen.has(this.room.index) && this.room.type !== 'entrance') {
+      this.festivalActSeen.add(this.room.index);
+      this.festivalActRooms += 1;
+    }
+    if (this.sim.time < this.nextFestivalPressureAt) return;
+
+    if (this.festivalMode === 'hazard-survival') {
+      this.spawnFestivalHazard('hazard');
+      this.nextFestivalPressureAt += 14;
+    } else if (this.festivalMode === 'act-trials') {
+      this.spawnFestivalHazard('sigil');
+      this.nextFestivalPressureAt += 18;
+    } else if (this.festivalMode === 'endless-descent') {
+      this.applyContinuumPulse();
+      this.nextFestivalPressureAt += 20;
+    }
+  }
+
+  private festivalCaster(): Unit | null {
+    return this.enemyUids
+      .map((uid) => this.sim.unit(uid))
+      .find((u): u is Unit => !!u?.alive)
+      ?? this.drivenUnit();
+  }
+
+  private partyCenter(): Vec2 {
+    const alive = this.partyUids
+      .map((uid) => this.sim.unit(uid))
+      .filter((u): u is Unit => !!u?.alive);
+    if (alive.length === 0) return { x: this.sim.bounds.w * 0.5, y: this.sim.bounds.h * 0.5 };
+    return {
+      x: alive.reduce((sum, u) => sum + u.pos.x, 0) / alive.length,
+      y: alive.reduce((sum, u) => sum + u.pos.y, 0) / alive.length
+    };
+  }
+
+  private spawnFestivalHazard(kind: 'hazard' | 'sigil'): void {
+    const caster = this.festivalCaster();
+    if (!caster) return;
+    const isEnemyCaster = caster.team !== 0;
+    const effects: EffectNode[] = [{
+      kind: 'zone',
+      at: 'point',
+      zone: {
+        shape: 'circle',
+        radius: kind === 'hazard' ? 360 : 430,
+        duration: kind === 'hazard' ? 6 : 7,
+        tick: {
+          interval: 1,
+          affects: isEnemyCaster ? 'enemies' : 'all',
+          effects: [{ kind: 'damage', dtype: 'magical', amount: kind === 'hazard' ? 22 : 16, target: 'target' }]
+        },
+        auraMods: kind === 'sigil' ? { affects: isEnemyCaster ? 'allies' : 'enemies', mods: { damagePct: 12, armor: 3 } } : undefined
+      }
+    }];
+    execEffects(this.sim, caster, this.festivalCtx(kind), effects, { point: this.partyCenter() });
+    this.festivalPulses += 1;
+  }
+
+  private applyContinuumPulse(): void {
+    this.festivalPulses += 1;
+    const caster = this.festivalCaster();
+    if (!caster) return;
+    const target = this.enemyUids
+      .map((uid) => this.sim.unit(uid))
+      .find((u): u is Unit => !!u?.alive);
+    if (!target) return;
+    execEffects(this.sim, caster, this.festivalCtx('continuum'), [{
+      kind: 'statmod',
+      target: 'self',
+      duration: 8,
+      mods: { moveSpeedPct: 18, attackSpeed: 24 }
+    }], { target });
+  }
+
+  private festivalCtx(kind: string): EffectCtx {
+    return {
+      defId: `festival:${this.festivalMode}:${kind}`,
+      level: 30,
+      vfx: {
+        archetype: kind === 'continuum' ? 'global-mark' : 'ground-aoe',
+        color: this.festivalMode === 'hazard-survival' ? '#ff9d3a' : this.festivalMode === 'act-trials' ? '#ffd86a' : '#b88cff'
+      }
+    };
   }
 
   private guardianCtx(boss: Unit): EffectCtx {
