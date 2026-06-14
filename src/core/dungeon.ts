@@ -215,14 +215,14 @@ function pickRoomTemplate(def: DungeonDef, pool: RoomTemplate[], type: RoomType,
   return rng.pick(eligible);
 }
 
-/** Rarity-weighted total the endless meter fills toward; reaching it summons the guardian (Diablo III greater rift). */
+/** Rarity-weighted kill total the endless meter fills toward; reaching it opens the guardian route. */
 function endlessProgressTarget(rooms: DungeonRoom[]): number {
   let total = 0;
   for (const room of rooms) {
     if (room.type === 'boss') continue;
     for (const pack of room.packs) total += PACK_PROGRESS_WEIGHT[pack.rarity] * pack.cards.length;
   }
-  return Math.max(1, total);
+  return Math.max(1, Math.ceil(total * 0.78));
 }
 
 /** The endless level folds into the modifier profile: deeper levels buy bigger budgets and richer elite odds. */

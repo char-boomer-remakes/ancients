@@ -22,6 +22,7 @@
     "generate:audio": "node scripts/assets/generate_audio.mjs",
     "generate:creature-families": "node scripts/assets/generate_creature_families.mjs",
     "generate:hero-weapons": "node scripts/assets/generate_hero_weapons.mjs",
+    "generate:item-weapons": "node scripts/assets/generate_item_weapons.mjs",
     "generate:item-icons": "node scripts/assets/generate_item_icons.mjs",
     "generate:holdout-signatures": "node scripts/assets/generate_holdout_signatures.mjs",
     "generate:ui-assets": "node scripts/assets/generate_ui_assets.mjs",

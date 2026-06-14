@@ -604,6 +604,24 @@ describe('data lint: regions', () => {
       for (const raidId of region.raids ?? []) {
         expect(REG.raids.has(raidId), `${region.id}: raid ${raidId}`).toBe(true);
       }
+      // Verticality (GAMEPLAY_OVERHAUL §3.3): every climb/glide connector must reference a
+      // real elevation tier, and water-zone polygons need at least a triangle.
+      const tierCount = region.elevation?.tiers.length ?? 0;
+      if (region.climbPoints?.length || region.glidePoints?.length) {
+        expect(tierCount, `${region.id}: connectors need elevation tiers`).toBeGreaterThan(1);
+      }
+      for (const c of region.climbPoints ?? []) {
+        expect(c.fromTier, `${region.id}: climb ${c.id} fromTier`).toBeLessThan(tierCount);
+        expect(c.toTier, `${region.id}: climb ${c.id} toTier`).toBeLessThan(tierCount);
+        expect(c.fromTier, `${region.id}: climb ${c.id} self-loop`).not.toBe(c.toTier);
+      }
+      for (const g of region.glidePoints ?? []) {
+        expect(g.fromTier, `${region.id}: glide ${g.id} fromTier`).toBeGreaterThan(0);
+        expect(g.fromTier, `${region.id}: glide ${g.id} fromTier`).toBeLessThan(tierCount);
+      }
+      for (const z of region.waterZones ?? []) {
+        expect(z.poly.length, `${region.id}: water ${z.id} polygon`).toBeGreaterThanOrEqual(3);
+      }
       expect(region.arrivalBeat, `${region.id}: arrival beat`).toMatch(/^arrival-/);
       const poiIds = new Set<string>([
         ...(region.chests ?? []).map((c) => c.id),
@@ -710,6 +728,19 @@ describe('data lint: Phase 3 registries', () => {
       expect(domain.dialogue.length, `${domain.id}: dialogue`).toBeGreaterThanOrEqual(2);
       for (const id of [...domain.loot.guaranteed, ...domain.loot.assembledPool]) expect(REG.items.has(id), `${domain.id}: loot ${id}`).toBe(true);
       for (const id of domain.encounter.items ?? []) expect(REG.items.has(id), `${domain.id}: boss item ${id}`).toBe(true);
+    }
+
+    // Dishes (GAMEPLAY_OVERHAUL §3.7): each cooked dish needs a positive cost and the
+    // payload its kind implies — buff dishes carry timed mods, heal dishes a restore %.
+    for (const dish of REG.dishes.values()) {
+      expect(dish.cost, `${dish.id}: cost`).toBeGreaterThan(0);
+      expect(dish.lore.length, `${dish.id}: lore`).toBeGreaterThan(0);
+      if (dish.kind === 'buff') {
+        expect(dish.buff, `${dish.id}: buff payload`).toBeTruthy();
+        expect(Object.keys(dish.buff!.mods).length, `${dish.id}: buff mods`).toBeGreaterThan(0);
+        expect(dish.buff!.durationSec, `${dish.id}: buff duration`).toBeGreaterThan(0);
+      }
+      if (dish.kind === 'heal') expect(dish.restorePct, `${dish.id}: restorePct`).toBeGreaterThan(0);
     }
     expect(ALL_DUNGEONS.length).toBeGreaterThanOrEqual(4);
     expect(ALL_ROOM_TEMPLATES.length).toBeGreaterThanOrEqual(ALL_DUNGEONS.length * 3);
@@ -1012,6 +1043,32 @@ describe('data lint: lore + esports denylist (test 23)', () => {
         if (branch.region) expect(REG.regions.has(branch.region), `${def.id} anyOf region`).toBe(true);
         for (const q of branch.quests ?? []) expect(ids.has(q), `${def.id} anyOf prereq quest ${q}`).toBe(true);
       }
+      // A timed window is opt-in but, if set, must be a positive duration.
+      if (def.windowSec !== undefined) expect(def.windowSec, `${def.id} windowSec`).toBeGreaterThan(0);
+      // A fork's branches each carry their own rewards and (optional) successor;
+      // ids must be unique within the quest and every reference must resolve.
+      if (def.choices) {
+        expect(def.kind, `${def.id} only event quests fork`).toBe('event');
+        expect(def.choices.length, `${def.id} fork needs ≥2 branches`).toBeGreaterThanOrEqual(2);
+        const choiceIds = new Set<string>();
+        for (const c of def.choices) {
+          expect(choiceIds.has(c.id), `${def.id} duplicate choice ${c.id}`).toBe(false);
+          choiceIds.add(c.id);
+          expect(c.rewards.length, `${def.id}/${c.id} rewards`).toBeGreaterThan(0);
+          for (const r of c.rewards) {
+            if (r.kind === 'item') expect(REG.items.has(r.itemId), `${def.id}/${c.id} item ${r.itemId}`).toBe(true);
+            if (r.kind === 'recruit') expect(REG.heroes.has(r.heroId), `${def.id}/${c.id} recruit ${r.heroId}`).toBe(true);
+          }
+          if (c.next) expect(ids.has(c.next), `${def.id}/${c.id} next ${c.next}`).toBe(true);
+        }
+      }
+      // A choice-gate prereq must name a real fork quest and one of its branches.
+      const cg = def.prereq?.choice;
+      if (cg) {
+        const fork = ALL_QUEST_DEFS.find((q) => q.id === cg.quest);
+        expect(fork, `${def.id} prereq.choice quest ${cg.quest}`).toBeTruthy();
+        expect((fork!.choices ?? []).some((c) => c.id === cg.choiceId), `${def.id} prereq.choice ${cg.quest}/${cg.choiceId}`).toBe(true);
+      }
       for (const obj of def.objectives) {
         if (obj.kind === 'reach-region' && obj.targetId) expect(REG.regions.has(obj.targetId), `${def.id} reach-region target ${obj.targetId}`).toBe(true);
       }
@@ -1019,29 +1076,64 @@ describe('data lint: lore + esports denylist (test 23)', () => {
     }
   });
 
-  // `next` is the authoritative chain link, so it must agree with the
-  // successor's `prereq.quests`, point at a unique target, and not cycle.
-  it('quest `next` chains are unique, acyclic, and consistent with prereqs', () => {
+  // `next` (and a fork branch's `next`) is the authoritative chain link, so it
+  // must agree with the successor's gate, point at a unique target, and not cycle.
+  it('quest `next` chains (incl. fork branches) are unique, acyclic, and consistent with prereqs', () => {
     const byId = new Map(ALL_QUEST_DEFS.map((q) => [q.id, q]));
-    const claimedBy = new Map<string, string>(); // next target -> predecessor id
+    // Every chain edge: a plain `next` (gated by prereq.quests) or a fork
+    // branch `next` (gated by the specific prereq.choice).
+    const edges: { from: string; to: string; branch?: string }[] = [];
     for (const def of ALL_QUEST_DEFS) {
-      if (!def.next) continue;
-      expect(def.next, `${def.id} next must not self-loop`).not.toBe(def.id);
-      expect(claimedBy.has(def.next), `${def.next} is the next of both ${claimedBy.get(def.next)} and ${def.id}`).toBe(false);
-      claimedBy.set(def.next, def.id);
-      const successor = byId.get(def.next)!;
-      expect(successor.prereq?.quests ?? [], `${def.id} -> ${def.next}: successor must gate on predecessor`).toContain(def.id);
+      if (def.next) edges.push({ from: def.id, to: def.next });
+      for (const c of def.choices ?? []) if (c.next) edges.push({ from: def.id, to: c.next, branch: c.id });
     }
-    // Walk every chain from its root; a revisit means a cycle.
+    const claimedBy = new Map<string, string>(); // successor id -> predecessor edge label
+    const adj = new Map<string, string[]>();
+    for (const e of edges) {
+      const label = e.branch ? `${e.from}/${e.branch}` : e.from;
+      expect(e.to, `${label} next must not self-loop`).not.toBe(e.from);
+      expect(claimedBy.has(e.to), `${e.to} is the successor of both ${claimedBy.get(e.to)} and ${label}`).toBe(false);
+      claimedBy.set(e.to, label);
+      const successor = byId.get(e.to)!;
+      if (e.branch) {
+        expect(successor.prereq?.choice, `${label} -> ${e.to}: branch successor must gate on the choice`).toEqual({ quest: e.from, choiceId: e.branch });
+      } else {
+        expect(successor.prereq?.quests ?? [], `${e.from} -> ${e.to}: successor must gate on predecessor`).toContain(e.from);
+      }
+      (adj.get(e.from) ?? adj.set(e.from, []).get(e.from)!).push(e.to);
+    }
+    // Walk every chain from its roots; a revisit means a cycle.
     for (const root of ALL_QUEST_DEFS) {
       if (claimedBy.has(root.id)) continue; // not a chain root
       const seen = new Set<string>();
-      let cursor: string | undefined = root.id;
-      while (cursor) {
-        expect(seen.has(cursor), `quest chain cycle at ${cursor}`).toBe(false);
-        seen.add(cursor);
-        cursor = byId.get(cursor)?.next;
+      const stack = [root.id];
+      while (stack.length) {
+        const cur = stack.pop()!;
+        expect(seen.has(cur), `quest chain cycle at ${cur}`).toBe(false);
+        seen.add(cur);
+        for (const nxt of adj.get(cur) ?? []) stack.push(nxt);
       }
+    }
+  });
+
+  // QUEST.md §3: walking quest givers must home to a real region and post a
+  // board that at least one registered quest actually uses, or the NPC is empty.
+  it('quest givers reference real regions and post a real board', () => {
+    const givers = [...REG.questGivers.values()];
+    expect(givers.length).toBeGreaterThan(0);
+    const boards = new Set(ALL_QUEST_DEFS.map((q) => q.giver).filter(Boolean) as string[]);
+    const ids = new Set<string>();
+    for (const g of givers) {
+      expect(ids.has(g.id), `duplicate giver id ${g.id}`).toBe(false);
+      ids.add(g.id);
+      expect(REG.regions.has(g.regionId), `${g.id} region ${g.regionId}`).toBe(true);
+      expect(boards.has(g.board), `${g.id} board "${g.board}" has no quests posted`).toBe(true);
+      expect(g.patrol === undefined || g.patrol.length > 0, `${g.id} patrol must be non-empty if present`).toBe(true);
+      expect((g.loopSec ?? 1) > 0, `${g.id} loopSec must be positive`).toBe(true);
+    }
+    // Every board referenced by a quest has a keeper posting it.
+    for (const board of boards) {
+      expect(givers.some((g) => g.board === board), `no giver posts board "${board}"`).toBe(true);
     }
   });
 });

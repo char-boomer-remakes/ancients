@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllContent, ALL_HEROES } from '../data';
@@ -8,9 +8,10 @@ import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { soundForAbility } from '../core/gestures';
 import { ProceduralAudio } from '../engine/audio';
-import { CAST_SFX_BY_SOUND, SampledAudioBank, MUSIC_BEDS, SFX_KEYS } from '../engine/sampled-audio';
+import { eventWorldPos, Game, HeadlessScene, newGameSave, type AudioLike } from '../systems/game';
+import { CAST_SFX_BY_SOUND, SampledAudioBank, MUSIC_BEDS, SFX_KEYS, musicAssetUrl, sfxAssetUrls } from '../engine/sampled-audio';
 import { TUNING } from '../data/tuning';
-import type { GameSave, SimEvent, SoundArchetype } from '../core/types';
+import type { GameSave, SimEvent, SoundArchetype, Vec2 } from '../core/types';
 
 beforeAll(() => registerAllContent());
 
@@ -24,6 +25,39 @@ function settings(muted = false): GameSave['settings'] {
 
 function castEvent(uid: number): SimEvent {
   return { t: 'cast', uid, abilityId: `a${uid}`, vfx: { archetype: 'projectile', color: '#fff' }, sound: 'blade', timbre: 'sharp' };
+}
+
+function sampledPublicPath(url: string): string {
+  expect(url, `sampled audio URL must stay under /assets/audio: ${url}`).toMatch(/^\/assets\/audio\//);
+  return fileURLToPath(new URL(`../../public${url}`, import.meta.url));
+}
+
+class RecordingLoopAudio implements AudioLike {
+  updates: { biome: string; dayTime: number; inCombat: boolean; dt: number }[] = [];
+  setSettings(): void {}
+  handleEvent(): void {}
+  playStinger(): void {}
+  update(env: { biome: string; dayTime: number; inCombat: boolean; dt: number }): void {
+    this.updates.push(env);
+  }
+}
+
+function fullPartySave(regionId = 'tranquil-vale'): GameSave {
+  const save = newGameSave('juggernaut');
+  const heroes = ['juggernaut', 'sven', 'sniper', 'lich', 'earthshaker'];
+  const template = structuredClone(save.roster[0]);
+  const region = REG.region(regionId);
+  save.regionId = regionId;
+  save.worldSeed = region.seed;
+  save.playerPos = { ...region.town.pos };
+  save.party = heroes;
+  save.recruited = heroes;
+  save.roster = heroes.map((heroId) => ({ ...structuredClone(template), heroId, level: 30, hpPct: 1, manaPct: 1 }));
+  return save;
+}
+
+function gameWithAudio(save: GameSave, audio: RecordingLoopAudio): Game {
+  return new Game(null, save, { scene: new HeadlessScene(), audio });
 }
 
 // ---------- Test 20: audio-coverage + safety ----------
@@ -77,14 +111,22 @@ describe('test 20 — audio-coverage + safety', () => {
     expect(() => {
       const audio = new ProceduralAudio(settings());
       audio.unlock();
+      audio.setListener({ x: 0, y: 0 });
       audio.handleEvent(castEvent(1));
       audio.handleEvent({ t: 'bark', uid: 1, line: 'For the Isle!' });
-      // Every event type that now carries a cue should be safe to drive headless.
-      audio.handleEvent({ t: 'revive', uid: 1, pos: { x: 0, y: 0 } });
-      audio.handleEvent({ t: 'immune-block', uid: 1 });
+      // Every event type that now carries a cue should be safe to drive headless,
+      // with and without a resolved world position (positional panning path).
+      audio.handleEvent({ t: 'revive', uid: 1, pos: { x: 0, y: 0 } }, { x: 800, y: -400 });
+      audio.handleEvent({ t: 'immune-block', uid: 1 }, { x: -3000, y: 0 });
       audio.handleEvent({ t: 'blink', uid: 1, from: { x: 0, y: 0 }, to: { x: 9, y: 9 } });
       audio.handleEvent({ t: 'summon', uid: 1, pos: { x: 0, y: 0 } });
-      audio.handleEvent({ t: 'aoe-burst', pos: { x: 0, y: 0 }, radius: 600, vfx: { archetype: 'ground-aoe', color: '#fff' } });
+      audio.handleEvent({ t: 'aoe-burst', pos: { x: 0, y: 0 }, radius: 600, vfx: { archetype: 'ground-aoe', color: '#fff' } }, { x: 1200, y: 200 });
+      audio.handleEvent({ t: 'projectile-hit', pid: 1, pos: { x: 50, y: 0 } });
+      audio.handleEvent({ t: 'projectile-expire', pid: 1, pos: { x: 50, y: 0 } }, { x: 50, y: 0 });
+      audio.handleEvent({ t: 'zone-spawn', zid: 1, pos: { x: 0, y: 0 }, spec: { shape: 'circle', radius: 400, length: 0, width: 0, angle: 0, wall: false, duration: 4 }, vfx: { archetype: 'ground-aoe', color: '#fff' } }, { x: 200, y: 0 });
+      audio.handleEvent({ t: 'zone-spawn', zid: 2, pos: { x: 0, y: 0 }, spec: { shape: 'line', radius: 0, length: 600, width: 60, angle: 0, wall: true, duration: 3 }, vfx: { archetype: 'wall', color: '#fff' } });
+      audio.handleEvent({ t: 'zone-expire', zid: 1 });
+      audio.handleEvent({ t: 'zone-expire', zid: 999 }); // unknown zid is a no-op
       audio.handleEvent({ t: 'capture-start', uid: 1, target: 2, duration: 3 });
       audio.handleEvent({ t: 'capture-interrupt', target: 2 });
       for (const status of ['stun', 'frozen', 'hex', 'sleep', 'fear', 'root', 'taunt', 'cyclone', 'slow', 'buff'] as const) {
@@ -92,6 +134,7 @@ describe('test 20 — audio-coverage + safety', () => {
       }
       audio.playStinger('badge');
       audio.playStinger('raid-clear');
+      audio.setListener(null);
       audio.setCinematicMix('duck');
       audio.playDialogueBlip('Narration');
       audio.setCinematicMix('silence');
@@ -152,10 +195,27 @@ describe('test 20b — sampled-audio layer', () => {
     expect(SFX_KEYS.every((k) => k.length > 0)).toBe(true);
   });
 
+  it('every sampled audio URL points at a shipped audio file', () => {
+    const urls = [
+      ...MUSIC_BEDS.map(musicAssetUrl),
+      ...SFX_KEYS.flatMap((key) => sfxAssetUrls(key))
+    ];
+
+    const missingOrInvalid = urls.filter((url) => {
+      const file = sampledPublicPath(url);
+      if (!existsSync(file) || !statSync(file).isFile() || statSync(file).size <= 0) return true;
+      const magic = readFileSync(file).subarray(0, 4).toString('ascii');
+      return url.endsWith('.wav') ? magic !== 'RIFF' : url.endsWith('.ogg') ? magic !== 'OggS' : true;
+    });
+
+    expect(missingOrInvalid).toEqual([]);
+  });
+
   it('enabling samples headless never opens a context or throws (synth floor intact)', () => {
     const audio = new ProceduralAudio(settings());
     expect(() => {
       audio.enableSampledAudio(true);
+      expect((audio as unknown as { musicFloorEnabled: boolean }).musicFloorEnabled).toBe(true);
       audio.unlock();
       audio.handleEvent({ t: 'damage', uid: 1, from: 2, amount: 600, dtype: 'physical', crit: true });
       audio.handleEvent({ t: 'cast', uid: 1, abilityId: 'a1', vfx: { archetype: 'dome', color: '#fff' }, timbre: 'deep' });
@@ -167,6 +227,67 @@ describe('test 20b — sampled-audio layer', () => {
     }).not.toThrow();
     // headless has no AudioContext, so nothing should have been allocated
     expect((audio as unknown as { ctx: unknown }).ctx).toBeNull();
+  });
+});
+
+// ---------- Test 20c: positional-audio event resolution ----------
+
+describe('test 20c — positional event resolution', () => {
+  // Minimal sim stub: only unit(uid) → { pos } is needed by eventWorldPos.
+  const fakeSim = {
+    unit: (uid: number): { pos: Vec2 } | undefined =>
+      uid === 5 ? { pos: { x: 10, y: 20 } } : uid === 7 ? { pos: { x: -30, y: 40 } } : undefined
+  } as unknown as Parameters<typeof eventWorldPos>[1];
+
+  it('prefers an explicit pos/point, else looks the unit up', () => {
+    expect(eventWorldPos({ t: 'aoe-burst', pos: { x: 1, y: 2 }, radius: 300, vfx: { archetype: 'ground-aoe', color: '#fff' } }, fakeSim)).toEqual({ x: 1, y: 2 });
+    expect(eventWorldPos({ t: 'zone-spawn', zid: 1, pos: { x: 3, y: 4 }, spec: { shape: 'circle', radius: 200, length: 0, width: 0, angle: 0, wall: false, duration: 4 }, vfx: { archetype: 'ground-aoe', color: '#fff' } }, fakeSim)).toEqual({ x: 3, y: 4 });
+    // cast: point wins over target/caster
+    expect(eventWorldPos({ t: 'cast', uid: 5, abilityId: 'a', vfx: { archetype: 'projectile', color: '#fff' }, point: { x: 9, y: 9 } }, fakeSim)).toEqual({ x: 9, y: 9 });
+    // cast: target unit when no point
+    expect(eventWorldPos({ t: 'cast', uid: 5, abilityId: 'a', vfx: { archetype: 'projectile', color: '#fff' }, target: 7 }, fakeSim)).toEqual({ x: -30, y: 40 });
+    // cast: caster when neither
+    expect(eventWorldPos({ t: 'cast', uid: 5, abilityId: 'a', vfx: { archetype: 'projectile', color: '#fff' } }, fakeSim)).toEqual({ x: 10, y: 20 });
+    // unit-keyed events
+    expect(eventWorldPos({ t: 'damage', uid: 5, from: 7, amount: 10, dtype: 'physical' }, fakeSim)).toEqual({ x: 10, y: 20 });
+    expect(eventWorldPos({ t: 'attack-impact', uid: 5, target: 7 }, fakeSim)).toEqual({ x: -30, y: 40 });
+    // UI/global cues stay centered (undefined)
+    expect(eventWorldPos({ t: 'gold', amount: 50, reason: 'kill' }, fakeSim)).toBeUndefined();
+    expect(eventWorldPos({ t: 'levelup', uid: 5, level: 6 }, fakeSim)).toBeUndefined();
+    // missing unit → undefined, never throws
+    expect(eventWorldPos({ t: 'damage', uid: 999, from: 1, amount: 10, dtype: 'physical' }, fakeSim)).toBeUndefined();
+  });
+});
+
+// ---------- Test 20d: live-session music routing ----------
+
+describe('test 20d — live-session music routing', () => {
+  it('keeps the combat music bed updated during live raids', () => {
+    const audio = new RecordingLoopAudio();
+    const game = gameWithAudio(fullPartySave('tranquil-vale'), audio);
+
+    expect(game.startLiveRaid('roshan-pit', 'normal', { maxSec: 5 })).toBe(true);
+    game.update(0.05);
+
+    expect(audio.updates.at(-1)).toMatchObject({
+      biome: REG.region('tranquil-vale').biome,
+      dayTime: 0.5,
+      inCombat: true
+    });
+  });
+
+  it('keeps the combat music bed updated during live dungeons', () => {
+    const audio = new RecordingLoopAudio();
+    const game = gameWithAudio(fullPartySave('icewrack'), audio);
+
+    expect(game.startDungeon('frost-hollow', 'normal', { seed: 1001 })).toBe(true);
+    game.update(0.05);
+
+    expect(audio.updates.at(-1)).toMatchObject({
+      biome: REG.region('icewrack').biome,
+      dayTime: 0.5,
+      inCombat: true
+    });
   });
 });
 

@@ -390,6 +390,37 @@ describe('dungeon session D1/D2', () => {
     expect(g.toasts.some((t) => t.text.includes(`${depth}/${depth} rooms`))).toBe(true);
   });
 
+  it('mirrors fielded entourage into the dungeon and captures dungeon creeps', () => {
+    const save = dungeonSave();
+    save.caught = [{ uid: 'caught-kobold-1', creepId: 'kobold', star: 2 }];
+    save.fielded = ['caught-kobold-1'];
+    const g = Game.headless(save);
+
+    expect(g.startDungeon('frost-hollow', 'normal', { seed: 1001 })).toBe(true);
+    const session = g.liveDungeon!;
+    expect(session.entourageUids.length).toBe(1);
+    expect(session.entourageUids.some((uid) => session.sim.unit(uid)?.ownerUid === session.drivenUnit()?.uid)).toBe(true);
+
+    const hero = session.drivenUnit()!;
+    const target = session.enemyUids.map((uid) => session.sim.unit(uid)).find((u) => u?.alive && u.kind === 'creep');
+    expect(target).toBeDefined();
+    for (const uid of session.partyUids.slice(1)) session.sim.removeUnit(uid);
+    for (const uid of [...session.entourageUids]) session.sim.removeUnit(uid);
+    for (const uid of session.enemyUids) {
+      if (uid !== target!.uid) session.sim.removeUnit(uid);
+    }
+    session.enemyUids = [target!.uid];
+    target!.pos = { x: hero.pos.x + 80, y: hero.pos.y };
+    target!.prevPos = { ...target!.pos };
+    target!.hp = 1;
+    const caughtBefore = g.caught.length;
+    g.tryCapture(target!.uid);
+    for (let guard = 0; guard < 100 && g.caught.length === caughtBefore; guard++) g.update(0.1);
+
+    expect(g.caught.length).toBeGreaterThan(caughtBefore);
+    expect(g.toasts.some((t) => t.text.includes('Captured'))).toBe(true);
+  });
+
   it('opens the dungeon entry hook from a portal before starting in UI mode', () => {
     const g = Game.headless(dungeonSave());
     let opened: string | null = null;
@@ -565,10 +596,13 @@ describe('dungeon session D1/D2', () => {
     expect(session.room.type).toBe('boss');
 
     const boss = session.sim.unit(session.enemyUids[0])!;
-    boss.hp = boss.stats.maxHp * 0.6;
-    session.step(0.05);
+    boss.hp = boss.stats.maxHp * 0.2;
+    for (let i = 0; i < 20 && !session.guardianMechanicsFired.some((id) => id.startsWith('raid-')); i++) {
+      session.step(0.1);
+    }
 
     expect(session.guardianMechanicsFired).toContain('phase-0');
+    expect(session.guardianMechanicsFired.some((id) => id.startsWith('raid-'))).toBe(true);
     expect(boss.hasStatus('buff')).toBe(true);
   });
 });
@@ -600,6 +634,9 @@ describe('dungeon endless mode (D7)', () => {
     expect(deep.depth).toBeGreaterThan(a.depth); // deeper levels are longer
     // ...and denser/nastier: the rarity-weighted kill total climbs with the level.
     expect(deep.progressTarget!).toBeGreaterThan(a.progressTarget!);
+    expect(deep.progressTarget!).toBeLessThan(
+      deep.rooms.reduce((sum, room) => sum + room.packs.reduce((roomSum, pack) => roomSum + pack.cards.length * (pack.rarity === 'rare' ? 6 : pack.rarity === 'champion' ? 3 : 1), 0), 0)
+    );
     expect(deep.rooms[deep.rooms.length - 1].type).toBe('boss'); // guardian still caps the run
   });
 
@@ -636,5 +673,24 @@ describe('dungeon endless mode (D7)', () => {
     // The frontier opened: L1 is now enterable, L2 still clamped.
     expect(g.clampEndlessLevel('frost-hollow', 5)).toBe(1);
     expect(g.toasts.some((t) => t.text.includes('endless L1 cleared'))).toBe(true);
+  });
+
+  it('opens the guardian route when endless progress reaches 100%', () => {
+    const g = Game.headless(dungeonSave());
+    expect(g.startDungeon('frost-hollow', 'normal', { endless: true, endlessLevel: 0, seed: 909 })).toBe(true);
+    let sawGuardianRoute = false;
+    for (let guard = 0; g.liveDungeon && guard < 6000; guard++) {
+      if (g.liveDungeon.exitsUnlocked()) {
+        const exits = g.liveDungeon.availableExits();
+        if (g.liveDungeon.endlessInfo().progress >= 1) {
+          sawGuardianRoute = exits.some((room) => room.type === 'boss');
+          break;
+        }
+        expect(g.chooseDungeonExit(exits[0].index)).toBe(true);
+      } else {
+        clearCurrentRoom(g);
+      }
+    }
+    expect(sawGuardianRoute).toBe(true);
   });
 });

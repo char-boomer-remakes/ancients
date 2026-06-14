@@ -138,6 +138,31 @@ describe('gameplay overhaul: locomotion and discovery', () => {
     expect(hit).toBe(true);
   });
 
+  it('a dash issued mid-windup cancels the strike and deals no free damage (G0)', () => {
+    const game = Game.headless(newGameSave('juggernaut'));
+    const hero = game.activeUnit()!;
+    const creep = game.sim.spawnCreep(REG.creep('kobold'), { team: 1, pos: { x: hero.pos.x + 120, y: hero.pos.y } });
+    const fullHp = creep.hp;
+
+    // order the melee attack and step until the strike is winding up but has not landed
+    game.sim.order(hero.uid, { kind: 'attack-unit', uid: creep.uid });
+    let windingUp = false;
+    for (let i = 0; i < 240 && !windingUp; i++) {
+      game.update(1 / 60);
+      windingUp = hero.windupUntil > game.sim.time;
+    }
+    expect(windingUp, 'hero should reach an attack windup').toBe(true);
+    expect(creep.hp).toBe(fullHp); // damage lands at the END of the windup, not yet
+
+    // dash mid-windup: the forced move cancels the pending strike (no "swing, dash, keep the hit")
+    game.stamina = game.staminaMax();
+    expect(game.tryDash({ x: hero.pos.x - 600, y: hero.pos.y })).toBe(true);
+
+    for (let i = 0; i < 20; i++) game.update(1 / 60);
+    expect(hero.windupUntil).toBe(-1);   // the windup was cancelled, not resolved
+    expect(creep.hp).toBe(fullHp);       // the cancelled strike never dealt its damage
+  });
+
   it('discovers waypoints, shards, elemental puzzles, and puzzle-gated chests', () => {
     const game = Game.headless(newGameSave('juggernaut'));
     const hero = game.activeUnit()!;

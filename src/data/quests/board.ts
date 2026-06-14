@@ -214,6 +214,42 @@ const REGION_BOUNTY_META: RegionBountyMeta[] = [
 
 const REGION_BOUNTIES: QuestDef[] = REGION_BOUNTY_META.flatMap(regionBounties);
 
+// regionId -> the town board name its bounties post under. Exported so the
+// walking quest givers (givers.ts) home to the right board without re-typing it.
+export const REGION_BOARD_NAMES: Record<string, string> = Object.fromEntries(
+  REGION_BOUNTY_META.map((m) => [m.regionId, m.board])
+);
+
+// Board strings the region-agnostic quests post under (QuestDef.giver), shared
+// with the global quest givers so they post the matching board.
+export const GLOBAL_BOUNTY_BOARD = 'Binder\u2019s Board';
+export const CHAPTER_BOARD = 'Mending the Moon';
+
+// ------------------------------------------------------------------
+// Timed contracts (QUEST.md follow-up): recurring bounties on a clock.
+// Once posted they must be cleared inside `windowSec` of playtime or the
+// progress resets and the contract re-posts — a race the steady board is not.
+// These also exercise the long-dormant per-tier objective filter.
+// ------------------------------------------------------------------
+const TIMED_BOUNTIES: QuestDef[] = [
+  {
+    id: 'bounty-ancient-reckoning',
+    kind: 'recurring',
+    name: 'Ancient Reckoning',
+    giver: 'Binder\u2019s Board',
+    summary: 'An ancient-blooded beast has been sighted. The board pays well — but the trail goes cold fast. Bring down three before it does.',
+    objectives: [{ kind: 'kill-creeps', count: 3, tier: 'ancient', text: 'Defeat ancient-tier creeps' }],
+    rewards: [
+      { kind: 'gold', amount: 1400 },
+      { kind: 'loot-mark', band: 'late', amount: 1 }
+    ],
+    prereq: { badges: 4 },
+    windowSec: 30 * 60,
+    repeatable: true,
+    dialogue: ['Old blood doesn\u2019t wait to be hunted. Move.']
+  }
+];
+
 const CHAPTERS: QuestDef[] = [
   {
     id: 'chapter-first-light',
@@ -382,4 +418,158 @@ const SIDE_CHAPTERS: QuestDef[] = [
   }
 ];
 
-export const ALL_QUEST_DEFS: QuestDef[] = [...GLOBAL_BOUNTIES, ...REGION_BOUNTIES, ...CHAPTERS, ...SIDE_CHAPTERS];
+// ------------------------------------------------------------------
+// Second spine — "The Outworld Seal" (QUEST.md follow-up). A post-Mad-Moon
+// questline about the claimants who crossed worlds when the seal thinned
+// (README: the Renegade Marshal, the Forsaken Queen, the Lords of Hatred and
+// Destruction). It chains off the end of the main spine and pays out in raid
+// gear and a title, walking alongside the endgame instead of the badge run.
+// ------------------------------------------------------------------
+const OUTWORLD_CHAPTERS: QuestDef[] = [
+  {
+    id: 'chapter-outworld-cracks',
+    kind: 'event',
+    name: 'Cracks in the Seal',
+    giver: 'Mending the Moon',
+    summary: 'The Moon answered, and something on the other side answered back. The seal that held the Ancients is thinning. Break two raids open and see what is pressing through.',
+    objectives: [{ kind: 'clear-raid', count: 2, text: 'Clear raids' }],
+    rewards: [
+      { kind: 'item', itemId: 'octarine-core' },
+      { kind: 'essence', amount: 150 }
+    ],
+    prereq: { quests: ['chapter-mad-moon'] },
+    next: 'chapter-outworld-renegade',
+    dialogue: ['Every shard you gather thins the wall a little more. They feel it too.']
+  },
+  {
+    id: 'chapter-outworld-renegade',
+    kind: 'event',
+    name: 'The Renegade\u2019s Wake',
+    giver: 'Mending the Moon',
+    summary: 'A claimant walks the deep places now, and the anchors it passes do not rise again. Clear a raid and put down two of the bosses it has stirred.',
+    objectives: [
+      { kind: 'clear-raid', count: 1, text: 'Clear a raid' },
+      { kind: 'clear-boss', count: 2, text: 'Clear bosses in its wake' }
+    ],
+    rewards: [{ kind: 'item', itemId: 'eye-of-skadi' }],
+    prereq: { quests: ['chapter-outworld-cracks'] },
+    next: 'chapter-outworld-seal',
+    dialogue: ['It is not from here. It came for the same prize you did, and it does not mean to share.']
+  },
+  {
+    id: 'chapter-outworld-seal',
+    kind: 'event',
+    name: 'Mend the Seal',
+    giver: 'Mending the Moon',
+    summary: 'The breach can be closed, but only from the deepest war. Clear three raids and carry their shards back to the wall before another claimant slips the seal.',
+    objectives: [{ kind: 'clear-raid', count: 3, text: 'Clear raids' }],
+    rewards: [
+      { kind: 'title', id: 'sealwarden', name: 'Sealwarden', note: 'Closed the breach the broken Moon tore between worlds.' },
+      { kind: 'item', itemId: 'aghanims-blessing' }
+    ],
+    prereq: { quests: ['chapter-outworld-renegade'] },
+    dialogue: ['Held. For now the wall is yours to keep, and the prize beneath it stays ours.']
+  }
+];
+
+// ------------------------------------------------------------------
+// The fork — "Zet's Question" (QUEST.md follow-up: branching choice-quests).
+// At the Tower, the game poses Zet's own choice (README): reunite the Ancients
+// and end the war, keep the eternal game turning, or break the Loop and let the
+// world out. Claiming the quest takes exactly one branch — granting that
+// branch's title and reward and unlocking only its epilogue.
+// ------------------------------------------------------------------
+const ENDGAME_FORK: QuestDef[] = [
+  {
+    id: 'fork-zets-question',
+    kind: 'event',
+    name: 'Zet\u2019s Question',
+    giver: 'The Tower of the Ancients',
+    regionId: 'mad-moon-crater',
+    summary: 'You answered the Mad Moon and walked back out of the war. Now the Tower asks what Zet could not: with the pieces in your hands, what becomes of the Loop? Return to the Tower and decide.',
+    objectives: [{ kind: 'reach-region', count: 1, text: 'Return to the Tower of the Ancients', targetId: 'mad-moon-crater', regionId: 'mad-moon-crater' }],
+    rewards: [{ kind: 'gold', amount: 2000 }],
+    prereq: { quests: ['chapter-mad-moon'] },
+    choices: [
+      {
+        id: 'reunite',
+        label: 'Reunite the Ancients',
+        note: 'End the war. Make the broken mind whole and let the Loop fall silent.',
+        rewards: [
+          { kind: 'title', id: 'worldmender', name: 'Worldmender', note: 'Gathered the broken Moon back into one mind and ended the war.' },
+          { kind: 'gold', amount: 5000 }
+        ],
+        next: 'epilogue-reunite'
+      },
+      {
+        id: 'eternal',
+        label: 'Keep the eternal game',
+        note: 'Let the war turn forever, as it always has. Some things are not meant to end.',
+        rewards: [
+          { kind: 'title', id: 'eternal-warden', name: 'Eternal Warden', note: 'Chose to keep the Loop turning, and stands watch over the eternal game.' },
+          { kind: 'essence', amount: 300 }
+        ],
+        next: 'epilogue-eternal'
+      },
+      {
+        id: 'break',
+        label: 'Break the Loop',
+        note: 'Shatter the rule that resets the world and let everything out for good.',
+        rewards: [
+          { kind: 'title', id: 'loop-breaker', name: 'Looser of the Loop', note: 'Broke the rule that bound the world and let it out for good.' },
+          { kind: 'item', itemId: 'divine-rapier' }
+        ],
+        next: 'epilogue-break'
+      }
+    ],
+    dialogue: ['Three fragments woke with names, and one spent itself sealing the other two. The shard you carry remembers the choice. Now it is yours.']
+  },
+  // Branch epilogues — each gates on the specific choice taken, so only the
+  // path you chose ever opens. Leaves (no `next`), each a one-time payout.
+  {
+    id: 'epilogue-reunite',
+    kind: 'event',
+    name: 'The Silence After',
+    giver: 'The Tower of the Ancients',
+    regionId: 'mad-moon-crater',
+    summary: 'The Ancients are one again and the war has stopped. Walk the crater once more and see a world that no longer resets.',
+    objectives: [{ kind: 'reach-region', count: 1, text: 'Walk the quieted crater', targetId: 'mad-moon-crater', regionId: 'mad-moon-crater' }],
+    rewards: [{ kind: 'item', itemId: 'aghanims-scepter' }],
+    prereq: { choice: { quest: 'fork-zets-question', choiceId: 'reunite' } },
+    dialogue: ['No more turns. No more wars to remember. Only the quiet you made.']
+  },
+  {
+    id: 'epilogue-eternal',
+    kind: 'event',
+    name: 'The Game Goes On',
+    giver: 'The Tower of the Ancients',
+    regionId: 'mad-moon-crater',
+    summary: 'The Loop turns as it always has, and you turn with it now — its warden, not its prisoner. Take your post at the Tower.',
+    objectives: [{ kind: 'reach-region', count: 1, text: 'Take your post at the Tower', targetId: 'mad-moon-crater', regionId: 'mad-moon-crater' }],
+    rewards: [{ kind: 'item', itemId: 'refresher-orb' }],
+    prereq: { choice: { quest: 'fork-zets-question', choiceId: 'eternal' } },
+    dialogue: ['The war begins again, and you are ready for it. You will always be ready for it.']
+  },
+  {
+    id: 'epilogue-break',
+    kind: 'event',
+    name: 'The World Let Out',
+    giver: 'The Tower of the Ancients',
+    regionId: 'mad-moon-crater',
+    summary: 'The Loop is broken and the world spills past its old edges for the first time. Step into the crater and see what comes next — no one has before.',
+    objectives: [{ kind: 'reach-region', count: 1, text: 'Step past the broken Loop', targetId: 'mad-moon-crater', regionId: 'mad-moon-crater' }],
+    rewards: [{ kind: 'item', itemId: 'eye-of-skadi' }],
+    prereq: { choice: { quest: 'fork-zets-question', choiceId: 'break' } },
+    dialogue: ['Whatever happens now happens once. That is the gift, and the cost.']
+  }
+];
+
+export const ALL_QUEST_DEFS: QuestDef[] = [
+  ...GLOBAL_BOUNTIES,
+  ...REGION_BOUNTIES,
+  ...TIMED_BOUNTIES,
+  ...CHAPTERS,
+  ...SIDE_CHAPTERS,
+  ...OUTWORLD_CHAPTERS,
+  ...ENDGAME_FORK
+];

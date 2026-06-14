@@ -115,28 +115,52 @@ function runMeasured(sim: Sim, seconds: number): { elapsedMs: number; ticks: num
   return { elapsedMs, ticks, hash: sim.hash() };
 }
 
+// Warm the JIT once so the first measured case isn't paying compilation cost
+// (the original single-cold-run measurement was the main flake vector under load).
+let warmed = false;
+function warmup(): void {
+  if (warmed) return;
+  const sim = buildStressSim({ units: 30, projectiles: 50 });
+  for (let i = 0; i < 30; i++) sim.tick();
+  warmed = true;
+}
+
+// Best-of-N on a fresh sim per run. Taking the minimum discards scheduler
+// preemption spikes from concurrent Vitest workers, so the budget measures the
+// sim's steady-state cost (a crawl guard) rather than how busy the box is.
+function bestMeasured(opts: StressOpts, seconds: number, runs = 3): { elapsedMs: number; ticks: number } {
+  warmup();
+  let elapsedMs = Infinity;
+  let ticks = 0;
+  for (let i = 0; i < runs; i++) {
+    const r = runMeasured(buildStressSim(opts), seconds);
+    elapsedMs = Math.min(elapsedMs, r.elapsedMs);
+    ticks = r.ticks;
+  }
+  return { elapsedMs, ticks };
+}
+
 describe('simulation performance budget', () => {
   it('simulates the target 30-unit / 200-projectile stress case with headroom', () => {
-    const result = runMeasured(buildStressSim({ units: 30, projectiles: 200 }), 1);
+    const result = bestMeasured({ units: 30, projectiles: 200 }, 1);
 
-    // This is intentionally generous for CI. It guards against crawling while
-    // leaving precise baseline tracking to manual bench runs.
+    // Intentionally generous: warm steady-state is single-digit ms, so this ~100x
+    // headroom only ever trips on a genuine algorithmic crawl, not machine load.
     expect(result.elapsedMs).toBeLessThan(750);
     expect(result.ticks).toBe(30);
   });
 
   it('keeps a 60-unit stress case comfortably bounded', () => {
-    const result = runMeasured(buildStressSim({ units: 60, projectiles: 120 }), 1);
+    const result = bestMeasured({ units: 60, projectiles: 120 }, 1);
 
-    // Wall-clock ratios are noisy when Vitest runs test files concurrently.
-    // The absolute ceiling still catches the old quadratic crawl while staying
-    // stable on loaded developer machines and CI workers.
+    // The absolute ceiling catches the old quadratic crawl while staying stable
+    // on loaded developer machines and CI workers (warmup + best-of-N).
     expect(result.elapsedMs).toBeLessThan(650);
     expect(result.ticks).toBe(30);
   });
 
   it('keeps a 100-unit stress case within the 2.0 scale envelope', () => {
-    const result = runMeasured(buildStressSim({ units: 100, projectiles: 80 }), 1);
+    const result = bestMeasured({ units: 100, projectiles: 80 }, 1);
 
     // OPTIMIZATION 2.0 raises the probe beyond the original 30-unit target.
     // Keep this as a coarse crawl guard; precise GPU/frame baselines live in

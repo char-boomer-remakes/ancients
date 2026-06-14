@@ -117,6 +117,83 @@ test.describe('quests', () => {
     expect(after.valeWardenVisible).toBe(true);
   });
 
+  test('a timed, tier-scoped bounty counts only ancient kills and shows a deadline', async ({ page }) => {
+    await boot(page, { hero: 'juggernaut', seed: 307 });
+
+    const result = await page.evaluate(() => {
+      const g = (window as any).__game;
+      const t = (window as any).__test;
+      // Hold four badges so Ancient Reckoning is posted, then refresh the board.
+      g.badges = new Set(['vale-badge', 'wood-badge', 'frost-badge', 'dune-badge']);
+      g.refreshQuests();
+      // Lesser kills are filtered out by the ancient-tier objective.
+      t.advanceQuest({ kind: 'kill-creeps', amount: 5, tier: 'small' });
+      const beforeRow = g.questBoard().find((b: any) => b.id === 'bounty-ancient-reckoning');
+      // Ancient kills count it to completion.
+      t.advanceQuest({ kind: 'kill-creeps', amount: 3, tier: 'ancient' });
+      const afterRow = g.questBoard().find((b: any) => b.id === 'bounty-ancient-reckoning');
+      return {
+        present: Boolean(beforeRow),
+        progressBefore: beforeRow?.objectives?.[0]?.have ?? null,
+        hasDeadline: typeof beforeRow?.expiresIn === 'number' && beforeRow.expiresIn > 0,
+        claimable: afterRow?.claimable ?? false
+      };
+    });
+
+    expect(result.present).toBe(true);
+    expect(result.progressBefore).toBe(0); // small kills ignored
+    expect(result.hasDeadline).toBe(true);
+    expect(result.claimable).toBe(true);
+  });
+
+  test('a fork quest takes one branch and unlocks only its epilogue', async ({ page }) => {
+    await boot(page, { hero: 'juggernaut', seed: 308 });
+
+    const result = await page.evaluate(() => {
+      const g = (window as any).__game;
+      // Stage the fork as ready: the Mad Moon chapter claimed, the fork complete.
+      g.quests['chapter-mad-moon'] = { status: 'claimed', progress: [1], completions: 1 };
+      g.quests['fork-zets-question'] = { status: 'complete', progress: [1], completions: 0 };
+      const claimed = g.claimQuest('fork-zets-question', 'reunite');
+      const ids = g.questBoard().map((b: any) => b.id);
+      return {
+        claimed,
+        choice: g.quests['fork-zets-question']?.choice ?? null,
+        hasTitle: g.questTitles().some((t: any) => t.id === 'worldmender'),
+        openedChosen: ids.includes('epilogue-reunite'),
+        openedOther: ids.includes('epilogue-break') || ids.includes('epilogue-eternal')
+      };
+    });
+
+    expect(result.claimed).toBe(true);
+    expect(result.choice).toBe('reunite');
+    expect(result.hasTitle).toBe(true);
+    expect(result.openedChosen).toBe(true);
+    expect(result.openedOther).toBe(false);
+  });
+
+  test('claiming a fork branch from the Journal grants its reward', async ({ page }) => {
+    await boot(page, { hero: 'juggernaut', seed: 309, hud: true });
+    await clearCinematics(page);
+
+    await page.evaluate(() => {
+      const g = (window as any).__game;
+      g.quests['chapter-mad-moon'] = { status: 'claimed', progress: [1], completions: 1 };
+      g.quests['fork-zets-question'] = { status: 'complete', progress: [1], completions: 0 };
+    });
+
+    await page.evaluate(() => (document.querySelector('[data-open="journal"]') as HTMLElement | null)?.click());
+    await expect(page.locator(MODAL_CARD)).toContainText('Zet');
+
+    const breakBtn = page.locator('[data-claim-quest="fork-zets-question"][data-claim-choice="break"]');
+    await expect(breakBtn).toBeVisible();
+    await breakBtn.click();
+
+    // The Break-the-Loop branch grants its title; the fork remembers the branch.
+    expect(await page.evaluate(() => (window as any).__game.quests['fork-zets-question']?.choice ?? null)).toBe('break');
+    expect(await page.evaluate(() => (window as any).__game.questTitles().some((t: any) => t.id === 'loop-breaker'))).toBe(true);
+  });
+
   // The other specs drive the model directly; this one proves the full UI loop:
   // open the Journal (real HUD over the headless scene), click the Claim button,
   // and confirm the reward landed and the row refreshed.

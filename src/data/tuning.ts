@@ -276,13 +276,22 @@ export const TUNING = {
     climbDrainPerSec: 24,
     swimDrainPerSec: 14,
     staminaRegenPerSec: 25,
-    regenDelaySec: 0.6
+    regenDelaySec: 0.6,
+    // verticality (§3.3, G3): scripted ascent/descent between elevation tiers
+    climbDurationSec: 1.6,      // time to climb one tier (drains climbDrainPerSec the whole way)
+    glideDescentSec: 2.0,       // time to glide down one tier (free, but committing)
+    glideSpeedMult: 0.9,        // forward drift while gliding
+    swimSpeedMult: 0.55,        // move-speed multiplier while in a water zone
+    connectorRadius: 200,       // how close to a climb/glide point you must be to use it
+    washbackStaminaRefund: 60   // stamina handed back after a deep-water washback
   },
   exploration: {
     pickupRadius: 180,
     waypointRadius: 260,
     chestInteractRadius: 260,
     puzzleNodeRadius: 230,
+    cookRadius: 520,            // cooking (§3.7) is available within this range of a shrine
+
     shrineShardQuota: 3,
     shardRewardGold: 225,
     explorationThresholdRewardGold: 175

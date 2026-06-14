@@ -1,10 +1,30 @@
-import type { DamageType, GameSave, SimEvent, SoundArchetype, StatusId, StingerId } from '../core/types';
+import type { DamageType, GameSave, SimEvent, SoundArchetype, StatusId, StingerId, Vec2 } from '../core/types';
 import { TUNING } from '../data/tuning';
 import { CAST_SFX_BY_SOUND, SampledAudioBank, type SfxKey } from './sampled-audio';
 
 type AudioSettings = GameSave['settings'];
 type Channel = 'sfx' | 'voice' | 'stinger' | 'music';
 export type CinematicMixMode = 'normal' | 'duck' | 'silence';
+
+// Positional audio (§2). A cue's world position is compared to the listener
+// (the followed hero) to pan it left/right and attenuate it with distance, so a
+// hit off the left edge reads from the left and an off-screen cast is quieter.
+// Distances are in sim world units (overworld bounds are thousands wide).
+const PAN_REF = 1100;        // world units mapped to a full hard-pan
+const PAN_STRENGTH = 0.85;   // never fully hard-pan a cue to one ear
+const ATTEN_NEAR = 320;      // full volume within this radius of the listener
+const ATTEN_FAR = 2600;      // beyond this, a cue sits at the floor gain
+const ATTEN_FLOOR = 0.34;    // off-screen cues stay audible, just quieter
+const ZONE_BED_CAP = 5;      // concurrent persistent-zone ambiences
+
+const clampNum = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+
+interface ZoneBed {
+  src: AudioBufferSourceNode;
+  osc: OscillatorNode | null;
+  gain: GainNode;
+  timer: ReturnType<typeof setTimeout> | null;
+}
 
 // Only hard crowd-control lands an audible cue. The frequent/soft carriers
 // (buff, slow, invis, break, disarm, blind, silence, magic-immune) stay silent
@@ -71,13 +91,26 @@ export class ProceduralAudio {
   private samples: SampledAudioBank | null = null;
   private samplesEnabled = false;
   private sampleMusic: { biome: string; src: AudioBufferSourceNode; gain: GainNode } | null = null;
-  // The *synth* music bed stays off: its sustained drone + filtered-noise
-  // ambience read as a constant "hum". The composed, sampled biome beds
-  // (`updateSampleMusic`) DO play on medium+ now that they have a dedicated
-  // `music` volume slider to turn down. Flip this to true to also layer the
-  // procedural drone under the sampled bed.
+  // The *synth* music bed is the fallback floor. Its sustained drone + filtered
+  // noise ambience read as a constant hum when layered under decoded music, so
+  // the composed sampled beds lead on medium+ once they are actually playing.
+  // Flip this to true to also layer the procedural drone under the sampled bed.
   private musicEnabled = false;
+  // The synth bed remains the music floor whenever no composed bed is sounding:
+  // low tier, samples disabled, missing files, or the decode gap on medium+.
+  // It is mixed well under SFX and ducks in combat/at night like the sampled bed.
+  private musicFloorEnabled = false;
   private combatHotUntil = 0;
+  // Listener (followed hero) for positional panning; null leaves cues centered.
+  private listener: Vec2 | null = null;
+  // Per-cue spatial state, set for the duration of one positional handleEvent
+  // and read by the low-level synth helpers. Reset to center/full after each.
+  private spatialPan = 0;
+  private spatialAtten = 1;
+  // Persistent-zone ambiences (fire fields, freezing fields, walls) keyed by zid.
+  private zoneBeds = new Map<number, ZoneBed>();
+  private zoneSpawnTimes: number[] = [];
+  private projExpireTimes: number[] = [];
   private cinematicMix: CinematicMixMode = 'normal';
   // Damage-impact throttle (§2.4): cap how many hit sounds fire in a short window
   // so a big AoE reads as one crunch instead of a machine-gun wall of mush.
@@ -126,8 +159,16 @@ export class ProceduralAudio {
    */
   enableSampledAudio(on: boolean): void {
     this.samplesEnabled = on;
+    // The synth bed is the floor on every tier until a composed bed is actually
+    // sounding. On medium+ the sampled bed then leads and the drone tears down.
+    this.musicFloorEnabled = true;
     if (on && this.unlocked) this.initSamples();
     if (!on) this.stopSampleMusic();
+  }
+
+  /** Set the listener (followed hero) world position for positional panning. */
+  setListener(pos: Vec2 | null): void {
+    this.listener = pos ? { x: pos.x, y: pos.y } : null;
   }
 
   private initSamples(): void {
@@ -146,6 +187,7 @@ export class ProceduralAudio {
       this.unlockHandler = null;
     }
     this.stopSampleMusic();
+    this.stopAllZoneBeds();
     this.samples = null;
     this.stopMusic();
     try {
@@ -159,6 +201,7 @@ export class ProceduralAudio {
     this.reverb = null;
     this.reverbGain = null;
     this.unlocked = false;
+    this.listener = null;
     this.voiceEnds.length = 0;
     this.damageSoundTimes.length = 0;
     this.projHitTimes.length = 0;
@@ -172,6 +215,7 @@ export class ProceduralAudio {
     if (settings.audio.muted) {
       this.stopMusic();
       this.stopSampleMusic();
+      this.stopAllZoneBeds();
     }
   }
 
@@ -192,9 +236,32 @@ export class ProceduralAudio {
     return this.peakVoices;
   }
 
-  handleEvent(ev: SimEvent): void {
+  handleEvent(ev: SimEvent, at?: Vec2): void {
     this.noteCombatEvent(ev);
     if (!this.unlocked || this.settings.audio.muted) return;
+    this.applySpatial(at);
+    try {
+      this.dispatchEvent(ev);
+    } finally {
+      this.spatialPan = 0;
+      this.spatialAtten = 1;
+    }
+  }
+
+  /** Pan/attenuate the current cue for a world position relative to the listener. */
+  private applySpatial(at?: Vec2): void {
+    this.spatialPan = 0;
+    this.spatialAtten = 1;
+    if (!at || !this.listener) return;
+    const dx = at.x - this.listener.x;
+    const dy = at.y - this.listener.y;
+    this.spatialPan = clampNum(dx / PAN_REF, -1, 1) * PAN_STRENGTH;
+    const dist = Math.hypot(dx, dy);
+    const t = clampNum((dist - ATTEN_NEAR) / (ATTEN_FAR - ATTEN_NEAR), 0, 1);
+    this.spatialAtten = 1 - t * (1 - ATTEN_FLOOR);
+  }
+
+  private dispatchEvent(ev: SimEvent): void {
     switch (ev.t) {
       case 'cast':
         this.castVoice(ev.sound, ev.vfx.archetype, ev.timbre);
@@ -283,6 +350,15 @@ export class ProceduralAudio {
       case 'item-used':
         this.sweep(260, 520, 0.08, 'square', 0.14);
         break;
+      case 'projectile-expire':
+        this.projectileFizzle();
+        break;
+      case 'zone-spawn':
+        this.zoneSpawn(ev.zid, ev.spec);
+        break;
+      case 'zone-expire':
+        this.stopZoneBed(ev.zid);
+        break;
       default:
         break;
     }
@@ -302,12 +378,14 @@ export class ProceduralAudio {
     const now = ctx.currentTime;
     const night = env.dayTime >= 0.5;
     const combat = env.inCombat || now < this.combatHotUntil;
-    // The composed, sampled biome bed leads (medium+); the synth drone below is
-    // off by default. With no decoded file / on low tier this is a no-op and the
-    // game stays SFX-only.
+    // The composed, sampled biome bed leads once decoded. Until then, the synth
+    // bed below remains the music floor.
     const sampleActive = this.updateSampleMusic(env, ctx, now, night, combat);
-    if (!this.musicEnabled) {
-      this.stopMusic(); // keep the procedural drone torn down
+    // The synth bed plays when explicitly enabled, or as the music floor
+    // whenever no composed bed is sounding.
+    const synthBed = this.musicEnabled || (this.musicFloorEnabled && !sampleActive);
+    if (!synthBed) {
+      this.stopMusic(); // composed bed leads (or audio is off); keep the drone torn down
       return;
     }
     if (!this.music || this.music.biome !== env.biome) this.startMusic(env.biome);
@@ -318,7 +396,9 @@ export class ProceduralAudio {
     // whenever the file is absent/undecoded).
     const drone = sampleActive ? 0.28 : 1;
     const cinMult = this.cinematicMix === 'silence' ? 0 : this.cinematicMix === 'duck' ? 0.35 : 1;
-    const base = this.volume(0.11, 'music') * cinMult;
+    // As the fallback floor the drone sits well under SFX so it scores the run
+    // without reading as a constant hum; the dev override stays louder.
+    const base = this.volume(this.musicEnabled ? 0.11 : 0.06, 'music') * cinMult;
     this.music.master.gain.setTargetAtTime(base * (night ? 0.78 : 1) * drone, now, 0.55);
     this.music.combat.gain.setTargetAtTime(base * (combat ? 0.9 : 0.04), now, combat ? 0.08 : 0.9);
     this.music.ambient.gain.setTargetAtTime(this.volume(night ? 0.055 : 0.038, 'music') * cinMult * (sampleActive ? 0.5 : 1), now, 0.8);
@@ -716,8 +796,9 @@ export class ProceduralAudio {
     const src = ctx.createBufferSource();
     const gain = ctx.createGain();
     src.buffer = buf;
-    gain.gain.value = this.volume(vol, chan);
-    src.connect(gain).connect(this.master ?? ctx.destination);
+    gain.gain.value = this.vol(vol, chan);
+    src.connect(gain);
+    this.route(gain);
     src.start();
     return true;
   }
@@ -751,6 +832,27 @@ export class ProceduralAudio {
     return this.channelGain(chan) * mult;
   }
 
+  /** Per-cue volume: the channel gain folded with the current distance attenuation. */
+  private vol(mult: number, chan: Channel): number {
+    return this.channelGain(chan) * mult * this.spatialAtten;
+  }
+
+  /** Connect a finished voice node to the master, inserting a stereo panner when
+   *  the current cue has a non-zero pan. Falls back to a direct connect when
+   *  panning is unavailable (older WebAudio) or the cue is centered. */
+  private route(node: AudioNode): void {
+    const ctx = this.ctx;
+    const dest = this.master ?? ctx?.destination;
+    if (!dest) return;
+    if (this.spatialPan !== 0 && ctx && typeof ctx.createStereoPanner === 'function') {
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = this.spatialPan;
+      node.connect(panner).connect(dest);
+    } else {
+      node.connect(dest);
+    }
+  }
+
   /** Route a per-sound gain to the shared reverb bus so a cue reads with space
    *  instead of bone-dry. No-op until the reverb exists (headless skips this). */
   private sendReverb(node: AudioNode, amount: number): void {
@@ -767,9 +869,10 @@ export class ProceduralAudio {
     const gain = ctx.createGain();
     osc.type = type;
     osc.frequency.setValueAtTime(freq, ctx.currentTime);
-    gain.gain.setValueAtTime(this.volume(vol, chan), ctx.currentTime);
+    gain.gain.setValueAtTime(this.vol(vol, chan), ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    osc.connect(gain).connect(this.master ?? ctx.destination);
+    osc.connect(gain);
+    this.route(gain);
     this.sendReverb(gain, reverbSend);
     osc.start();
     osc.stop(ctx.currentTime + dur);
@@ -783,9 +886,10 @@ export class ProceduralAudio {
     osc.type = type;
     osc.frequency.setValueAtTime(start, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(Math.max(1, end), ctx.currentTime + dur);
-    gain.gain.setValueAtTime(this.volume(vol, chan), ctx.currentTime);
+    gain.gain.setValueAtTime(this.vol(vol, chan), ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    osc.connect(gain).connect(this.master ?? ctx.destination);
+    osc.connect(gain);
+    this.route(gain);
     this.sendReverb(gain, reverbSend);
     osc.start();
     osc.stop(ctx.currentTime + dur);
@@ -806,9 +910,10 @@ export class ProceduralAudio {
     filter.type = 'lowpass';
     filter.frequency.value = filterHz;
     src.buffer = buffer;
-    gain.gain.setValueAtTime(this.volume(vol, 'sfx'), ctx.currentTime);
+    gain.gain.setValueAtTime(this.vol(vol, 'sfx'), ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    src.connect(filter).connect(gain).connect(this.master ?? ctx.destination);
+    src.connect(filter).connect(gain);
+    this.route(gain);
     this.sendReverb(gain, reverbSend);
     src.start();
   }
@@ -822,9 +927,10 @@ export class ProceduralAudio {
     const src = ctx.createBufferSource();
     const gain = ctx.createGain();
     src.buffer = buffer;
-    gain.gain.setValueAtTime(this.volume(vol, 'sfx'), ctx.currentTime);
+    gain.gain.setValueAtTime(this.vol(vol, 'sfx'), ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    src.connect(gain).connect(this.master ?? ctx.destination);
+    src.connect(gain);
+    this.route(gain);
     this.sendReverb(gain, reverbSend);
     src.start();
   }
@@ -927,6 +1033,105 @@ export class ProceduralAudio {
     const j = 0.9 + Math.random() * 0.2;
     this.playSample('projectile-hit', 0.1);
     this.tone(360 * j, 0.025, 'triangle', 0.04);
+  }
+
+  /** Soft downward fizzle when a projectile expires without hitting (whiffed,
+   *  out of range, line-blocked). Throttled so a volley of misses reads as one. */
+  private projectileFizzle(): void {
+    const t = this.now();
+    this.projExpireTimes = this.projExpireTimes.filter((at) => t - at < 0.1);
+    if (this.projExpireTimes.length >= 3) return;
+    this.projExpireTimes.push(t);
+    const j = 0.9 + Math.random() * 0.2;
+    this.sweep(520 * j, 180 * j, 0.1, 'sine', 0.035);
+    this.noise(0.03, 0.02);
+  }
+
+  // ---------- persistent-zone ambiences ----------
+
+  /** A persistent ground zone (fire field, freezing field, wall) gets a spawn
+   *  whoomp distinct from its cast, plus a looping ambient bed for its lifetime
+   *  so a lingering hazard keeps reading. Bed count is capped; pan is fixed at
+   *  spawn. The whoomp always plays even when the bed is skipped/unavailable. */
+  private zoneSpawn(zid: number, spec: { radius: number; length: number; width: number; wall: boolean; duration: number }): void {
+    const size = Math.max(spec.radius, spec.length, 120);
+    const w = clampNum(size / 700, 0.2, 1);
+    // Spawn whoomp: a low body for a zone, a brighter shing for a wall.
+    if (spec.wall) {
+      this.sweep(900, 320, 0.16, 'triangle', 0.06 + w * 0.05, 'sfx', 0.16);
+      this.noise(0.05, 0.03 + w * 0.03);
+    } else {
+      this.thump(0.12 + w * 0.06, 0.05 + w * 0.08, 220 + (1 - w) * 220, 0.16 * w);
+      this.noise(0.06, 0.03 + w * 0.03);
+    }
+    this.startZoneBed(zid, spec.wall, w, spec.duration ?? 4);
+  }
+
+  private startZoneBed(zid: number, wall: boolean, w: number, duration: number): void {
+    if (this.zoneBeds.has(zid) || this.zoneBeds.size >= ZONE_BED_CAP) return;
+    const ctx = this.ctx;
+    if (!ctx) return; // headless / synth-floor only
+
+    // Looping filtered noise gives the bed its texture; a low oscillator gives it
+    // body. A wall reads steadier/higher; an area zone reads airier/lower.
+    const buffer = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * 0.5)), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      // Wrap-safe value so the half-second loop doesn't click at the seam.
+      const edge = Math.sin((i / data.length) * Math.PI);
+      data[i] = (i % 2 === 0 ? 1 : -1) * 0.5 * edge;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = wall ? 'bandpass' : 'lowpass';
+    filter.frequency.value = wall ? 1400 : 520;
+    filter.Q.value = wall ? 1.4 : 0.7;
+    const gain = ctx.createGain();
+    const target = this.volume((wall ? 0.018 : 0.026) + w * 0.02, 'sfx');
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.setTargetAtTime(Math.max(0.0001, target), ctx.currentTime, 0.3);
+
+    let osc: OscillatorNode | null = null;
+    if (!wall) {
+      osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = 70 + (1 - w) * 40;
+      const oscGain = ctx.createGain();
+      oscGain.gain.value = 0.4;
+      osc.connect(oscGain).connect(gain);
+      osc.start();
+    }
+    src.connect(filter).connect(gain);
+    this.route(gain); // honors the spawn-time pan
+
+    src.start();
+    // Backstop teardown in case the matching zone-expire never arrives.
+    const timer = setTimeout(() => this.stopZoneBed(zid), Math.max(500, duration * 1000 + 400));
+    this.zoneBeds.set(zid, { src, osc, gain, timer });
+  }
+
+  private stopZoneBed(zid: number): void {
+    const bed = this.zoneBeds.get(zid);
+    if (!bed) return;
+    this.zoneBeds.delete(zid);
+    if (bed.timer) clearTimeout(bed.timer);
+    const ctx = this.ctx;
+    if (ctx) bed.gain.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.25);
+    const stop = () => {
+      try { bed.src.stop(); } catch { /* already stopped */ }
+      try { bed.osc?.stop(); } catch { /* already stopped */ }
+      bed.src.disconnect();
+      bed.osc?.disconnect();
+      bed.gain.disconnect();
+    };
+    if (ctx) setTimeout(stop, 400);
+    else stop();
+  }
+
+  private stopAllZoneBeds(): void {
+    for (const zid of [...this.zoneBeds.keys()]) this.stopZoneBed(zid);
   }
 
   /** Soft airy whiff so a missed swing still reads. */

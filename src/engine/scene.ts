@@ -4,8 +4,8 @@ import type { Sim } from '../core/sim';
 import type { Unit } from '../core/unit';
 import { REG } from '../core/registry';
 import { buildTerrain, type TerrainInfo } from './terrain';
-import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, buildUnitRig, buildSelectionRing, mountHeroModel, recolorToPalette, type UnitRig } from './models';
-import { HeroAssetLoader, heroAssetEntry, creepCreatureUrl, ENABLED_HOLDOUT_MODELS, heroBaseId, holdoutSignatureUrl } from './assets';
+import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, attachSignatureItemWeapon, buildUnitRig, buildSelectionRing, mountHeroModel, recolorToPalette, type UnitRig } from './models';
+import { HeroAssetLoader, heroAssetEntry, creepCreatureUrl, ENABLED_HOLDOUT_MODELS, heroBaseId, holdoutSignatureUrl, itemWeaponGlbUrl } from './assets';
 import { animateRig, applyCinematicGesture, newAnimState, type AnimState } from './animator';
 import { loadVfxBeamRamp, loadVfxTextureAtlas, VfxManager } from './vfx';
 import type { CinematicView } from './cinematic';
@@ -65,9 +65,33 @@ interface CrowdImpostorBatch {
   count: number;
 }
 
+// Decorative, non-sim wandering animals that make the overworld feel alive
+// (ASSET_GAPS P2). They reuse on-disk creature GLBs, animate via their own
+// clip + a gentle wander, and never touch the simulation.
+interface AmbientCritter {
+  obj: THREE.Object3D;
+  mixer: THREE.AnimationMixer | null;
+  home: { x: number; y: number };   // sim-space anchor
+  pos: { x: number; y: number };    // sim-space position
+  target: { x: number; y: number }; // sim-space wander goal
+  speed: number;                    // sim units / sec
+  facing: number;
+  bob: number;                      // phase for a subtle vertical bob
+  wanderRadius: number;
+  repathAt: number;                 // scene-time to choose a new target
+}
+
 interface MapMarker {
   mesh: THREE.Mesh;
   material: THREE.MeshBasicMaterial;
+}
+
+interface QuestGiverMarker {
+  root: THREE.Group;
+  indicator: THREE.Mesh;             // floating beacon: bright when claimable
+  indicatorMat: THREE.MeshStandardMaterial;
+  x: number;                         // sim-space position (smoothed toward target)
+  y: number;
 }
 
 interface GroundItemView {
@@ -346,6 +370,8 @@ export class GameScene {
   private skyDome: THREE.Mesh;
   private weather: THREE.Points | null = null;
   private weatherVel: Float32Array | null = null;
+  private ambientCritters: AmbientCritter[] = [];
+  private ambientCritterGroup: THREE.Group | null = null;
   private views = new Map<number, UnitView>();
   private crowdImpostors = new Map<string, CrowdImpostorBatch>();
   private heroAssets = new HeroAssetLoader();
@@ -373,6 +399,8 @@ export class GameScene {
   private groundItemViews = new Map<number, GroundItemView>();
   private groundItemGroup = new THREE.Group();
   private mapMarkers: MapMarker[] = [];
+  private questGiverGroup = new THREE.Group();
+  private questGivers = new Map<string, QuestGiverMarker>();
   private dungeonRoomGroup: THREE.Group | null = null;
   private dungeonRoomFloorY: number | null = null;
 
@@ -484,6 +512,9 @@ export class GameScene {
 
     if (qualityCfg.weatherDensity > 0) this.buildWeather(region.biome, qualityCfg.weatherDensity);
 
+    // Ambient overworld life (skip on the cheapest tier alongside weather).
+    if (qualityCfg.weatherDensity > 0) this.buildAmbientCritters(region);
+
     this.vfx = new VfxManager((x, y) => this.visualGroundHeightAt(x, y), qualityCfg.transientVfxCap);
     this.scene.add(this.vfx.group);
     this.groundItemGroup.name = 'ground-item-drops';
@@ -494,6 +525,8 @@ export class GameScene {
     }
 
     this.createMapMarkers(region);
+    this.questGiverGroup.name = 'quest-givers';
+    this.scene.add(this.questGiverGroup);
 
     if (qualityCfg.postFx) this.setupComposer(qualityCfg);
     this.resize();
@@ -644,6 +677,116 @@ export class GameScene {
     pos.needsUpdate = true;
   }
 
+  /** Spawn a handful of decorative wandering animals in the open land around town
+   *  (ASSET_GAPS P2). They reuse on-disk creature GLBs, are never sim units, and
+   *  fall away silently if the assets aren't shipped. */
+  private buildAmbientCritters(region: RegionDef): void {
+    const group = new THREE.Group();
+    group.name = 'ambient-critters';
+    this.ambientCritterGroup = group;
+    this.scene.add(group);
+    const token = this.sceneToken;
+
+    const species = [
+      { url: '/assets/creeps/alpaca.glb', height: 1.3, speed: 30 },
+      { url: '/assets/creeps/fox.glb', height: 0.7, speed: 78 },
+      { url: '/assets/creeps/frog.glb', height: 0.42, speed: 40 }
+    ];
+    const perSpecies = 2;
+    const tx = region.town.pos.x;
+    const ty = region.town.pos.y;
+    const homeFor = (): { x: number; y: number } => {
+      const ang = Math.random() * Math.PI * 2;
+      const r = region.town.radius * (1.35 + Math.random() * 1.1);
+      return {
+        x: Math.max(500, Math.min(region.size - 500, tx + Math.cos(ang) * r)),
+        y: Math.max(500, Math.min(region.size - 500, ty + Math.sin(ang) * r))
+      };
+    };
+
+    for (const sp of species) {
+      void loadModelAsset(sp.url).then((asset) => {
+        if (!asset || !this.isLive() || token !== this.sceneToken) return;
+        for (let i = 0; i < perSpecies; i++) {
+          const model = cloneModel(asset.scene);
+          const box = new THREE.Box3().setFromObject(model);
+          const size = box.getSize(new THREE.Vector3());
+          const k = sp.height / (size.y || 1);
+          model.scale.setScalar(k);
+          model.position.y = -box.min.y * k; // seat feet at the container origin
+          model.traverse((o) => {
+            o.userData.sharedAsset = true; // shared cached geometry; dispose pass skips it
+            const m = o as THREE.Mesh;
+            if (m.isMesh) m.castShadow = true;
+          });
+          const container = new THREE.Object3D();
+          container.add(model);
+          group.add(container);
+
+          let mixer: THREE.AnimationMixer | null = null;
+          if (asset.animations.length) {
+            mixer = new THREE.AnimationMixer(model);
+            const clip = asset.animations.find((c) => /walk|run|move|idle/i.test(c.name)) ?? asset.animations[0];
+            mixer.clipAction(clip).play();
+          }
+          const home = homeFor();
+          this.ambientCritters.push({
+            obj: container,
+            mixer,
+            home,
+            pos: { ...home },
+            target: { ...home },
+            speed: sp.speed,
+            facing: Math.random() * Math.PI * 2,
+            bob: Math.random() * Math.PI * 2,
+            wanderRadius: region.town.radius * 0.9,
+            repathAt: 0
+          });
+        }
+      });
+    }
+  }
+
+  private updateAmbientCritters(dt: number): void {
+    if (!this.ambientCritters.length) return;
+    const moving = !this.reducedMotion;
+    for (const c of this.ambientCritters) {
+      if (moving) {
+        let dx = c.target.x - c.pos.x;
+        let dy = c.target.y - c.pos.y;
+        let d = Math.hypot(dx, dy);
+        if (d < 15 || this.time >= c.repathAt) {
+          const a = Math.random() * Math.PI * 2;
+          const r = c.wanderRadius * (0.25 + Math.random() * 0.75);
+          c.target = { x: c.home.x + Math.cos(a) * r, y: c.home.y + Math.sin(a) * r };
+          c.repathAt = this.time + 2 + Math.random() * 4;
+          dx = c.target.x - c.pos.x;
+          dy = c.target.y - c.pos.y;
+          d = Math.hypot(dx, dy) || 1;
+        }
+        const step = Math.min(d, c.speed * dt);
+        c.pos.x += (dx / d) * step;
+        c.pos.y += (dy / d) * step;
+        c.facing = Math.atan2(dy, dx);
+        c.bob += dt * 6;
+      }
+      const gy = this.terrain.heightAt(c.pos.x, c.pos.y);
+      const bob = moving ? Math.abs(Math.sin(c.bob)) * 0.05 : 0;
+      c.obj.position.set(c.pos.x / WORLD_SCALE, gy + bob, c.pos.y / WORLD_SCALE);
+      c.obj.rotation.y = Math.atan2(Math.cos(c.facing), Math.sin(c.facing));
+      c.mixer?.update(moving ? dt : 0);
+    }
+  }
+
+  private disposeAmbientCritters(): void {
+    for (const c of this.ambientCritters) c.mixer?.stopAllAction();
+    this.ambientCritters = [];
+    if (this.ambientCritterGroup) {
+      this.scene.remove(this.ambientCritterGroup);
+      this.ambientCritterGroup = null;
+    }
+  }
+
   resize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -678,6 +821,7 @@ export class GameScene {
     this.scene.remove(this.vfx.group);
     this.scene.remove(this.groundItemGroup);
     this.vfx.reset();
+    this.disposeAmbientCritters();
     this.disposeCrowdImpostors();
     if (this.weather) {
       this.scene.remove(this.weather);
@@ -960,6 +1104,7 @@ export class GameScene {
     this.updateCamera(followUnit, renderDt, sim, cinematicView);
     this.updateMapMarkers();
     if (!this.reducedMotion) this.terrain.update?.(this.time);
+    this.updateAmbientCritters(renderDt);
     this.skyDome.position.copy(this.camera.position);
     this.updateWeather(renderDt);
     this.renderer.info.reset();
@@ -1211,7 +1356,16 @@ export class GameScene {
     group.add(edge);
 
     const doorGeo = new THREE.RingGeometry(0.25, 0.42, 24);
-    const doorMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthTest: false, depthWrite: false });
+    const doorColor = room?.reward.kind === 'guardian'
+      ? 0xff7a3a
+      : room?.reward.kind === 'chest'
+        ? 0xade55c
+        : room?.reward.kind === 'shrine'
+          ? 0xb28cff
+          : room?.reward.kind === 'rest'
+            ? 0x8ec5ff
+            : 0xffffff;
+    const doorMat = new THREE.MeshBasicMaterial({ color: doorColor, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false });
     for (const c of template.connectors) {
       const door = new THREE.Mesh(doorGeo, doorMat);
       door.rotation.x = -Math.PI / 2;
@@ -1283,6 +1437,73 @@ export class GameScene {
     for (const gate of region.gates ?? []) add(gate.pos.x, gate.pos.y, 0.5, 0x7aff9a, 'ring');
     for (const gym of region.gyms ?? []) add(gym.pos.x, gym.pos.y, 0.58, 0xff9ad5, 'ring');
     for (const dungeon of region.dungeons ?? []) add(dungeon.pos.x, dungeon.pos.y, 0.6, 0xb28cff, 'ring');
+  }
+
+  private buildQuestGiverMarker(): QuestGiverMarker {
+    const root = new THREE.Group();
+    // A simple banner-post NPC: a body, a head, and a posted board.
+    const robe = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.26, 0.9, 8),
+      new THREE.MeshStandardMaterial({ color: 0x3d5a7a, roughness: 0.85 })
+    );
+    robe.position.y = 0.45;
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.14, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0xe8c79a, roughness: 0.7 })
+    );
+    head.position.y = 1.04;
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.04, 1.1, 6),
+      new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.9 })
+    );
+    post.position.set(0.34, 0.55, 0);
+    const board = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 0.32, 0.05),
+      new THREE.MeshStandardMaterial({ color: 0xb8895a, roughness: 0.8 })
+    );
+    board.position.set(0.34, 1.0, 0);
+    // Floating beacon above the head — bright/emissive when there's a reward to claim.
+    const indicatorMat = new THREE.MeshStandardMaterial({ color: 0xffd34d, emissive: 0xffb000, emissiveIntensity: 0.8, roughness: 0.4 });
+    const indicator = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), indicatorMat);
+    indicator.position.y = 1.55;
+    root.add(robe, head, post, board, indicator);
+    this.questGiverGroup.add(root);
+    return { root, indicator, indicatorMat, x: 0, y: 0 };
+  }
+
+  /** Place/move the walking quest-giver NPCs from the Game's per-frame view-model. */
+  syncQuestGivers(givers: readonly { id: string; name: string; x: number; y: number; hasClaimable: boolean; hasActive: boolean }[]): void {
+    const seen = new Set<string>();
+    for (const g of givers) {
+      seen.add(g.id);
+      let marker = this.questGivers.get(g.id);
+      if (!marker) {
+        marker = this.buildQuestGiverMarker();
+        marker.x = g.x;
+        marker.y = g.y;
+        this.questGivers.set(g.id, marker);
+      }
+      // Ease toward the target so a patrol step reads as a walk, not a teleport.
+      const k = this.reducedMotion ? 1 : 0.12;
+      marker.x += (g.x - marker.x) * k;
+      marker.y += (g.y - marker.y) * k;
+      const gy = this.visualGroundHeightAt(marker.x, marker.y);
+      const bob = this.reducedMotion ? 0 : Math.sin(this.time * 2.2 + marker.x * 0.01) * 0.04;
+      marker.root.position.set(marker.x / WORLD_SCALE, gy + bob, marker.y / WORLD_SCALE);
+      marker.root.visible = true;
+      // Face roughly along travel; cheap heading from the eased delta.
+      const dx = g.x - marker.x;
+      const dy = g.y - marker.y;
+      if (Math.abs(dx) + Math.abs(dy) > 1) marker.root.rotation.y = Math.atan2(dx, dy);
+      const reward = g.hasClaimable;
+      marker.indicator.visible = reward || g.hasActive;
+      marker.indicatorMat.emissiveIntensity = reward ? 0.6 + Math.abs(Math.sin(this.time * 4)) * 0.9 : 0.18;
+      marker.indicator.scale.setScalar(reward ? 1 : 0.6);
+      marker.indicator.rotation.y = this.time * (reward ? 2.4 : 0.8);
+    }
+    for (const [id, marker] of this.questGivers) {
+      if (!seen.has(id)) marker.root.visible = false;
+    }
   }
 
   /** Game layer forwards sim events here (it also consumes them for UI). */
@@ -1492,6 +1713,9 @@ export class GameScene {
     applyItemAppearances(rig, this.itemAppearancesFor(u));
     this.scene.add(rig.root);
     const token = this.sceneToken;
+    // Baseline signature weapon for the procedural rig; async mounts below re-apply
+    // it once their hand sockets resolve so it rides the authored bone.
+    this.applySignatureWeapon(rig, u, token);
 
     // Pluggable rig (Phase 5): prefer a dedicated hero GLB; otherwise try the
     // shared-base cohort path. If neither asset exists, the procedural rig stays.
@@ -1505,6 +1729,7 @@ export class GameScene {
           recolorToPalette(model, palette);
           mountHeroModel(rig, model, asset.animations);
           applyItemAppearances(rig, this.itemAppearancesFor(u));
+          this.applySignatureWeapon(rig, u, token);
         }
       });
     };
@@ -1532,11 +1757,14 @@ export class GameScene {
           // WS-B: re-apply worn items now that sockets resolved, so the weapon hangs
           // off the authored hand bone instead of the hidden procedural one.
           applyItemAppearances(rig, this.itemAppearancesFor(u));
+          // Holdout heroes skip the weapon-load branch, so resolve their signature here.
+          if (isHoldoutReplacement) this.applySignatureWeapon(rig, u, token);
           if (!isHoldoutReplacement) {
             void this.heroAssets.loadHeroWeapon(assetEntry).then((weapon) => {
               if (weapon && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
                 attachHeroWeaponModel(rig, cloneModel(weapon.scene));
                 applyItemAppearances(rig, this.itemAppearancesFor(u));
+                this.applySignatureWeapon(rig, u, token);
               }
             });
           }
@@ -1657,6 +1885,7 @@ export class GameScene {
 
     if (this.itemVisualChanged(u, view)) {
       applyItemAppearances(rig, this.itemAppearancesFor(u));
+      this.applySignatureWeapon(rig, u, this.sceneToken);
       if (view.materialMode === 'unique') this.ensureUniqueMaterials(view);
     }
 
@@ -1670,7 +1899,7 @@ export class GameScene {
     rig.root.position.y = this.visualGroundHeightAt(
       rig.root.position.x * WORLD_SCALE,
       rig.root.position.z * WORLD_SCALE
-    );
+    ) + (u.renderHeight ?? 0) / WORLD_SCALE;
 
     // facing: sim dir (cos f, sin f) on (x,z); rig forward is +z
     const targetRotY = Math.atan2(Math.cos(u.facing), Math.sin(u.facing));
@@ -1858,6 +2087,33 @@ export class GameScene {
     return u.items
       .map((it) => (it ? REG.items.get(it.defId)?.appearance : undefined))
       .filter((app): app is ItemAppearanceSpec => !!app);
+  }
+
+  /** The signature held-weapon GLB URL for the unit's first equipped marquee item,
+   *  or null if it carries none (ASSET_GAPS P3). */
+  private signatureWeaponUrlFor(u: Unit): string | null {
+    for (const it of u.items) {
+      if (!it) continue;
+      const url = itemWeaponGlbUrl(it.defId);
+      if (url) return url;
+    }
+    return null;
+  }
+
+  /** Override the hand weapon with an authored signature artifact GLB when equipped,
+   *  else leave the procedural item/default weapon as-is. Re-resolves on equip changes. */
+  private applySignatureWeapon(rig: UnitRig, u: Unit, token: number): void {
+    const url = this.signatureWeaponUrlFor(u);
+    if (!url) {
+      attachSignatureItemWeapon(rig, null);
+      return;
+    }
+    void loadModelAsset(url).then((asset) => {
+      if (!asset || !this.isLive() || token !== this.sceneToken || this.views.get(u.uid)?.rig !== rig) return;
+      // The artifact may have been unequipped while the GLB loaded.
+      if (this.signatureWeaponUrlFor(u) !== url) return;
+      attachSignatureItemWeapon(rig, cloneModel(asset.scene));
+    });
   }
 
   private attackVisualsFor(u: Unit): AttackVisualSpec[] {

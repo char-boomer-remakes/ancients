@@ -239,7 +239,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .stamina-chip,
 .explore-chip,
-.resin-chip {
+.resin-chip,
+.loco-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -269,6 +270,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 .explore-chip { border-color: rgba(138, 223, 122, 0.25); background: rgba(138, 223, 122, 0.08); color: #c9ffc3; }
 .resin-chip { border-color: rgba(216, 178, 74, 0.25); background: rgba(216, 178, 74, 0.08); color: #ffe6a3; }
+.loco-chip { border-color: rgba(103, 215, 255, 0.3); background: rgba(103, 215, 255, 0.1); color: #bff0ff; font-weight: 700; letter-spacing: 0.06em; }
+.loco-chip.prompt { animation: locoPulse 1.4s ease-in-out infinite; }
+@keyframes locoPulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 #top-bar .keys-hint { margin-left: auto; color: var(--dim); font-size: 11px; }
 .top-btn {
   padding: 3px 8px;
@@ -737,6 +741,44 @@ button:disabled { opacity: 0.45; cursor: default; }
 #live-gym-bar .lg-dots { letter-spacing: 2px; color: #67d7ff; }
 #live-gym-bar .lg-dots.foe { color: #e0a05a; }
 
+/* ---------- combat readability (C4): cast bars, threat, focus, ult prompt ---------- */
+#combat-readout {
+  position: absolute;
+  bottom: 132px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  font-size: 12px;
+  z-index: 6;
+}
+#combat-readout .readout-casts { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+#combat-readout .cast-bar {
+  width: 280px;
+  background: rgba(10, 13, 20, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  padding: 3px 9px;
+}
+#combat-readout .cast-bar.enemy { border-color: rgba(224, 90, 90, 0.6); }
+#combat-readout .cast-bar.ally { border-color: rgba(103, 215, 255, 0.45); }
+#combat-readout .cast-bar.ult { border-color: #ffd24a; box-shadow: 0 0 12px rgba(255, 210, 74, 0.35); }
+#combat-readout .cast-name { display: block; color: #e9f3ff; font-weight: 600; margin-bottom: 2px; }
+#combat-readout .cast-bar i { display: block; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+#combat-readout .cast-bar em { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ffd27a, #ff8a5a); }
+#combat-readout .cast-bar.enemy em { background: linear-gradient(90deg, #ff9a68, #e05a5a); }
+#combat-readout .cast-bar.ally em { background: linear-gradient(90deg, #8fd8ff, #4aa8ff); }
+#combat-readout .readout-status { display: flex; flex-direction: column; align-items: center; gap: 2px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
+#combat-readout .threat-line { color: #ffc6c6; }
+#combat-readout .threat-line.taunted { color: #ffe9a8; }
+#combat-readout .threat-line b { color: #ff8a8a; }
+#combat-readout .threat-line span, #combat-readout .focus-line span { color: #fff; font-weight: 700; }
+#combat-readout .focus-line { color: #bff0ff; }
+#combat-readout .ult-line { color: #ffe9a8; font-weight: 600; }
+
 /* ---------- gambit editor ---------- */
 
 .gambit-editor .ge-presets { margin-bottom: 10px; font-size: 12px; color: #9aa3b8; }
@@ -965,6 +1007,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 .jr-main p, .codex-card p, .codex-note p { color: var(--dim); margin-top: 3px; font-size: 12px; line-height: 1.35; }
 .jr-main .jr-flavor { font-style: italic; opacity: 0.85; }
 .jr-main span { color: #9db8e8; font-size: 11px; }
+.journal-row > [data-claim-quest], .journal-row > .jr-choices { grid-column: 2; }
+.jr-choices { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.jr-choices .btn { text-align: left; }
 .codex-grid {
   display: grid;
   grid-template-columns: 1.2fr 1fr 1fr;

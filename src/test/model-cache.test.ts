@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, buildUnitRig, heroProportions, modelGeometryCacheSize, mountHeroModel, recolorToPalette } from '../engine/models';
-import { ENABLED_HERO_MODELS, ENABLED_HERO_BASES, ENABLED_HOLDOUT_MODELS, ENABLED_HOLDOUT_SIGNATURES, HERO_BASE, creepCreatureUrl, heroAssetEntry, heroBaseId, heroBaseUrl, holdoutReplacementUrl, holdoutSignatureUrl, PHASE5_STARTER_ASSETS } from '../engine/assets';
+import { applyAuthoredSilhouette, applyHeroLikeness, applyItemAppearances, attachHeroWeaponModel, attachHoldoutSignatureModel, attachSignatureItemWeapon, buildUnitRig, heroProportions, modelGeometryCacheSize, mountHeroModel, recolorToPalette } from '../engine/models';
+import { ENABLED_HERO_MODELS, ENABLED_HERO_BASES, ENABLED_HOLDOUT_MODELS, ENABLED_HOLDOUT_SIGNATURES, HERO_BASE, creepCreatureUrl, heroAssetEntry, heroBaseId, heroBaseUrl, holdoutReplacementUrl, holdoutSignatureUrl, itemWeaponGlbUrl, PHASE5_STARTER_ASSETS } from '../engine/assets';
 import { ALL_HEROES } from '../data/index';
 
 /** A stand-in mounted base: a 2×6×2 box the loader would normally fit + seat. */
@@ -278,6 +278,40 @@ describe('shared hero bases (WS-A0)', () => {
     // Bear/treant hero bases resolve to the generated files.
     expect(heroBaseUrl(heroBaseId('ursa'))).toBe('/assets/creeps/bear.glb');
     expect(heroBaseUrl(heroBaseId('treant-protector'))).toBe('/assets/creeps/treant.glb');
+  });
+
+  it('ships the generated P3 signature item weapons and wires them to marquee artifacts', () => {
+    // Each generated signature weapon exists on disk with real bytes.
+    for (const id of ['daedalus', 'radiance', 'battlefury', 'divine-rapier']) {
+      const file = path.join(process.cwd(), 'public', 'assets', 'weapons', 'items', `${id}.glb`);
+      expect(existsSync(file), `${id} signature weapon file`).toBe(true);
+      expect(statSync(file).size, `${id} signature weapon size`).toBeGreaterThan(0);
+      expect(itemWeaponGlbUrl(id)).toBe(`/assets/weapons/items/${id}.glb`);
+    }
+    // Items without a signature GLB keep the procedural/default hand weapon.
+    expect(itemWeaponGlbUrl('tango')).toBeNull();
+    expect(itemWeaponGlbUrl(undefined)).toBeNull();
+  });
+
+  it('mounts a signature item weapon over the default and restores it on removal', () => {
+    const rig = buildUnitRig({ build: 'biped', scale: 1 }, ['#cccccc', '#444444', '#ffffff']);
+    const defaultWeapon = new THREE.Object3D();
+    attachHeroWeaponModel(rig, defaultWeapon);
+    expect(rig.weapon).toBe(defaultWeapon);
+
+    const signature = new THREE.Object3D();
+    attachSignatureItemWeapon(rig, signature);
+    expect(rig.weapon).toBe(signature);
+    expect(signature.userData.signatureItemWeapon).toBe(true);
+    expect(rig.defaultWeapon).toBe(defaultWeapon); // default preserved for restore
+
+    // Removing the signature falls back to the hero's default weapon.
+    attachSignatureItemWeapon(rig, null);
+    expect(rig.weapon).toBe(defaultWeapon);
+
+    // A null call with no signature mounted must not disturb the current weapon.
+    attachSignatureItemWeapon(rig, null);
+    expect(rig.weapon).toBe(defaultWeapon);
   });
 
   it('recolors a cloned base to a palette without sharing tint across clones', () => {

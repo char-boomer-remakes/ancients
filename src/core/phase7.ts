@@ -23,7 +23,9 @@ export function normalizeQuestSaves(value: unknown): Record<string, QuestSave> {
       status,
       progress,
       completions: typeof rec.completions === 'number' && rec.completions > 0 ? Math.floor(rec.completions) : 0,
-      ...(typeof rec.availableAt === 'number' ? { availableAt: rec.availableAt } : {})
+      ...(typeof rec.availableAt === 'number' ? { availableAt: rec.availableAt } : {}),
+      ...(typeof rec.expiresAt === 'number' ? { expiresAt: rec.expiresAt } : {}),
+      ...(typeof rec.choice === 'string' ? { choice: rec.choice } : {})
     };
   }
   return out;

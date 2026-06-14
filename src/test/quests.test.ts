@@ -5,16 +5,18 @@ import { freshEchoProgress } from '../core/echo';
 import { xpForLevel } from '../core/stats';
 import {
   advance,
+  chosenBranch,
   claim,
   defaultQuestSave,
   isComplete,
   matchesObjective,
   prereqMet,
+  questGiverPos,
   refreshAvailability,
   type QuestContext
 } from '../core/quests';
 import { Game, newGameSave } from '../systems/game';
-import type { GameSave, QuestDef } from '../core/types';
+import type { GameSave, QuestDef, QuestGiverDef } from '../core/types';
 
 beforeAll(() => registerAllContent());
 
@@ -129,6 +131,93 @@ describe('quest core logic (pure)', () => {
     expect(armed.status).toBe('active');
     expect(armed.progress[0]).toBe(0);
     expect(armed.completions).toBe(1);
+  });
+});
+
+// ---------- timed quests (windowSec) ----------
+
+const TIMED: QuestDef = {
+  id: 'test-timed',
+  kind: 'recurring',
+  name: 'Timed Bounty',
+  summary: 'race the clock',
+  objectives: [{ kind: 'kill-creeps', count: 3, text: 'kill creeps' }],
+  rewards: [{ kind: 'gold', amount: 100 }],
+  windowSec: 60,
+  repeatable: true
+};
+
+describe('timed quests (windowSec)', () => {
+  it('opens a deadline when it goes active', () => {
+    const s = refreshAvailability(TIMED, defaultQuestSave(TIMED), ctx({ playtimeSec: 10 }));
+    expect(s.status).toBe('active');
+    expect(s.expiresAt).toBe(70);
+  });
+
+  it('resets progress and re-arms the window when the deadline lapses', () => {
+    let s = refreshAvailability(TIMED, defaultQuestSave(TIMED), ctx({ playtimeSec: 0 }));
+    s = advance(TIMED, s, { kind: 'kill-creeps', amount: 2 }).save;
+    expect(s.progress[0]).toBe(2);
+    // Before the deadline: progress holds.
+    s = refreshAvailability(TIMED, s, ctx({ playtimeSec: 59 }));
+    expect(s.status).toBe('active');
+    expect(s.progress[0]).toBe(2);
+    // At/after the deadline: it resets and opens a fresh window.
+    s = refreshAvailability(TIMED, s, ctx({ playtimeSec: 60 }));
+    expect(s.status).toBe('active');
+    expect(s.progress[0]).toBe(0);
+    expect(s.expiresAt).toBe(120);
+  });
+
+  it('locks in a completed run even past the deadline (the reward is earned)', () => {
+    let s = refreshAvailability(TIMED, defaultQuestSave(TIMED), ctx({ playtimeSec: 0 }));
+    s = advance(TIMED, s, { kind: 'kill-creeps', amount: 3 }).save;
+    expect(s.status).toBe('complete');
+    expect(s.expiresAt).toBeUndefined(); // window dropped on completion
+    const r = refreshAvailability(TIMED, s, ctx({ playtimeSec: 10_000 }));
+    expect(r.status).toBe('complete');
+  });
+});
+
+// ---------- branching choice-quests ----------
+
+const FORK: QuestDef = {
+  id: 'test-fork',
+  kind: 'event',
+  name: 'A Choice',
+  summary: 'pick a path',
+  objectives: [{ kind: 'reach-region', count: 1, text: 'arrive' }],
+  rewards: [{ kind: 'gold', amount: 100 }],
+  choices: [
+    { id: 'left', label: 'Go left', rewards: [{ kind: 'essence', amount: 10 }], next: 'test-left' },
+    { id: 'right', label: 'Go right', rewards: [{ kind: 'essence', amount: 20 }], next: 'test-right' }
+  ]
+};
+
+describe('branching choice-quests', () => {
+  it('chosenBranch resolves by id and defaults to the first branch', () => {
+    expect(chosenBranch(FORK, 'right')?.id).toBe('right');
+    expect(chosenBranch(FORK, 'nope')?.id).toBe('left'); // unknown -> first
+    expect(chosenBranch(FORK, undefined)?.id).toBe('left');
+    expect(chosenBranch(RECURRING)).toBeUndefined(); // no choices
+  });
+
+  it('records the chosen branch on claim', () => {
+    let s = refreshAvailability(FORK, defaultQuestSave(FORK), ctx());
+    s = advance(FORK, s, { kind: 'reach-region', amount: 1 }).save;
+    expect(s.status).toBe('complete');
+    const r = claim(FORK, s, ctx(), 'right');
+    expect(r.claimed).toBe(true);
+    expect(r.save.status).toBe('claimed');
+    expect(r.save.choice).toBe('right');
+  });
+
+  it('a prereq.choice gate only opens for the branch that was taken', () => {
+    const successor: QuestDef = { ...EVENT, id: 'test-left', prereq: { choice: { quest: 'test-fork', choiceId: 'left' } } };
+    // Took the right branch -> the left successor stays locked.
+    expect(prereqMet(successor, ctx({ questChoices: new Map([['test-fork', 'right']]) }))).toBe(false);
+    // Took the left branch -> it opens.
+    expect(prereqMet(successor, ctx({ questChoices: new Map([['test-fork', 'left']]) }))).toBe(true);
   });
 });
 
@@ -330,5 +419,153 @@ describe('quests wired into Game (headless)', () => {
     expect(migrated).not.toBeNull();
     expect(migrated!.version).toBe(7);
     expect(migrated!.quests).toEqual({});
+  });
+
+  it('a timed, tier-scoped bounty counts only ancient kills and carries a deadline', () => {
+    const game = Game.headless(fullSave()); // all badges -> prereq (4 badges) met
+    game.refreshQuests();
+    const id = 'bounty-ancient-reckoning';
+    // The ancient filter ignores lesser kills, and the active run shows a window.
+    game.advanceQuests({ kind: 'kill-creeps', amount: 5, tier: 'small', regionId: game.region.id });
+    let row = game.questBoard().find((q) => q.id === id);
+    expect(row?.objectives[0].have).toBe(0);
+    expect(row?.expiresIn).toBeGreaterThan(0);
+    // Ancient kills count toward it.
+    game.advanceQuests({ kind: 'kill-creeps', amount: 3, tier: 'ancient', regionId: game.region.id });
+    row = game.questBoard().find((q) => q.id === id);
+    expect(row?.claimable).toBe(true);
+    const goldBefore = game.gold;
+    const lateBefore = game.lootMarks.late;
+    expect(game.claimQuest(id)).toBe(true);
+    expect(game.gold).toBeGreaterThan(goldBefore);
+    expect(game.lootMarks.late).toBe(lateBefore + 1);
+  });
+
+  it('the second spine unlocks after the Mad Moon and chains forward', () => {
+    const save = fullSave();
+    save.quests = { 'chapter-mad-moon': { status: 'claimed', progress: [1], completions: 1 } };
+    const game = Game.headless(save);
+    expect(game.questBoard().some((q) => q.id === 'chapter-outworld-cracks')).toBe(true);
+    game.advanceQuests({ kind: 'clear-raid', amount: 2 });
+    expect(game.claimQuest('chapter-outworld-cracks')).toBe(true);
+    expect(game.questBoard().some((q) => q.id === 'chapter-outworld-renegade')).toBe(true);
+  });
+
+  it('a fork takes exactly one branch: its reward lands and only its epilogue opens', () => {
+    const save = fullSave();
+    save.quests = {
+      'chapter-mad-moon': { status: 'claimed', progress: [1], completions: 1 },
+      'fork-zets-question': { status: 'complete', progress: [1], completions: 0 }
+    };
+    const game = Game.headless(save);
+    expect(game.claimQuest('fork-zets-question', 'break')).toBe(true);
+    // Branch reward + title granted.
+    expect(game.inventoryStash.some((it) => it.id === 'divine-rapier')).toBe(true);
+    expect(game.questTitles().some((t) => t.id === 'loop-breaker')).toBe(true);
+    // Only the chosen branch's epilogue unlocks.
+    const ids = game.questBoard().map((q) => q.id);
+    expect(ids).toContain('epilogue-break');
+    expect(ids).not.toContain('epilogue-reunite');
+    expect(ids).not.toContain('epilogue-eternal');
+    // The fork is terminal-claimed and remembers the branch.
+    expect(game.quests['fork-zets-question'].status).toBe('claimed');
+    expect(game.quests['fork-zets-question'].choice).toBe('break');
+  });
+
+  it('a fork choice survives a save round-trip', () => {
+    const save = fullSave();
+    save.quests = {
+      'chapter-mad-moon': { status: 'claimed', progress: [1], completions: 1 },
+      'fork-zets-question': { status: 'complete', progress: [1], completions: 0 }
+    };
+    const game = Game.headless(save);
+    expect(game.claimQuest('fork-zets-question', 'eternal')).toBe(true);
+    const reload = Game.headless(game.buildSave());
+    expect(reload.quests['fork-zets-question'].choice).toBe('eternal');
+    const ids = reload.questBoard().map((q) => q.id);
+    expect(ids).toContain('epilogue-eternal');
+    expect(ids).not.toContain('epilogue-break');
+  });
+});
+
+// ---------- walking quest givers (QUEST.md §3) ----------
+
+describe('quest givers (pure patrol position)', () => {
+  const triangle: QuestGiverDef = {
+    id: 'g-test',
+    name: 'Test Keeper',
+    regionId: 'tranquil-vale',
+    board: 'Test Board',
+    home: { x: 1000, y: 1000 },
+    patrol: [{ x: 2000, y: 1000 }, { x: 1000, y: 2000 }],
+    loopSec: 60
+  };
+
+  it('a giver with no patrol stands at home', () => {
+    const stationary: QuestGiverDef = { id: 'g', name: 'n', regionId: 'r', board: 'b', home: { x: 50, y: 70 } };
+    expect(questGiverPos(stationary, 0)).toEqual({ x: 50, y: 70 });
+    expect(questGiverPos(stationary, 12345)).toEqual({ x: 50, y: 70 });
+  });
+
+  it('is deterministic, loops with period loopSec, and returns home at the loop seam', () => {
+    expect(questGiverPos(triangle, 0)).toEqual(triangle.home);
+    // Same phase one full loop later.
+    expect(questGiverPos(triangle, 60)).toEqual(questGiverPos(triangle, 0));
+    expect(questGiverPos(triangle, 73)).toEqual(questGiverPos(triangle, 13));
+    // Negative time wraps the same way (total function, no throw).
+    expect(questGiverPos(triangle, -47)).toEqual(questGiverPos(triangle, 13));
+  });
+
+  it('stays on the patrol polygon (never wanders past its waypoints)', () => {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let t = 0; t < 60; t += 0.5) {
+      const p = questGiverPos(triangle, t);
+      xs.push(p.x);
+      ys.push(p.y);
+    }
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(1000 - 1e-6);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(2000 + 1e-6);
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(1000 - 1e-6);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(2000 + 1e-6);
+  });
+});
+
+describe('quest givers wired into Game (headless)', () => {
+  it('registers a giver per region plus the hub givers', () => {
+    const givers = [...REG.questGivers.values()];
+    // one keeper per region + 3 hub givers (Binder courier, chapter herald, Tower warden).
+    expect(givers.length).toBe(REG.regions.size + 3);
+    expect(REG.questGivers.has('giver-tranquil-vale')).toBe(true);
+    expect(REG.questGivers.has('giver-binder-courier')).toBe(true);
+    expect(REG.questGivers.has('giver-moonmender-herald')).toBe(true);
+    expect(REG.questGivers.has('giver-tower-warden')).toBe(true);
+  });
+
+  it('giverQuests returns only the quests posted under that giver board', () => {
+    const game = Game.headless(newGameSave('juggernaut'));
+    game.refreshQuests();
+    // The chapter herald posts the Mending-the-Moon spine; First Light is live.
+    const heraldBoard = game.giverQuests('giver-moonmender-herald');
+    expect(heraldBoard.length).toBeGreaterThan(0);
+    expect(heraldBoard.every((q) => q.kind === 'event')).toBe(true);
+    expect(heraldBoard.some((q) => q.id === 'chapter-first-light')).toBe(true);
+    // The Binder's courier posts the region-agnostic recurring bounties only.
+    const courierBoard = game.giverQuests('giver-binder-courier');
+    expect(courierBoard.some((q) => q.id === 'bounty-cull-wilds')).toBe(true);
+    expect(courierBoard.every((q) => q.kind === 'recurring')).toBe(true);
+  });
+
+  it('exposes a per-frame giver view-model for the current region and flags claimable', () => {
+    const game = Game.headless(newGameSave('juggernaut'));
+    game.refreshQuests();
+    const views = game.questGiverViews();
+    // Only the Vale's givers (region keeper + 2 hubs) show in the Vale.
+    expect(views.length).toBe(3);
+    expect(views.every((v) => Number.isFinite(v.x) && Number.isFinite(v.y))).toBe(true);
+    // Drive First Light to completion: its herald should now flag a claimable.
+    game.advanceQuests({ kind: 'recruit-heroes', amount: 1 });
+    const herald = game.questGiverViews().find((v) => v.id === 'giver-moonmender-herald');
+    expect(herald?.hasClaimable).toBe(true);
   });
 });

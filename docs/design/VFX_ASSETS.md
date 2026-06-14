@@ -446,8 +446,17 @@ it). The sampled-audio enhancement layer now ships:
   `SampledAudioBank` prefetches and rotates decoded variants per SFX key, with
   the generated WAV for that key always in the same pool as the local fallback.
   `frost`, `fire`, and `roar` have no curated cryo/flame/beast source in the
-  subset, so each ships a second generated rotation variant (`cast-*-2.wav`)
-  rather than always replaying the one WAV.
+  subset, so each ships two extra generated rotation variants (`cast-*-2.wav`,
+  `cast-*-3.wav`) rather than always replaying the one WAV — a three-take
+  rotation matching the curated archetypes.
+- **Positional + ambience polish pass (latest).** Live cues are now panned and
+  distance-attenuated relative to the followed hero (`setListener` +
+  `handleEvent(ev, at)`, position resolved by `eventWorldPos` in `game.ts`,
+  folded into a `StereoPannerNode`); persistent zones (fire/freeze fields, walls)
+  get a spawn whoomp and a capped, looping ambient bed torn down on
+  `zone-expire`; `projectile-expire` gets a throttled fizzle; and the synth drone
+  returns as a tuned, ducking **music floor** on low tier / before a bed decodes
+  so a low-end run isn't SFX-only. All paths stay headless-safe (audio test 20/20c).
 - **Signature `sound` reassignment (already in data).** Hero kits already carry
   explicit signatures — `roar` (STR ults, e.g. ursa-enrage/sven), `void` (portal
   kits, e.g. enigma-black-hole), `frost` (cryo, e.g. lich) — with `soundForAbility`

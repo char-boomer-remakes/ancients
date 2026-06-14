@@ -59,7 +59,7 @@ export const CAST_SFX_BY_SOUND: Record<SoundArchetype, SfxKey> = {
 
 const hasFetch = typeof fetch !== 'undefined';
 
-function musicUrl(bed: MusicBed): string {
+export function musicAssetUrl(bed: MusicBed): string {
   return `${SAMPLED_AUDIO_BASE}/music/${bed}${GENERATED_AUDIO_EXT}`;
 }
 
@@ -82,18 +82,18 @@ const SFX_VARIANTS: Record<SfxKey, readonly string[]> = {
   'cast-blade': [kenneySfxUrl('blade-draw-1'), kenneySfxUrl('whoosh-blade-1'), generatedSfxUrl('cast-blade')],
   'cast-bow': [kenneySfxUrl('whoosh-blade-2'), kenneySfxUrl('projectile-hit-1'), generatedSfxUrl('cast-bow')],
   'cast-impact': [kenneySfxUrl('impact-heavy-punch-1'), kenneySfxUrl('impact-heavy-punch-2'), generatedSfxUrl('cast-impact')],
-  'cast-frost': [generatedSfxUrl('cast-frost'), variantUrl('cast-frost-2')],
-  'cast-fire': [generatedSfxUrl('cast-fire'), variantUrl('cast-fire-2')],
+  'cast-frost': [generatedSfxUrl('cast-frost'), variantUrl('cast-frost-2'), variantUrl('cast-frost-3')],
+  'cast-fire': [generatedSfxUrl('cast-fire'), variantUrl('cast-fire-2'), variantUrl('cast-fire-3')],
   'cast-storm': [kenneySfxUrl('storm-zap-up-1'), kenneySfxUrl('storm-phaser-up-1'), generatedSfxUrl('cast-storm')],
   'cast-void': [kenneySfxUrl('void-phase-1'), kenneySfxUrl('void-phase-2'), generatedSfxUrl('cast-void')],
   'cast-heal': [kenneySfxUrl('heal-power-1'), generatedSfxUrl('cast-heal')],
   'cast-summon': [kenneySfxUrl('summon-power-1'), generatedSfxUrl('cast-summon')],
   'cast-item': [kenneySfxUrl('item-tone-1'), generatedSfxUrl('cast-item')],
-  'cast-roar': [generatedSfxUrl('cast-roar'), variantUrl('cast-roar-2')],
+  'cast-roar': [generatedSfxUrl('cast-roar'), variantUrl('cast-roar-2'), variantUrl('cast-roar-3')],
   'cast-lightning': [kenneySfxUrl('lightning-zap-1'), kenneySfxUrl('lightning-zap-2'), generatedSfxUrl('cast-lightning')]
 };
 
-function sfxUrls(key: SfxKey): readonly string[] {
+export function sfxAssetUrls(key: SfxKey): readonly string[] {
   return SFX_VARIANTS[key] ?? [generatedSfxUrl(key)];
 }
 
@@ -111,13 +111,13 @@ export class SampledAudioBank {
 
   /** Kick off decoding the common SFX + a biome bed; safe to call repeatedly. */
   prefetch(bed?: MusicBed): void {
-    for (const key of SFX_KEYS) for (const url of sfxUrls(key)) void this.load(url);
-    if (bed) void this.load(musicUrl(bed));
+    for (const key of SFX_KEYS) for (const url of sfxAssetUrls(key)) void this.load(url);
+    if (bed) void this.load(musicAssetUrl(bed));
   }
 
   /** Decoded SFX buffer, or null until it resolves / on any failure. */
   sfx(key: SfxKey): AudioBuffer | null {
-    const urls = sfxUrls(key);
+    const urls = sfxAssetUrls(key);
     for (const url of urls) void this.load(url);
     const ready = urls.filter((url) => this.buffers.get(url));
     if (!ready.length) return null;
@@ -130,7 +130,7 @@ export class SampledAudioBank {
   /** Decoded ambient bed for a biome, or null until it resolves / on any failure. */
   music(bed: string): AudioBuffer | null {
     if (!(MUSIC_BEDS as readonly string[]).includes(bed)) return null;
-    const url = musicUrl(bed as MusicBed);
+    const url = musicAssetUrl(bed as MusicBed);
     void this.load(url);
     return this.buffers.get(url) ?? null;
   }

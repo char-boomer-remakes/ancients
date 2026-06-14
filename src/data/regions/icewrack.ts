@@ -50,6 +50,23 @@ export const ICEWRACK: RegionDef = {
   gyms: [{ gymId: 'frost-gym', pos: { x: 6500, y: 3200 }, radius: 650 }],
   dungeons: [{ id: 'iw-frost-hollow-portal', dungeonId: 'frost-hollow', name: 'Frost Hollow Portal', pos: { x: 5000, y: 9100 }, radius: 520 }],
   raids: ['forsaken-queen'],
+  // Night frost (GAMEPLAY_OVERHAUL §3.7): once the sun drops, Icewrack's cold deepens and
+  // bathes everything outdoors in ambient Cryo through the field path — bring Pyro to Melt.
+  weather: { element: 'cryo', interval: 6, night: true, note: 'Night Frost: ambient cryo settles over the field after dark.' },
+  // Verticality (GAMEPLAY_OVERHAUL §3.3, G3): the blue-white cliffs climb in three bands.
+  // Climb the NE escarpment to the high ledge, then glide the ravine back down; a frozen
+  // lake in the SW is a deep swim zone that punishes an empty stamina bar with a washback.
+  elevation: { tiers: [0, 260, 520] },
+  climbPoints: [
+    { id: 'iw-climb-escarpment', pos: { x: 9000, y: 3000 }, fromTier: 0, toTier: 1 },
+    { id: 'iw-climb-highledge', pos: { x: 9620, y: 2440 }, fromTier: 1, toTier: 2 }
+  ],
+  glidePoints: [
+    { id: 'iw-glide-ravine', pos: { x: 9780, y: 2260 }, fromTier: 2 }
+  ],
+  waterZones: [
+    { id: 'iw-frozen-lake', poly: [{ x: 2800, y: 8000 }, { x: 4300, y: 8000 }, { x: 4300, y: 9300 }, { x: 2800, y: 9300 }], deep: true }
+  ],
   props: { treeDensity: 0.25, rockDensity: 0.75 },
   gateHint: 'The Frost Gym stands north of Frostford.'
 };

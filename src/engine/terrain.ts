@@ -455,6 +455,243 @@ function swapTownBuildings(
   });
 }
 
+// ------------------------------------------------------------------
+// Town set dressing (ASSET_GAPS P2): props + ambient presence that make a
+// town read as inhabited. Authored GLBs already on disk (well/cart/barrel/
+// market_stand) are placed with a procedural fallback so the floor still
+// renders with public/assets empty; lamp posts, a quest/notice board, crates,
+// a banner, and a few villager standees are built from primitives.
+// ------------------------------------------------------------------
+
+/** A warm-lit lamp post: pole + arm + emissive lantern (named for day/night dimming). */
+function buildLampPost(): THREE.Group {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x4a3a26, roughness: 0.85, metalness: 0.05, flatShading: true });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.11, 2.3, 6), wood);
+  pole.position.y = 1.15;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.08), wood);
+  arm.position.set(0.22, 2.16, 0);
+  const lantern = new THREE.Mesh(
+    new THREE.BoxGeometry(0.26, 0.36, 0.26),
+    new THREE.MeshStandardMaterial({ color: 0xffe6a8, emissive: 0xffc55a, emissiveIntensity: 1.5, roughness: 0.4, metalness: 0.08 })
+  );
+  lantern.position.set(0.42, 1.99, 0);
+  lantern.name = 'lamp-glow';
+  g.add(pole, arm, lantern);
+  return g;
+}
+
+/** A simple robed townsperson built from primitives — static ambient presence. */
+function buildVillager(palette: { robe: number; trim: number; skin: number }): THREE.Group {
+  const g = new THREE.Group();
+  const robeMat = new THREE.MeshStandardMaterial({ color: palette.robe, roughness: 0.92, metalness: 0.02, flatShading: true });
+  const trimMat = new THREE.MeshStandardMaterial({ color: palette.trim, roughness: 0.82, metalness: 0.04, flatShading: true });
+  const skinMat = new THREE.MeshStandardMaterial({ color: palette.skin, roughness: 0.7, metalness: 0.02, flatShading: true });
+  const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.37, 0.8, 7), robeMat);
+  robe.position.y = 0.5;
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.26, 0.34, 7), trimMat);
+  torso.position.y = 0.97;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.155, 8, 6), skinMat);
+  head.position.y = 1.26;
+  const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.42, 5), robeMat);
+  armL.position.set(0.26, 0.92, 0);
+  armL.rotation.z = 0.3;
+  const armR = armL.clone();
+  armR.position.x = -0.26;
+  armR.rotation.z = -0.3;
+  g.add(robe, torso, head, armL, armR);
+  return g;
+}
+
+const VILLAGER_PALETTES: { robe: number; trim: number; skin: number }[] = [
+  { robe: 0x8a5a3c, trim: 0xcf9a5a, skin: 0xe8c19a },
+  { robe: 0x4f6b8a, trim: 0xc8d4e0, skin: 0xd8a87e },
+  { robe: 0x6a7a4a, trim: 0xd8c87a, skin: 0xe8c19a },
+  { robe: 0x7a4a5a, trim: 0xd8a8b8, skin: 0xc89070 }
+];
+
+/** Authored town props already on disk but previously unwired, with a target height. */
+const DRESSING_PROPS = {
+  well: { url: `${TOWN_BASE}/well.glb`, height: 1.9 },
+  cart: { url: `${TOWN_BASE}/cart.glb`, height: 1.5 },
+  barrel: { url: `${TOWN_BASE}/barrel.glb`, height: 1.0 },
+  market: { url: `${TOWN_BASE}/market_stand_1.glb`, height: 2.0 }
+} as const;
+
+/** Load an authored prop GLB and seat it; keep a procedural fallback visible until it lands. */
+function placeAuthoredProp(
+  g: THREE.Group,
+  url: string,
+  place: { x: number; z: number; baseY: number; rotY: number; height: number },
+  fallback: THREE.Object3D | null,
+  isLive: SceneLiveCheck,
+  staticPropShadows: boolean
+): void {
+  void loadModel(url).then((scene) => {
+    if (!scene || !isLive()) return;
+    const m = normalizedClone(scene, place.height);
+    m.position.x = place.x;
+    m.position.z = place.z;
+    m.position.y += place.baseY;
+    m.rotation.y = place.rotY;
+    m.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh) {
+        markStaticShadowCaster(mesh, staticPropShadows);
+        mesh.receiveShadow = true;
+      }
+    });
+    g.add(m);
+    if (fallback) fallback.visible = false;
+  });
+}
+
+/** Town dressing layer: lamp posts, a quest/notice board, market + cart + barrels,
+ *  crates, a banner, and a few villager standees (ASSET_GAPS P2). */
+function buildTownDressing(
+  region: RegionDef,
+  heightAt: (x: number, y: number) => number,
+  isLive: SceneLiveCheck,
+  staticPropShadows: boolean
+): THREE.Group {
+  const g = new THREE.Group();
+  const t = region.town.pos;
+  const wx = t.x / WORLD_SCALE;
+  const wz = t.y / WORLD_SCALE;
+  const townRadius = region.town.radius / WORLD_SCALE;
+  const rng = new Rng(region.seed ^ hashString(`${region.id}:dressing`));
+
+  // World-space point + ground height at a polar offset from the town centre.
+  const at = (ang: number, radius: number): { x: number; z: number; baseY: number } => ({
+    x: wx + Math.cos(ang) * radius,
+    z: wz + Math.sin(ang) * radius,
+    baseY: heightAt(t.x + Math.cos(ang) * (radius * WORLD_SCALE), t.y + Math.sin(ang) * (radius * WORLD_SCALE))
+  });
+  const dress = (obj: THREE.Object3D, p: { x: number; z: number; baseY: number }, rotY: number): void => {
+    obj.position.set(p.x, p.baseY, p.z);
+    obj.rotation.y = rotY;
+    obj.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        markStaticShadowCaster(m, staticPropShadows);
+        m.receiveShadow = true;
+      }
+    });
+    g.add(obj);
+  };
+
+  // Lamp posts ringed between the buildings, facing the plaza.
+  for (let i = 0; i < 6; i++) {
+    const ang = (i / 6) * Math.PI * 2 + 0.4 + Math.PI / 6;
+    dress(buildLampPost(), at(ang, townRadius * 0.6), ang + Math.PI);
+  }
+
+  // Quest / notice board — a visible marker for the town's quest-board service.
+  const boardAng = 0.4 - 0.7;
+  const boardPos = at(boardAng, townRadius * 0.32);
+  const boardGroup = new THREE.Group();
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x5a4128, roughness: 0.88, metalness: 0.04, flatShading: true });
+  const postL = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 1.5, 6), woodMat);
+  postL.position.set(-0.5, 0.75, 0);
+  const postR = postL.clone();
+  postR.position.x = 0.5;
+  const board = new THREE.Mesh(
+    new THREE.BoxGeometry(1.35, 0.95, 0.1),
+    new THREE.MeshStandardMaterial({ color: 0xe6d3a3, emissive: 0x6a5630, emissiveIntensity: 0.45, roughness: 0.7, metalness: 0.05 })
+  );
+  board.position.set(0, 1.25, 0.02);
+  board.name = 'quest-board';
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.1, 0.4), woodMat);
+  roof.position.set(0, 1.78, 0);
+  boardGroup.add(postL, postR, board, roof);
+  dress(boardGroup, boardPos, boardAng + Math.PI);
+
+  // Banner pole near the plaza edge.
+  const bannerPos = at(0.4 + Math.PI, townRadius * 0.28);
+  const bannerGroup = new THREE.Group();
+  const bpole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 3.2, 6), woodMat);
+  bpole.position.y = 1.6;
+  const flag = new THREE.Mesh(
+    new THREE.BoxGeometry(0.06, 0.9, 1.0),
+    new THREE.MeshStandardMaterial({ color: 0xb8423a, roughness: 0.7, metalness: 0.05, flatShading: true, side: THREE.DoubleSide })
+  );
+  flag.position.set(0, 2.7, 0.52);
+  bannerGroup.add(bpole, flag);
+  dress(bannerGroup, bannerPos, rng.next() * Math.PI * 2);
+
+  // Market + cart + barrels + crates near the shop stall corner.
+  const shopAng = 0.4 + Math.PI / 6;
+  const marketPos = at(shopAng - 0.34, townRadius * 0.4);
+  const marketFb = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.2, 1.0), woodMat);
+  marketFb.position.set(marketPos.x, marketPos.baseY + 0.6, marketPos.z);
+  marketFb.rotation.y = shopAng;
+  markStaticShadowCaster(marketFb, staticPropShadows);
+  g.add(marketFb);
+  placeAuthoredProp(g, DRESSING_PROPS.market.url, { ...marketPos, rotY: shopAng + Math.PI, height: DRESSING_PROPS.market.height }, marketFb, isLive, staticPropShadows);
+
+  const cartPos = at(shopAng + 0.42, townRadius * 0.42);
+  const cartFb = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.8), woodMat);
+  cartFb.position.set(cartPos.x, cartPos.baseY + 0.4, cartPos.z);
+  cartFb.rotation.y = shopAng + 1.2;
+  markStaticShadowCaster(cartFb, staticPropShadows);
+  g.add(cartFb);
+  placeAuthoredProp(g, DRESSING_PROPS.cart.url, { ...cartPos, rotY: shopAng + 1.2, height: DRESSING_PROPS.cart.height }, cartFb, isLive, staticPropShadows);
+
+  // A couple of barrels by the cart.
+  for (let i = 0; i < 2; i++) {
+    const bp = at(shopAng + 0.55 + i * 0.12, townRadius * 0.38);
+    const barrelFb = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.34, 0.36, 0.9, 8),
+      new THREE.MeshStandardMaterial({ color: 0x6a4a2c, roughness: 0.85, metalness: 0.04, flatShading: true })
+    );
+    barrelFb.position.set(bp.x, bp.baseY + 0.45, bp.z);
+    markStaticShadowCaster(barrelFb, staticPropShadows);
+    g.add(barrelFb);
+    placeAuthoredProp(g, DRESSING_PROPS.barrel.url, { ...bp, rotY: rng.next() * Math.PI * 2, height: DRESSING_PROPS.barrel.height }, barrelFb, isLive, staticPropShadows);
+  }
+
+  // Well, opposite the shop.
+  const wellPos = at(shopAng + Math.PI, townRadius * 0.46);
+  const wellFb = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.7, 0.8, 1.0, 10),
+    new THREE.MeshStandardMaterial({ color: 0x8a8a92, roughness: 0.8, metalness: 0.06, flatShading: true })
+  );
+  wellFb.position.set(wellPos.x, wellPos.baseY + 0.5, wellPos.z);
+  markStaticShadowCaster(wellFb, staticPropShadows);
+  g.add(wellFb);
+  placeAuthoredProp(g, DRESSING_PROPS.well.url, { ...wellPos, rotY: rng.next() * Math.PI * 2, height: DRESSING_PROPS.well.height }, wellFb, isLive, staticPropShadows);
+
+  // Crate cluster near the market.
+  const crateMat = new THREE.MeshStandardMaterial({ color: 0x7a5630, roughness: 0.88, metalness: 0.03, flatShading: true });
+  const cratePos = at(shopAng - 0.5, townRadius * 0.34);
+  for (let i = 0; i < 3; i++) {
+    const s = 0.45 + rng.next() * 0.18;
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), crateMat);
+    const ox = (rng.next() - 0.5) * 0.7;
+    const oz = (rng.next() - 0.5) * 0.7;
+    crate.position.set(cratePos.x + ox, cratePos.baseY + s / 2 + (i === 2 ? 0.45 : 0), cratePos.z + oz);
+    crate.rotation.y = rng.next() * Math.PI;
+    markStaticShadowCaster(crate, staticPropShadows);
+    crate.receiveShadow = true;
+    g.add(crate);
+  }
+
+  // Villager standees by the board and the market (vendor / quest-giver presence).
+  const villagerSpots: { ang: number; radius: number }[] = [
+    { ang: boardAng + 0.25, radius: townRadius * 0.3 },
+    { ang: shopAng - 0.2, radius: townRadius * 0.34 },
+    { ang: shopAng + 0.18, radius: townRadius * 0.32 }
+  ];
+  villagerSpots.forEach((spot, i) => {
+    const v = buildVillager(VILLAGER_PALETTES[(i + Math.floor(rng.next() * 4)) % VILLAGER_PALETTES.length]);
+    const p = at(spot.ang, spot.radius);
+    // Face roughly toward the plaza centre, with a little jitter.
+    dress(v, p, spot.ang + Math.PI + (rng.next() - 0.5) * 0.8);
+  });
+
+  return g;
+}
+
 export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => true, opts: TerrainBuildOptions = {}): TerrainInfo {
   const group = new THREE.Group();
   const staticPropShadows = opts.staticPropShadows ?? true;
@@ -841,6 +1078,9 @@ function buildTown(region: RegionDef, heightAt: (x: number, y: number) => number
     mesh.receiveShadow = true;
   }
   g.add(counter, awning, pole1, pole2, sign);
+
+  // Set dressing + ambient presence (ASSET_GAPS P2).
+  g.add(buildTownDressing(region, heightAt, isLive, staticPropShadows));
 
   return g;
 }

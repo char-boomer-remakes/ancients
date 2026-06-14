@@ -1,20 +1,56 @@
 import { generateDungeon } from '../core/dungeon';
 import { execEffects, type EffectCtx } from '../core/effects';
 import { buildHero } from '../core/hero-setup';
-import { heroesAlive } from '../core/macro';
-import { v2 } from '../core/math2d';
+import { createRaidMechanicRunner, heroesAlive, type RaidMechanicRunner } from '../core/macro';
 import { bossBkbItemOverrides, tierScale } from '../core/phase3';
 import { REG } from '../core/registry';
 import { Sim } from '../core/sim';
 import { makeItemState, sortInventory } from '../core/items';
 import { TUNING } from '../data/tuning';
-import type { AffixDef, BossDef, DifficultyTier, DungeonDef, DungeonLayout, DungeonRoom, EffectNode, MacroHeroSetup, PlannedPack, RoomTemplate, SeasonalModeKind, Vec2 } from '../core/types';
+import type { AffixDef, BossDef, CreepInstanceSave, DifficultyTier, DungeonDef, DungeonLayout, DungeonRoom, EffectNode, MacroHeroSetup, PlannedPack, RaidDef, RoomTemplate, SeasonalModeKind, SummonSpec, Vec2, ZoneSpec } from '../core/types';
 import type { Unit } from '../core/unit';
 
 const FALLBACK_ROOM_SIZE = { x: 4200, y: 3000 };
 type DungeonPacingPhase = 'idle' | 'build-up' | 'peak' | 'relax';
 
 const PACK_PROGRESS_WEIGHT: Record<PlannedPack['rarity'], number> = { normal: 1, champion: 3, rare: 6 };
+
+const GUARDIAN_THRALL: SummonSpec = {
+  id: 'dungeon-guardian-thrall',
+  name: 'Guardian Thrall',
+  lifetime: 34,
+  stats: { maxHp: 460, damage: 30, armor: 1, moveSpeed: 325, attackRange: 120, baseAttackTime: 1.45 },
+  silhouette: { build: 'biped', scale: 0.7, weapon: 'sword', head: 'horned' },
+  palette: ['#6f3fb5', '#170b25', '#d5a7ff']
+};
+
+const GUARDIAN_ZONE: ZoneSpec = {
+  shape: 'circle',
+  radius: 360,
+  duration: 7,
+  auraMods: { affects: 'enemies', mods: { moveSpeedPct: -22, attackSpeed: -18 } },
+  tick: { interval: 0.75, affects: 'enemies', effects: [{ kind: 'damage', dtype: 'magical', amount: 46, target: 'target' }] }
+};
+
+function guardianRaidDef(def: DungeonDef, boss: BossDef): RaidDef {
+  const phases = boss.phases && boss.phases.length > 0
+    ? boss.phases
+    : [{ atHpPct: 65, onEnter: [] }, { atHpPct: 35, onEnter: [] }];
+  return {
+    id: `dungeon-${def.id}-${boss.id}`,
+    name: `${def.name} Guardian`,
+    title: 'Dungeon Guardian',
+    location: def.name,
+    unlockQuest: def.unlockQuest ?? 'dungeon',
+    boss: { heroId: boss.heroId, level: boss.rank === 'boss' ? 30 : 26, items: ['black-king-bar'], hpScale: 1, damageScale: 1 },
+    addWaves: phases.map((phase, i) => ({ atHpPct: Math.max(10, phase.atHpPct - 8), summon: GUARDIAN_THRALL, count: 2 + Math.min(3, i) })),
+    zones: phases.map((phase, i) => ({ atHpPct: phase.atHpPct, zone: { ...GUARDIAN_ZONE, radius: 320 + i * 70 } })),
+    enrageSec: 95,
+    loot: boss.loot,
+    signatureExotic: `dungeon-guardian-${boss.id}`,
+    dialogue: boss.dialogue
+  };
+}
 
 function syntheticTemplate(id: string, biome: DungeonDef['biome']): RoomTemplate {
   return {
@@ -81,6 +117,7 @@ export class DungeonSession {
   readonly layout: DungeonLayout;
   readonly sim: Sim;
   readonly partyUids: number[] = [];
+  readonly entourageUids: number[] = [];
   enemyUids: number[] = [];
   private readonly maxTicks: number;
   private readonly affixes: Map<string, AffixDef>;
@@ -92,7 +129,10 @@ export class DungeonSession {
   private awaitingExit = false;
   private guardianUid: number | null = null;
   private guardianBossDef: BossDef | null = null;
+  private guardianRaidMechanics: RaidMechanicRunner | null = null;
+  private guardianRaidFiredCount = 0;
   private readonly guardianPhaseKeys = new Set<string>();
+  private readonly entourageUnits = new Map<string, number>();
   private roomPackCursor = 0;
   private roomSpawnedPacks = 0;
   private nextPackAt = 0;
@@ -150,6 +190,7 @@ export class DungeonSession {
     if (!u || !u.alive) return false;
     this.driverIdx = idx;
     this.sim.playerActiveUid = u.uid;
+    this.retargetEntourage(u.uid);
     return true;
   }
 
@@ -159,6 +200,7 @@ export class DungeonSession {
 
   availableExits(): DungeonRoom[] {
     if (!this.awaitingExit) return [];
+    if (this.guardianReady()) return [this.layout.rooms[this.layout.depth - 1]].filter((room): room is DungeonRoom => !!room);
     return this.room.exits
       .map((index) => this.layout.rooms[index])
       .filter((room): room is DungeonRoom => !!room);
@@ -206,7 +248,8 @@ export class DungeonSession {
   }
 
   chooseExit(index: number): boolean {
-    if (this.done || !this.awaitingExit || !this.room.exits.includes(index)) return false;
+    const canChooseGuardian = this.guardianReady() && index === this.layout.depth - 1;
+    if (this.done || !this.awaitingExit || (!this.room.exits.includes(index) && !canChooseGuardian)) return false;
     this.awaitingExit = false;
     this.currentRoomIndex = index;
     this.enterNextPlayableRoom();
@@ -259,6 +302,47 @@ export class DungeonSession {
     });
   }
 
+  spawnEntourage(instances: CreepInstanceSave[]): void {
+    const owner = this.drivenUnit();
+    if (!owner) return;
+    const template = this.roomTemplateFor(this.layout.rooms[0]);
+    instances.forEach((inst, i) => {
+      if (this.entourageUnits.has(inst.uid)) return;
+      const def = REG.creep(inst.creepId);
+      const pos = {
+        x: Math.max(120, Math.min(template.size.x - 120, owner.pos.x - 160 - (i % 2) * 120)),
+        y: Math.max(120, Math.min(template.size.y - 120, owner.pos.y + (i - 1) * 140))
+      };
+      const u = this.sim.spawnCreep(def, {
+        team: 0,
+        pos,
+        star: inst.star,
+        ownerUid: owner.uid
+      });
+      u.visual = { silhouette: def.silhouette, palette: def.palette };
+      this.entourageUnits.set(inst.uid, u.uid);
+      this.entourageUids.push(u.uid);
+    });
+  }
+
+  removeEntourage(instanceUid: string): void {
+    const uid = this.entourageUnits.get(instanceUid);
+    if (uid === undefined) return;
+    const u = this.sim.unit(uid);
+    if (u?.alive) this.sim.removeUnit(uid);
+    this.entourageUnits.delete(instanceUid);
+    const idx = this.entourageUids.indexOf(uid);
+    if (idx >= 0) this.entourageUids.splice(idx, 1);
+  }
+
+  private retargetEntourage(ownerUid = this.drivenUnit()?.uid): void {
+    if (ownerUid === undefined) return;
+    for (const uid of this.entourageUids) {
+      const u = this.sim.unit(uid);
+      if (u?.alive) u.ownerUid = ownerUid;
+    }
+  }
+
   private enterNextPlayableRoom(): void {
     while (!this.done && !this.awaitingExit) {
       const room = this.room;
@@ -267,6 +351,8 @@ export class DungeonSession {
       this.enemyUids = [];
       this.guardianUid = null;
       this.guardianBossDef = null;
+      this.guardianRaidMechanics = null;
+      this.guardianRaidFiredCount = 0;
       this.guardianPhaseKeys.clear();
       this.roomPackCursor = 0;
       this.roomSpawnedPacks = 0;
@@ -298,6 +384,25 @@ export class DungeonSession {
     });
     const driver = this.drivenUnit();
     if (driver) this.sim.playerActiveUid = driver.uid;
+    this.repositionEntourage();
+  }
+
+  private repositionEntourage(): void {
+    const owner = this.drivenUnit();
+    if (!owner) return;
+    const template = this.roomTemplateFor();
+    const alive = this.entourageUids
+      .map((uid) => this.sim.unit(uid))
+      .filter((u): u is Unit => !!u && u.alive);
+    alive.forEach((u, i) => {
+      u.ownerUid = owner.uid;
+      u.pos = {
+        x: Math.max(u.radius, Math.min(template.size.x - u.radius, owner.pos.x - 180 - (i % 2) * 120)),
+        y: Math.max(u.radius, Math.min(template.size.y - u.radius, owner.pos.y + (i - 1) * 145))
+      };
+      u.prevPos = { ...u.pos };
+      u.order = { kind: 'stop' };
+    });
   }
 
   private healParty(): void {
@@ -396,6 +501,8 @@ export class DungeonSession {
     u.facing = Math.PI;
     this.guardianUid = u.uid;
     this.enemyUids.push(u.uid);
+    this.guardianRaidMechanics = createRaidMechanicRunner(guardianRaidDef(this.def, boss), this.sim, u);
+    this.guardianRaidFiredCount = 0;
   }
 
   private tickGuardianMechanics(): void {
@@ -410,6 +517,12 @@ export class DungeonSession {
       execEffects(this.sim, boss, this.guardianCtx(boss), phase.onEnter, { target: boss, point: boss.pos });
       this.guardianPhaseKeys.add(key);
       this.guardianMechanicsFired.push(key);
+    }
+    if (this.guardianRaidMechanics) {
+      this.guardianRaidMechanics.tick(this.sim);
+      const fired = this.guardianRaidMechanics.fired.slice(this.guardianRaidFiredCount);
+      for (const ev of fired) this.guardianMechanicsFired.push(`raid-${ev.kind}:${ev.id}`);
+      this.guardianRaidFiredCount = this.guardianRaidMechanics.fired.length;
     }
   }
 
@@ -531,6 +644,10 @@ export class DungeonSession {
     const next = completed.exits[0] ?? completed.index + 1;
     this.currentRoomIndex = Math.min(next, this.layout.depth - 1);
     this.enterNextPlayableRoom();
+  }
+
+  private guardianReady(): boolean {
+    return !!this.layout.endless && this.room.index < this.layout.depth - 1 && this.endlessProgress() >= 1;
   }
 
   private updatePacing(enemiesAlive: boolean): boolean {

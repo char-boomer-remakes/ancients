@@ -2721,6 +2721,37 @@ export function attachHeroWeaponModel(rig: UnitRig, weapon: THREE.Object3D): voi
   restoreDefaultWeapon(rig);
 }
 
+/** Mount an authored signature item-weapon GLB as the active hand weapon, taking
+ *  priority over the procedural item/default weapon (ASSET_GAPS P3). Leaves
+ *  `rig.defaultWeapon` (the hero weapon) intact so unequipping can restore it.
+ *  Pass null to drop the signature weapon and fall back to the default. */
+export function attachSignatureItemWeapon(rig: UnitRig, model: THREE.Object3D | null): void {
+  const current = rig.weapon;
+  const hadSignature = !!current?.userData.signatureItemWeapon;
+  if (!model) {
+    // Only restore the default when we're actually removing a signature weapon;
+    // otherwise leave the procedural item/default weapon exactly as it is.
+    if (hadSignature) {
+      if (current?.parent) current.parent.remove(current);
+      rig.weapon = undefined;
+      restoreDefaultWeapon(rig);
+    }
+    return;
+  }
+  // Clear whatever is currently in the hand (procedural item weapon or default).
+  if (current?.parent) current.parent.remove(current);
+  else if (rig.defaultWeapon?.parent) rig.defaultWeapon.parent.remove(rig.defaultWeapon);
+  model.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    m.castShadow = true;
+    m.receiveShadow = true;
+  });
+  model.userData.signatureItemWeapon = true;
+  hostWeapon(rig, model);
+  rig.weapon = model;
+}
+
 export function attachHoldoutSignatureModel(rig: UnitRig, signature: THREE.Object3D): void {
   const previous = rig.body.children.find((c) => c.userData.holdoutSignatureModel);
   if (previous?.parent) previous.parent.remove(previous);

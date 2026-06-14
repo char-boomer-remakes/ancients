@@ -457,6 +457,59 @@ function makeCastRoar2(dur = 0.46) {
   }, 0.92);
 }
 
+// Third rotation variants for frost/fire/roar. The Kenney CC0 subset has no
+// cryo/flame/beast recording, so these archetypes would otherwise rotate over
+// just two generated WAVs; a third tonally-distinct take gives them the same
+// per-cast variety the curated keys get, while staying fully original.
+
+// Glassy wind-chime frost: a cluster of high partials ringing down over a soft
+// pad, airier than the brittle crack of cast-frost-2.
+function makeCastFrost3(dur = 0.5) {
+  const tones = [1568, 1864.66, 2349.32, 3135.96];
+  const out = oneShot(dur, (buf, s, t) => {
+    let v = 0;
+    for (let i = 0; i < tones.length; i++) {
+      const start = i * 0.03;
+      if (t < start) continue;
+      const local = t - start;
+      v += Math.sin(TWO_PI * tones[i] * local) * Math.exp(-local * 5.5) * 0.12;
+    }
+    const pad = Math.sin(TWO_PI * 540 * t) * Math.exp(-t * 3) * 0.12;
+    const crack = hashNoise(s, 241) * Math.exp(-t * 30) * 0.12;
+    addPan(buf, s, v + pad + crack, Math.sin(t * 12) * 0.4);
+  }, 0.8);
+  return addEcho(out, 0.08, 0.2, 0.6);
+}
+
+// Sharp fire burst: a fast crackling attack with a bright flare, snappier and
+// higher than the low whoomp of cast-fire-2, for quick pyro nukes.
+function makeCastFire3(dur = 0.34) {
+  let lp = 0;
+  const out = oneShot(dur, (buf, s, t) => {
+    const env = Math.exp(-t * 6);
+    const raw = hashNoise(s, 251) * 0.85 + Math.sin(s * 0.27) * 0.15;
+    lp += (raw - lp) * (0.16 + 0.3 * t / dur);
+    const flare = Math.sin(TWO_PI * (520 + 760 * t / dur) * t) * 0.24;
+    const spit = hashNoise(s, 257) * Math.exp(-t * 40) * 0.2;
+    addPan(buf, s, (lp * 0.5 + flare + spit) * env, 0.1);
+  }, 0.86);
+  return addEcho(out, 0.045, 0.16, 0.4);
+}
+
+// Long bellowing roar: a sustained low growl that swells then falls, bigger and
+// slower than the guttural cast-roar-2, for huge strength ultimates.
+function makeCastRoar3(dur = 0.6) {
+  let lp = 0;
+  return oneShot(dur, (out, s, t) => {
+    const env = Math.sin(Math.PI * Math.min(1, t / dur)) * (0.6 + 0.4 * Math.exp(-t * 1.2));
+    const raw = hashNoise(s, 263);
+    lp += (raw - lp) * 0.13;
+    const bellow = Math.sin(TWO_PI * (120 * Math.exp(-t * 1.2) + 48) * t + Math.sin(TWO_PI * 22 * t) * 0.4) * 0.54;
+    out[0][s] += (bellow + lp * 0.42) * env;
+    out[1][s] += (bellow + lp * 0.36) * env;
+  }, 0.93);
+}
+
 function makeCastLightning(dur = 0.26) {
   let hp = 0;
   const out = oneShot(dur, (buf, s, t) => {
@@ -497,10 +550,14 @@ const sfx = {
   'cast-item': makeCastItem(),
   'cast-roar': makeCastRoar(),
   'cast-lightning': makeCastLightning(),
-  // Second rotation variants for the keys with no curated CC0 source.
+  // Extra rotation variants for the keys with no curated CC0 source, so they
+  // rotate over three distinct takes like the curated archetypes.
   'cast-frost-2': makeCastFrost2(),
   'cast-fire-2': makeCastFire2(),
-  'cast-roar-2': makeCastRoar2()
+  'cast-roar-2': makeCastRoar2(),
+  'cast-frost-3': makeCastFrost3(),
+  'cast-fire-3': makeCastFire3(),
+  'cast-roar-3': makeCastRoar3()
 };
 for (const [name, samples] of Object.entries(sfx)) {
   const bytes = writeWav(path.join(OUT_DIR, 'sfx', `${name}.wav`), samples);

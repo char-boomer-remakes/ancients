@@ -204,6 +204,11 @@ export class Unit {
   triggers: TriggerRuntime[] = [];
   triggerStacks = new Map<string, number>();   // stacks per ability id (Flesh Heap)
 
+  // Render-only vertical offset (world-height units) for overworld traversal
+  // (GAMEPLAY_OVERHAUL §3.3, G3): the scene lifts the active hero while it climbs or
+  // glides between elevation tiers. Never read by the sim — purely a render channel.
+  renderHeight = 0;
+
   order: Order = { kind: 'stop' };
   attackTargetUid = -1;
   windupUntil = -1;          // attack point in progress

@@ -1,4 +1,4 @@
-import type { BossDef, CreepDef, CutsceneDef, DomainDef, DraftDef, DungeonDef, GymDef, HeroDef, ItemDef, LegendDef, LoreEntryDef, NeutralItemDef, QuestDef, RaidDef, RecruitmentQuestDef, RegionDef, RoomTemplate, SeasonalEventDef, TrainerDef, TrialDef } from './types';
+import type { BossDef, CreepDef, CutsceneDef, DishDef, DomainDef, DraftDef, DungeonDef, GymDef, HeroDef, ItemDef, LegendDef, LoreEntryDef, NeutralItemDef, QuestDef, QuestGiverDef, RaidDef, RecruitmentQuestDef, RegionDef, RoomTemplate, SeasonalEventDef, TrainerDef, TrialDef } from './types';
 
 // ---------------------------------------------------------------
 // Content registry. Data files register themselves; systems are
@@ -17,9 +17,11 @@ class Registry {
   trials = new Map<string, TrialDef>();
   quests = new Map<string, RecruitmentQuestDef>();
   questDefs = new Map<string, QuestDef>();
+  questGivers = new Map<string, QuestGiverDef>();
   bosses = new Map<string, BossDef>();
   raids = new Map<string, RaidDef>();
   domains = new Map<string, DomainDef>();
+  dishes = new Map<string, DishDef>();
   loreEntries = new Map<string, LoreEntryDef>();
   cutscenes = new Map<string, CutsceneDef>();
   seasonalEvents = new Map<string, SeasonalEventDef>();
@@ -55,6 +57,9 @@ class Registry {
   registerQuestDef(def: QuestDef): void {
     this.questDefs.set(def.id, def);
   }
+  registerQuestGiver(def: QuestGiverDef): void {
+    this.questGivers.set(def.id, def);
+  }
   registerBoss(def: BossDef): void {
     this.bosses.set(def.id, def);
   }
@@ -63,6 +68,10 @@ class Registry {
   }
   registerDomain(def: DomainDef): void {
     this.domains.set(def.id, def);
+  }
+
+  registerDish(def: DishDef): void {
+    this.dishes.set(def.id, def);
   }
   registerLoreEntry(def: LoreEntryDef): void {
     this.loreEntries.set(def.id, def);
@@ -135,6 +144,11 @@ class Registry {
     if (!d) throw new Error(`unknown quest def: ${id}`);
     return d;
   }
+  questGiver(id: string): QuestGiverDef {
+    const d = this.questGivers.get(id);
+    if (!d) throw new Error(`unknown quest giver: ${id}`);
+    return d;
+  }
   boss(id: string): BossDef {
     const d = this.bosses.get(id);
     if (!d) throw new Error(`unknown boss: ${id}`);
@@ -148,6 +162,12 @@ class Registry {
   domain(id: string): DomainDef {
     const d = this.domains.get(id);
     if (!d) throw new Error(`unknown domain: ${id}`);
+    return d;
+  }
+
+  dish(id: string): DishDef {
+    const d = this.dishes.get(id);
+    if (!d) throw new Error(`unknown dish: ${id}`);
     return d;
   }
   loreEntry(id: string): LoreEntryDef {
@@ -204,9 +224,11 @@ class Registry {
     this.trials.clear();
     this.quests.clear();
     this.questDefs.clear();
+    this.questGivers.clear();
     this.bosses.clear();
     this.raids.clear();
     this.domains.clear();
+    this.dishes.clear();
     this.loreEntries.clear();
     this.cutscenes.clear();
     this.seasonalEvents.clear();

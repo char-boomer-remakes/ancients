@@ -735,6 +735,31 @@ export interface DomainDef {
   dialogue: string[];          // boss lines, original
 }
 
+// ---------- Cooking / field consumables (GAMEPLAY_OVERHAUL §3.7, Pillar P7) ----------
+// A "dish" is cooked at a town or shrine from a gold/ingredient cost and grants an
+// out-of-combat heal, a one-shot party revive, or a timed exploration buff. The buff
+// rides the existing statmod path (a `buff` status with bounded mods), so no new combat
+// mechanic is spent — exactly the "a dish is an item with a timed statmod active" framing.
+export interface DishDef {
+  id: string;
+  name: string;
+  kind: 'heal' | 'revive' | 'buff';
+  cost: number;                // gold (ingredient) cost to cook
+  lore: string;
+  restorePct?: number;         // kind 'heal': fraction of max HP/mana restored to the party
+  buff?: { mods: StatModMap; durationSec: number };  // kind 'buff': timed exploration statmod
+}
+
+// Elemental weather (GAMEPLAY_OVERHAUL §3.7): a region/clock-gated ambient state that
+// periodically applies an element to outdoor units through the §3.3/§3.4 field path
+// (the same `applyElementAura` call an element source uses), gated by Resonance.
+export interface WeatherDef {
+  element: ActiveElement;
+  interval: number;            // seconds between ambient applications
+  night?: boolean;             // gated by the day/night clock: true = only at night, false = only by day
+  note?: string;               // player-facing description
+}
+
 // ---------- Lore codex ----------
 export type LoreThreadId = 'loop';
 export type LoreUnlock =
@@ -970,7 +995,7 @@ export interface DungeonLayout {
   /** Endless run flag + level; absent on a normal fixed-length run. */
   endless?: boolean;
   endlessLevel?: number;
-  /** Rarity-weighted kill total that fills the endless progress meter (summons the guardian at 100%). */
+  /** Rarity-weighted kill total that fills the endless progress meter (opens the guardian route at 100%). */
   progressTarget?: number;
 }
 
@@ -1133,6 +1158,7 @@ export interface RegionDef {
   discoveries?: DiscoveryDef[];
   elementSources?: ElementSourceDef[];
   elementPuzzles?: ElementPuzzleDef[];
+  weather?: WeatherDef;        // ambient elemental weather (GAMEPLAY_OVERHAUL §3.7)
   props: { treeDensity: number; rockDensity: number };
   gateHint?: string;
 }
@@ -1232,6 +1258,23 @@ export interface QuestPrereq {
   region?: string;          // must have reached this region
   quests?: string[];        // these quest ids must be claimed first (chain)
   anyOf?: QuestPrereq[];     // OR-gate: at least one sub-prereq must also be met
+  choice?: QuestChoiceGate; // a branching predecessor must have taken this branch
+}
+
+// Gate a branch successor on the specific choice taken at a fork quest.
+export interface QuestChoiceGate {
+  quest: string;            // a claimed quest that offered choices
+  choiceId: string;         // the branch that must have been chosen there
+}
+
+// A branch a fork quest offers at claim time: exactly one is taken, granting its
+// rewards (on top of the quest's base rewards) and unlocking its own `next`.
+export interface QuestChoice {
+  id: string;
+  label: string;            // board button label
+  rewards: QuestReward[];
+  next?: string;            // branch-specific successor (gated via prereq.choice)
+  note?: string;            // flavor shown under the button
 }
 
 export interface QuestDef {
@@ -1245,8 +1288,10 @@ export interface QuestDef {
   rewards: QuestReward[];
   prereq?: QuestPrereq;
   cooldownSec?: number;     // recurring: rest this long after a claim
+  windowSec?: number;       // timed: must complete within this long of going active, else progress resets
   repeatable?: boolean;     // recurring quests set this; event quests do not
   next?: string;            // questline: auto-unlocks this quest id on claim
+  choices?: QuestChoice[];  // a fork: claiming requires picking one branch
   dialogue?: string[];
 }
 
@@ -1256,6 +1301,24 @@ export interface QuestSave {
   progress: number[];
   completions: number;
   availableAt?: number;     // playtime sec a cooled-down recurring re-arms at
+  expiresAt?: number;       // playtime sec a timed quest resets at if still active
+  choice?: string;          // branch chosen at claim on a fork quest
+}
+
+// A quest giver is an NPC that walks a patrol near its region's town and posts a
+// board of quests (matched by the shared `board` string on QuestDef.giver). It
+// carries no save state: its world position is a pure function of playtime, so
+// the headless core stays the system of record and the renderer just reads it.
+export interface QuestGiverDef {
+  id: string;
+  name: string;             // NPC name shown on the world hint + board header
+  title?: string;           // flavor subtitle
+  regionId: string;         // the region this giver stands in
+  board: string;            // matches QuestDef.giver, so we know which quests it posts
+  home: Vec2;               // patrol anchor (near the town board)
+  patrol?: Vec2[];          // waypoints walked as a closed loop back to home
+  loopSec?: number;         // seconds for one full patrol loop (default 60)
+  radius?: number;          // interaction radius (default 360)
 }
 
 export interface GymDef {

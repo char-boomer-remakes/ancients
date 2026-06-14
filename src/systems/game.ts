@@ -54,8 +54,8 @@ import { resonanceMods, elementForHero } from '../core/resonance';
 import { levelFromXp, xpForLevel } from '../core/stats';
 import { abilityMaxLevel, abilityRankRequiredHeroLevel, autoAbilityLevels, canLearnAbilityRank, normalizeAbilityLevels } from '../core/values';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DomainDef, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, EchoSpawnDef, GambitRule, GameSave, GraphicsSettings, GroundItemDrop, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, NeutralStashEntry, Order, QuestDef, QuestKind, QuestProgress, QuestReward, QuestSave, QuestStatus, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, Vec2 } from '../core/types';
-import { advance as questAdvance, claim as questClaim, normalizeQuestSave, refreshAvailability, type QuestContext, type QuestEvent } from '../core/quests';
+import type { ActiveElement, ArmoryLoadouts, BossDef, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DishDef, DomainDef, DraftDef, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, EchoSpawnDef, GambitRule, GameSave, GraphicsSettings, GroundItemDrop, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, NeutralStashEntry, Order, QuestDef, QuestGiverDef, QuestKind, QuestProgress, QuestReward, QuestSave, QuestStatus, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, Vec2 } from '../core/types';
+import { advance as questAdvance, chosenBranch as questChosenBranch, claim as questClaim, normalizeQuestSave, questGiverPos, refreshAvailability, type QuestContext, type QuestEvent } from '../core/quests';
 import { migratePhase7Save } from '../core/phase7';
 import { ProceduralAudio, type CinematicMixMode } from '../engine/audio';
 import { CinematicDirector, type CinematicView, type CutsceneContext } from '../engine/cinematic';
@@ -107,6 +107,19 @@ type GambleSlot = typeof GAMBLE_SLOTS[number];
 
 function isMainItemTier(tier: string): boolean {
   return MAIN_ITEM_TIERS.has(tier);
+}
+
+/** Ray-cast point-in-polygon test for overworld water zones (GAMEPLAY_OVERHAUL §3.3). */
+function pointInPolygon(p: Vec2, poly: Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
 }
 
 export function itemAllowedFromSource(itemId: string, source: DropSource): boolean {
@@ -283,6 +296,16 @@ export interface Toast {
   color?: string;   // optional accent (LOOT L6: rarity-tinted loot toasts)
 }
 
+/** Combat readability snapshot (COMBAT_OVERHAUL §3.4, C4). */
+export interface CombatReadout {
+  active: boolean;     // any combat readout is worth showing
+  live: boolean;       // a live raid/gym session is running (full overlay)
+  castBars: { uid: number; name: string; ability: string; pct: number; isUlt: boolean; enemy: boolean }[];
+  bossThreat: { bossName: string; targetName: string | null; taunted: boolean } | null;
+  sharedFocus: { uid: number; name: string } | null;
+  ultReady: { uid: number; name: string }[];
+}
+
 interface CampState {
   uids: number[];
   respawnAt: number; // 0 = alive/occupied
@@ -428,6 +451,17 @@ export function resolveQuality(q: GraphicsSettings['quality'] | undefined): Qual
 }
 
 /** The slice of GameScene the orchestrator calls; lets tests run headless. */
+/** Per-frame view-model for a walking quest giver: where it is now and whether
+ *  it has anything to offer, so the renderer can place a marker + indicator. */
+export interface QuestGiverView {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  hasClaimable: boolean;   // at least one quest ready to claim (pulse the marker)
+  hasActive: boolean;      // at least one active/available quest (show a soft tag)
+}
+
 export interface SceneLike {
   selectedUid: number;
   terrain: { obstacles: { pos: Vec2; radius: number }[] };
@@ -438,6 +472,8 @@ export interface SceneLike {
   resetUnitViews?(): void;
   setDungeonRoom?(template: RoomTemplate | null, room?: DungeonRoom | null): void;
   showOrderFeedback?(point: Vec2, kind: 'move' | 'attack-move' | 'attack-unit', queued?: boolean): void;
+  /** Optional (real GameScene only): place/move the walking quest-giver NPCs (QUEST.md §3). */
+  syncQuestGivers?(givers: readonly QuestGiverView[]): void;
   /** Optional (real GameScene only): live graphics-settings hooks (§6). */
   setQuality?(tier: QualityTier): void;
   setGraphics?(g: Partial<GraphicsSettings>): void;
@@ -446,16 +482,57 @@ export interface SceneLike {
   dispose?(): void;
 }
 
+/** Resolve the world position a sim event sounds from, for positional audio.
+ *  Events that carry a `pos`/`point` use it directly; unit-keyed events look the
+ *  unit up in the owning sim. Returns undefined when there's nothing to place
+ *  (UI/global cues), which leaves the cue centered at full volume. */
+export function eventWorldPos(ev: SimEvent, sim: Sim): Vec2 | undefined {
+  switch (ev.t) {
+    case 'projectile-hit':
+    case 'projectile-expire':
+    case 'aoe-burst':
+    case 'summon':
+    case 'revive':
+    case 'zone-spawn':
+      return ev.pos;
+    case 'cast':
+      return ev.point
+        ?? (ev.target != null ? sim.unit(ev.target)?.pos : undefined)
+        ?? sim.unit(ev.uid)?.pos;
+    case 'attack-impact':
+    case 'miss':
+      return sim.unit(ev.target)?.pos ?? sim.unit(ev.uid)?.pos;
+    case 'blink':
+      return ev.to ?? ev.from;
+    case 'capture-start':
+    case 'capture-complete':
+    case 'capture-interrupt':
+      return sim.unit(ev.target)?.pos;
+    case 'damage':
+    case 'attack-launch':
+    case 'heal':
+    case 'status-apply':
+    case 'immune-block':
+    case 'death':
+    case 'bark':
+      return sim.unit(ev.uid)?.pos;
+    default:
+      return undefined;
+  }
+}
+
 /** The slice of ProceduralAudio the orchestrator calls. */
 export interface AudioLike {
   setSettings(settings: GameSave['settings']): void;
-  handleEvent(ev: SimEvent): void;
+  handleEvent(ev: SimEvent, at?: Vec2): void;
   playStinger(id: StingerId): void;
   setCinematicMix?(mode: CinematicMixMode): void;
   playDialogueBlip?(seed?: string): void;
   update?(env: { biome: string; dayTime: number; inCombat: boolean; dt: number }): void;
   /** Toggle the sampled-audio enhancement layer (medium+ tiers). */
   enableSampledAudio?(on: boolean): void;
+  /** Listener (followed hero) world position for positional panning. */
+  setListener?(pos: Vec2 | null): void;
   dispose?(): void;
 }
 
@@ -550,6 +627,12 @@ export class Game {
   resinUpdatedAt = 0;
   sprintHeld = false;
   private sprintModUid = -1;
+  private weatherNextAt = 0;
+  // verticality & traversal (GAMEPLAY_OVERHAUL §3.3, G3)
+  private heroTier = 0;                 // active hero's current elevation tier (index into region.elevation.tiers)
+  private traversal: { kind: 'climb' | 'glide'; t: number; dur: number; fromTier: number; toTier: number } | null = null;
+  private swimModUid = -1;
+  private lastSafePos: Vec2 | null = null;
   private dashReadyAt = 0;
   private staminaRegenReadyAt = 0;
   private carriedElement: { element: ActiveElement; until: number } | null = null;
@@ -597,6 +680,7 @@ export class Game {
   /** HUD hook: open the gym pre-fight screen (§3.5). Null in headless. */
   onOpenGymPrefight: ((gymId: string) => void) | null = null;
   onOpenDungeonEntry: ((dungeonId: string) => void) | null = null;
+  onOpenQuestGiver: ((giverId: string) => void) | null = null;
 
   toasts: Toast[] = [];
   /** events the HUD wants this frame (damage floaters, gold, barks) */
@@ -793,6 +877,78 @@ export class Game {
     if (this.liveRaid) return this.liveRaid.drivenUnit();
     if (this.liveDungeon) return this.liveDungeon.drivenUnit();
     return this.activeUnit();
+  }
+
+  /**
+   * Combat readability snapshot (COMBAT_OVERHAUL §3.4, C4): the facts the HUD turns
+   * into cast bars, a boss aggro/threat marker, the shared-focus indicator, and the
+   * "ult ready → seize" Captain's Call prompt. Pure read over the active sim — it never
+   * changes a combat result, so the determinism tests stay green.
+   */
+  combatReadout(): CombatReadout {
+    const sim = this.inputSim();
+    const now = sim.time;
+    const driven = this.controlledUnit();
+    const playerTeam = driven?.team ?? this.activeUnit()?.team ?? 0;
+
+    const castBars: CombatReadout['castBars'] = [];
+    let boss: Unit | null = null;
+    for (const u of sim.unitsArr) {
+      if (!u.alive) continue;
+      if (u.team !== playerTeam && u.ctrl.kind === 'boss') boss = u;
+      const cast = u.cast;
+      if (cast && cast.fireAt > now) {
+        const def = u.abilities[cast.slot]?.def;
+        const cp = def?.castPoint ?? 0.3;
+        const pct = cp > 0 ? Math.max(0, Math.min(1, 1 - (cast.fireAt - now) / cp)) : 1;
+        castBars.push({
+          uid: u.uid,
+          name: u.name,
+          ability: def?.name ?? 'Casting',
+          pct,
+          isUlt: cast.source === 'ability' && cast.slot === 3,
+          enemy: u.team !== playerTeam
+        });
+      }
+    }
+    // enemy ults first, then enemies, then the rest — the bars the player most needs
+    castBars.sort((a, b) => Number(b.enemy && b.isUlt) - Number(a.enemy && a.isUlt) || Number(b.enemy) - Number(a.enemy));
+
+    let bossThreat: CombatReadout['bossThreat'] = null;
+    if (boss) {
+      let target = boss.attackTargetUid >= 0 ? sim.unit(boss.attackTargetUid) : undefined;
+      if ((!target || !target.alive) && boss.windupTargetUid >= 0) target = sim.unit(boss.windupTargetUid);
+      bossThreat = {
+        bossName: boss.name,
+        targetName: target && target.alive ? target.name : null,
+        taunted: boss.summary.taunted !== null
+      };
+    }
+
+    let sharedFocus: CombatReadout['sharedFocus'] = null;
+    const focusUid = sim.teamMind(playerTeam).focusUid;
+    if (focusUid !== null) {
+      const f = sim.unit(focusUid);
+      if (f && f.alive) sharedFocus = { uid: f.uid, name: f.name };
+    }
+
+    const ultReady: CombatReadout['ultReady'] = [];
+    for (const u of sim.unitsArr) {
+      if (!u.alive || u.team !== playerTeam || u.kind !== 'hero') continue;
+      const ult = u.abilities[3];
+      if (ult && ult.level > 0 && u.abilityReady(3, now).ok) {
+        ultReady.push({ uid: u.uid, name: u.name });
+      }
+    }
+
+    return {
+      active: !!(this.liveRaid || this.liveGym || this.liveDungeon) || this.inCombat(),
+      live: !!(this.liveRaid || this.liveGym),
+      castBars,
+      bossThreat,
+      sharedFocus,
+      ultReady
+    };
   }
 
   private partyEntryByHeroId(heroId: string): RosterEntry | undefined {
@@ -1711,7 +1867,13 @@ export class Game {
 
   private playPresentationEventNow(ev: SimEvent, sim: Sim = this.sim): void {
     this.scene.pushEvent(ev, sim);
-    this.audio.handleEvent(ev);
+    this.routeEventAudio(ev, sim);
+  }
+
+  /** Hand an event to the audio layer with its resolved world position so cues
+   *  pan/attenuate relative to the followed hero. */
+  private routeEventAudio(ev: SimEvent, sim: Sim): void {
+    this.audio.handleEvent(ev, eventWorldPos(ev, sim));
   }
 
   private awardGold(amount: number, reason: string, pos?: Vec2, routeNow = false): void {
@@ -1815,6 +1977,18 @@ export class Game {
     return (this.region.gyms ?? []).find((g) => dist(u.pos, g.pos) <= g.radius) ?? null;
   }
 
+  /** The walking quest giver (if any) whose current patrol spot is in reach. */
+  nearbyQuestGiver(): QuestGiverDef | null {
+    const u = this.activeUnit();
+    if (!u) return null;
+    for (const g of REG.questGivers.values()) {
+      if (g.regionId !== this.region.id) continue;
+      const p = questGiverPos(g, this.playtime);
+      if (dist(u.pos, p) <= (g.radius ?? 360)) return g;
+    }
+    return null;
+  }
+
   nearbyDungeonPortal(): NonNullable<RegionDef['dungeons']>[number] | null {
     const u = this.activeUnit();
     if (!u) return null;
@@ -1886,6 +2060,9 @@ export class Game {
   tryInteract(): boolean {
     if (this.openNearbyChest()) return true;
     if (this.offerShardsAtShrine()) return true;
+    // verticality (§3.3): the interact key also works the elevation connectors
+    if (this.nearbyClimbPoint() && this.tryClimb()) return true;
+    if (this.nearbyGlidePoint() && this.tryGlide()) return true;
     const portal = this.nearbyDungeonPortal();
     if (portal) {
       if (this.onOpenDungeonEntry) {
@@ -1902,6 +2079,11 @@ export class Game {
         return true;
       }
       return this.challengeGym(gym.gymId);
+    }
+    const giver = this.nearbyQuestGiver();
+    if (giver) {
+      this.onOpenQuestGiver?.(giver.id);
+      return true;
     }
     return this.tryTravel();
   }
@@ -2022,12 +2204,14 @@ export class Game {
     if (!this.paused) fight.step(Math.min(dt, 0.1));
     this.advanceQueuedOrder();
     this.frameEvents = fight.sim.events.drain();
+    this.audio.setListener?.(fight.cameraFollow()?.pos ?? null);
     for (const ev of this.frameEvents) {
       this.scene.pushEvent(ev, fight.sim);
-      this.audio.handleEvent(ev);
+      this.routeEventAudio(ev, fight.sim);
     }
     this.observeStory(this.frameEvents, { sim: fight.sim });
     this.audio.update?.({ biome: this.region.biome, dayTime: 0.5, inCombat: true, dt });
+    this.scene.syncQuestGivers?.([]);
     this.scene.update(fight.sim, fight.cameraFollow(), dt, 0.5, this.cinematicPresentationView(), []);
     if (fight.done && fight.result) {
       const id = this.liveGymId!;
@@ -2375,9 +2559,10 @@ export class Game {
     if (!this.paused) raid.step(Math.min(dt, 0.1));
     this.advanceQueuedOrder();
     this.frameEvents = raid.sim.events.drain();
+    this.audio.setListener?.(raid.cameraFollow()?.pos ?? null);
     for (const ev of this.frameEvents) {
       this.scene.pushEvent(ev, raid.sim);
-      this.audio.handleEvent(ev);
+      this.routeEventAudio(ev, raid.sim);
     }
     if (this.liveRaidId) {
       this.observeStory(this.frameEvents, {
@@ -2387,6 +2572,8 @@ export class Game {
         bossPhaseHpPct: this.raidPhaseThresholds(this.liveRaidId)
       });
     }
+    this.audio.update?.({ biome: this.region.biome, dayTime: 0.5, inCombat: true, dt });
+    this.scene.syncQuestGivers?.([]);
     this.scene.update(raid.sim, raid.cameraFollow(), dt, 0.5, this.cinematicPresentationView(), []);
     if (raid.done && raid.result) {
       const id = this.liveRaidId!;
@@ -2430,14 +2617,23 @@ export class Game {
     this.autosave('raid');
   }
 
-  dungeonEntryOptions(dungeonId: string): { def: DungeonDef; tiers: DifficultyTier[]; modifiers: DungeonModifierDef[]; progress?: DungeonProgressSave } {
+  dungeonEntryOptions(dungeonId: string): { def: DungeonDef; tiers: DifficultyTier[]; modifiers: DungeonModifierDef[]; progress?: DungeonProgressSave; lockReason?: string } {
     const def = REG.dungeon(dungeonId);
     return {
       def,
       tiers: [...def.tiers],
       modifiers: [...(def.modifiers ?? [])],
-      progress: this.dungeonProgress[dungeonId]
+      progress: this.dungeonProgress[dungeonId],
+      lockReason: this.dungeonLockReason(def)
     };
+  }
+
+  private dungeonLockReason(def: DungeonDef): string | undefined {
+    if (!def.unlockQuest) return undefined;
+    const quest = REG.questDefs.get(def.unlockQuest);
+    if (!quest) return undefined;
+    const status = this.questSaveFor(quest).status;
+    return status === 'claimed' ? undefined : `Complete ${quest.name} to unlock this descent.`;
   }
 
   private selectedDungeonModifiers(def: DungeonDef, ids: string[] | undefined): string[] {
@@ -2459,6 +2655,11 @@ export class Game {
     const def = REG.dungeon(dungeonId);
     if (def.regionId !== this.region.id) {
       this.msg(`${def.name} is not in this region`, 'bad');
+      return false;
+    }
+    const lockReason = this.dungeonLockReason(def);
+    if (lockReason) {
+      this.msg(lockReason, 'bad');
       return false;
     }
     if (!def.tiers.includes(tier)) {
@@ -2486,6 +2687,7 @@ export class Game {
     this.liveDungeonTier = tier;
     this.liveDungeonModifiers = modifiers;
     this.liveDungeon = new DungeonSession(def, this.gymPlayerTeam(), tier, seed, { maxSec: opts.maxSec, modifiers, endless, endlessLevel, festivalMode: opts.festivalMode });
+    this.liveDungeon.spawnEntourage(this.fieldedDungeonEntourage());
     this.story.beginEncounter();
     this.queuedOrders = [];
     this.scene.resetUnitViews();
@@ -2510,12 +2712,15 @@ export class Game {
     if (!this.paused) dungeon.step(Math.min(dt, 0.1));
     this.advanceQueuedOrder();
     this.frameEvents = dungeon.sim.events.drain();
+    this.audio.setListener?.(dungeon.cameraFollow()?.pos ?? null);
     for (const ev of this.frameEvents) {
       this.scene.pushEvent(ev, dungeon.sim);
-      this.audio.handleEvent(ev);
+      this.routeEventAudio(ev, dungeon.sim);
       if (ev.t === 'kill-credit') {
         const victim = dungeon.sim.unit(ev.victimUid);
         if (victim?.kind === 'creep' && victim.tier) this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid, dungeon.tier, victim.pos);
+      } else if (ev.t === 'capture-complete') {
+        this.handleCaptureComplete(ev, 'dungeon', dungeon.def.regionId);
       }
     }
     const guardian = REG.bosses.get(dungeon.def.guardian);
@@ -2524,9 +2729,11 @@ export class Game {
       bossHeroId: guardian?.heroId,
       bossPhaseHpPct: this.bossPhaseThresholdsForBossId(dungeon.def.guardian)
     });
+    this.audio.update?.({ biome: this.region.biome, dayTime: 0.5, inCombat: true, dt });
     for (const room of dungeon.drainCompletedRooms()) {
       this.grantDungeonRoomReward(dungeon.def, dungeon.tier, room, dungeon.selectedModifiers());
     }
+    this.scene.syncQuestGivers?.([]);
     this.scene.update(dungeon.sim, dungeon.cameraFollow(), dt, 0.5, this.cinematicPresentationView(), this.visibleGroundItemDrops());
     if (dungeon.done && dungeon.result) {
       const id = this.liveDungeonId!;
@@ -2601,9 +2808,35 @@ export class Game {
     };
   }
 
+  private grantDungeonRoomInteraction(tier: DifficultyTier, room: DungeonRoom): void {
+    const pos = this.controlledUnit()?.pos ?? this.activeUnit()?.pos ?? this.region.town.pos;
+    const tierMult = tier === 'hell' ? 2.1 : tier === 'nightmare' ? 1.55 : 1;
+    if (room.reward.kind === 'chest') {
+      const gold = Math.round((140 + room.index * 18) * tierMult);
+      this.awardGold(gold, 'dungeon-chest', pos, true);
+      this.msg(`Treasure chest opened: ${gold}g`, 'good');
+      return;
+    }
+    if (room.reward.kind === 'shrine') {
+      const dungeon = this.liveDungeon;
+      if (dungeon) {
+        for (const uid of dungeon.partyUids) {
+          const u = dungeon.sim.unit(uid);
+          if (!u?.alive) continue;
+          u.hp = Math.min(u.stats.maxHp, u.hp + u.stats.maxHp * 0.45);
+          u.mana = Math.min(u.stats.maxMana, u.mana + u.stats.maxMana * 0.55);
+        }
+      }
+      const gold = Math.round((70 + room.index * 10) * tierMult);
+      this.awardGold(gold, 'dungeon-shrine', pos, true);
+      this.msg(`Dungeon shrine restored the party and yielded ${gold}g`, 'good');
+    }
+  }
+
   private grantDungeonRoomReward(def: DungeonDef, tier: DifficultyTier, room: DungeonRoom, modifiers: string[] = []): void {
     const reward = room.reward;
     if (reward.kind === 'none' || reward.kind === 'rest' || !reward.table) return;
+    this.grantDungeonRoomInteraction(tier, room);
     const table = this.modifiedDungeonLootTable(def, reward.table, modifiers);
     const modSalt = modifiers.length > 0 ? `:${modifiers.join('+')}` : '';
     // Dry streaks persist per dungeon across runs so a slot's pity (e.g. the guardian
@@ -2993,14 +3226,19 @@ export class Game {
     const reached = new Set(Object.keys(this.regionVisits));
     reached.add(this.region.id);
     const claimed = new Set<string>();
-    for (const [id, q] of Object.entries(this.quests)) if (q.status === 'claimed') claimed.add(id);
+    const choices = new Map<string, string>();
+    for (const [id, q] of Object.entries(this.quests)) {
+      if (q.status === 'claimed') claimed.add(id);
+      if (q.choice) choices.set(id, q.choice);
+    }
     return {
       badges: this.badges.size,
       recruited: this.recruited.size,
       raidClears: this.totalRaidClears(),
       reachedRegions: reached,
       claimedQuests: claimed,
-      playtimeSec: this.playtime
+      playtimeSec: this.playtime,
+      questChoices: choices
     };
   }
 
@@ -3033,8 +3271,9 @@ export class Game {
     }
   }
 
-  /** Claim a completed quest's rewards. Chapters chain into their next quest. */
-  claimQuest(id: string): boolean {
+  /** Claim a completed quest's rewards. Chapters chain into their next quest;
+   *  a fork quest takes the chosen branch (its rewards + its own successor). */
+  claimQuest(id: string, choiceId?: string): boolean {
     const def = REG.questDefs.get(id);
     if (!def) return false;
     const cur = this.questSaveFor(def);
@@ -3042,15 +3281,19 @@ export class Game {
       this.msg('That quest is not ready to claim.', 'bad');
       return false;
     }
-    const { save, claimed } = questClaim(def, cur, this.questContext());
+    const branch = questChosenBranch(def, choiceId);
+    const { save, claimed } = questClaim(def, cur, this.questContext(), branch?.id);
     if (!claimed) return false;
     this.storeQuestState(def, save);
-    this.msg(`Quest complete: ${def.name}`, 'good');
+    this.msg(`Quest complete: ${def.name}${branch ? ` — ${branch.label}` : ''}`, 'good');
     this.playPresentationStinger('badge');
     for (const r of def.rewards) this.grantQuestReward(r);
+    if (branch) for (const r of branch.rewards) this.grantQuestReward(r);
     // `next` is the authoritative chain link: claiming a chapter unlocks its
-    // successor once that successor's remaining prereqs are met. Toast it.
-    const nextDef = def.next ? REG.questDefs.get(def.next) : undefined;
+    // successor once that successor's remaining prereqs are met. A fork instead
+    // unlocks the branch it just took. Toast whichever opened.
+    const nextId = branch ? branch.next : def.next;
+    const nextDef = nextId ? REG.questDefs.get(nextId) : undefined;
     const nextWasLocked = nextDef ? this.questSaveFor(nextDef).status === 'locked' : false;
     this.refreshQuests();
     if (nextDef && nextWasLocked && this.questSaveFor(nextDef).status !== 'locked') {
@@ -3142,7 +3385,8 @@ export class Game {
   questBoard(): {
     id: string; name: string; kind: QuestKind; summary: string; giver?: string; region?: string; regionId?: string;
     status: QuestStatus; objectives: { text: string; have: number; need: number }[];
-    rewards: string[]; dialogue?: string[]; claimable: boolean; cooldownLeft?: number;
+    rewards: string[]; dialogue?: string[]; claimable: boolean; cooldownLeft?: number; expiresIn?: number;
+    choices?: { id: string; label: string; rewards: string[]; note?: string }[];
   }[] {
     this.refreshQuests();
     const out: ReturnType<Game['questBoard']> = [];
@@ -3162,7 +3406,9 @@ export class Game {
         rewards: def.rewards.map((r) => this.rewardLabel(r)),
         dialogue: def.dialogue,
         claimable: save.status === 'complete',
-        cooldownLeft: save.status === 'cooldown' && save.availableAt !== undefined ? Math.max(0, Math.ceil(save.availableAt - this.playtime)) : undefined
+        cooldownLeft: save.status === 'cooldown' && save.availableAt !== undefined ? Math.max(0, Math.ceil(save.availableAt - this.playtime)) : undefined,
+        expiresIn: save.status === 'active' && save.expiresAt !== undefined ? Math.max(0, Math.ceil(save.expiresAt - this.playtime)) : undefined,
+        choices: def.choices?.map((c) => ({ id: c.id, label: c.label, rewards: c.rewards.map((r) => this.rewardLabel(r)), note: c.note }))
       });
     }
     // Order: ready-to-claim first (never miss a reward), then the region you are
@@ -3182,12 +3428,49 @@ export class Game {
   /** Quest-earned titles for the journal (codex-unlocked, named from the reward). */
   questTitles(): { id: string; name: string; note: string }[] {
     const titles: { id: string; name: string; note: string }[] = [];
+    const collect = (r: QuestReward) => {
+      if (r.kind === 'title' && this.codexUnlocks.has('title:' + r.id)) titles.push({ id: r.id, name: r.name, note: r.note });
+    };
     for (const def of REG.questDefs.values()) {
-      for (const r of def.rewards) {
-        if (r.kind === 'title' && this.codexUnlocks.has('title:' + r.id)) titles.push({ id: r.id, name: r.name, note: r.note });
-      }
+      for (const r of def.rewards) collect(r);
+      for (const c of def.choices ?? []) for (const r of c.rewards) collect(r);
     }
     return titles;
+  }
+
+  // ---------- walking quest givers (QUEST.md §3) ----------
+
+  /** Quests posted by a giver: those whose board (QuestDef.giver) matches it. */
+  giverQuests(giverId: string): ReturnType<Game['questBoard']> {
+    const giver = REG.questGivers.get(giverId);
+    if (!giver) return [];
+    return this.questBoard().filter((q) => q.giver === giver.board);
+  }
+
+  /** A giver's display name (for the HUD hint + board header). */
+  questGiverName(giverId: string): string {
+    return REG.questGivers.get(giverId)?.name ?? giverId;
+  }
+
+  /** Per-frame placement + state for the givers in the current region, so the
+   *  renderer can draw a moving NPC marker and pulse it when it has a reward. */
+  questGiverViews(): QuestGiverView[] {
+    const board = this.questBoard();
+    const out: QuestGiverView[] = [];
+    for (const g of REG.questGivers.values()) {
+      if (g.regionId !== this.region.id) continue;
+      const posted = board.filter((q) => q.giver === g.board);
+      const p = questGiverPos(g, this.playtime);
+      out.push({
+        id: g.id,
+        name: g.name,
+        x: p.x,
+        y: p.y,
+        hasClaimable: posted.some((q) => q.claimable),
+        hasActive: posted.some((q) => q.status === 'active')
+      });
+    }
+    return out;
   }
 
   // ---------- the Compendium: Atlas (Items) + Heroes (LOOT_OVERHAUL §3.7) ----------
@@ -4958,6 +5241,103 @@ export class Game {
     return true;
   }
 
+  /** Dishes the player can cook right now (GAMEPLAY_OVERHAUL §3.7). Cooking is a field
+   * service available out of combat at a town or shrine. */
+  canCook(): { ok: boolean; reason?: string } {
+    if (this.inCombat()) return { ok: false, reason: 'Cannot cook during combat' };
+    const u = this.activeUnit();
+    const nearShrine = !!u && dist(u.pos, this.region.shrine.pos) <= TUNING.exploration.cookRadius;
+    if (!this.inTown() && !nearShrine) return { ok: false, reason: 'Cook at a town or shrine' };
+    return { ok: true };
+  }
+
+  cookableDishes(): DishDef[] {
+    return [...REG.dishes.values()];
+  }
+
+  /** Cook a dish: spend its gold/ingredient cost and grant an out-of-combat heal, a
+   * one-shot revive of a fallen hero, or a timed exploration buff (the buff rides the
+   * existing statmod path). Returns true on a successful cook. */
+  cookDish(dishId: string): boolean {
+    const def = REG.dishes.get(dishId);
+    if (!def) {
+      this.msg('Unknown recipe', 'bad');
+      return false;
+    }
+    const allowed = this.canCook();
+    if (!allowed.ok) {
+      this.msg(allowed.reason ?? 'Cannot cook here', 'bad');
+      return false;
+    }
+    // revive needs a fallen hero before we charge for ingredients
+    let fallen: RosterEntry | undefined;
+    if (def.kind === 'revive') {
+      fallen = this.party.find((r) => r.respawnAt > this.sim.time);
+      if (!fallen) {
+        this.msg('No fallen hero to revive', 'bad');
+        return false;
+      }
+    }
+    if (this.gold < def.cost) {
+      this.msg(`${def.name} needs ${def.cost}g of ingredients`, 'bad');
+      return false;
+    }
+    this.gold -= def.cost;
+
+    switch (def.kind) {
+      case 'heal': {
+        const pct = def.restorePct ?? 1;
+        for (const rec of this.party) {
+          if (rec.respawnAt > this.sim.time) continue;
+          rec.hpPct = Math.min(1, rec.hpPct + pct);
+          rec.manaPct = Math.min(1, rec.manaPct + pct);
+          if (rec.unit && rec.unit.alive) {
+            rec.unit.hp = Math.min(rec.unit.stats.maxHp, rec.unit.hp + rec.unit.stats.maxHp * pct);
+            rec.unit.mana = Math.min(rec.unit.stats.maxMana, rec.unit.mana + rec.unit.stats.maxMana * pct);
+          }
+        }
+        this.msg(`${def.name} restores the party (-${def.cost}g)`, 'good');
+        break;
+      }
+      case 'revive': {
+        const rec = fallen!;
+        rec.respawnAt = this.sim.time;
+        rec.hpPct = Math.max(rec.hpPct, 1);
+        rec.manaPct = Math.max(rec.manaPct, 1);
+        this.msg(`${def.name} stands ${REG.hero(rec.heroId).name} back up (-${def.cost}g)`, 'good');
+        break;
+      }
+      case 'buff': {
+        if (def.buff) this.applyDishBuff(def);
+        this.msg(`${def.name} steels the party for the road (-${def.cost}g)`, 'good');
+        break;
+      }
+    }
+    return true;
+  }
+
+  /** Apply a cooked exploration buff to every fielded party hero through the statmod path. */
+  private applyDishBuff(def: DishDef): void {
+    if (!def.buff) return;
+    const mods: Record<string, number> = {};
+    for (const [k, v] of Object.entries(def.buff.mods)) mods[k] = v as number;
+    for (const rec of this.party) {
+      const u = rec.unit;
+      if (!u || !u.alive) continue;
+      u.addStatus({
+        status: 'buff',
+        tag: `dish:${def.id}`,
+        sourceUid: u.uid,
+        sourceTeam: u.team,
+        until: this.sim.time + def.buff.durationSec,
+        isDebuff: false,
+        mods: { ...mods }
+      });
+      u.markStatsDirty();
+      u.refresh(this.sim.time);
+    }
+  }
+
   // ---------- world spawning ----------
 
   private spawnCamps(savedRespawn: Record<string, number>): void {
@@ -5396,15 +5776,16 @@ export class Game {
   }
 
   tryCapture(uid: number): void {
-    const u = this.activeUnit();
-    const target = this.sim.unit(uid);
+    const sim = this.inputSim();
+    const u = this.controlledUnit();
+    const target = sim.unit(uid);
     if (!u || !target) return;
     const elig = this.captureEligible(target);
     if (!elig.ok) {
       this.msg(`Cannot capture: ${elig.reason}`, 'bad');
       return;
     }
-    this.sim.order(u.uid, { kind: 'capture', uid });
+    sim.order(u.uid, { kind: 'capture', uid });
     this.msg(`Binding ${target.name}...`, 'info');
   }
 
@@ -5707,6 +6088,13 @@ export class Game {
   }
 
   // ---------- entourage ----------
+
+  private fieldedDungeonEntourage(): CreepInstanceSave[] {
+    const byId = new Map(this.caught.map((inst) => [inst.uid, inst]));
+    return this.fielded
+      .map((uid) => byId.get(uid))
+      .filter((inst): inst is CreepInstanceSave => !!inst && !inst.faintedFor);
+  }
 
   fieldCreep(instanceUid: string, silent = false): boolean {
     const inst = this.caught.find((c) => c.uid === instanceUid);
@@ -6475,12 +6863,12 @@ export class Game {
     }
   }
 
-  private handleCaptureComplete(ev: Extract<SimEvent, { t: 'capture-complete' }>): void {
+  private handleCaptureComplete(ev: Extract<SimEvent, { t: 'capture-complete' }>, source: 'overworld' | 'dungeon' = 'overworld', regionId = this.region.id): void {
     const inst: CreepInstanceSave = { uid: newCreepInstanceId(), creepId: ev.creepId, star: 1 };
     this.caught.push(inst);
     const def = REG.creep(ev.creepId);
     this.codexUnlock('creep:' + ev.creepId); // capturing is the encounter (§3.14)
-    this.advanceQuests({ kind: 'capture-creeps', amount: 1, tier: def.tier, regionId: this.region.id });
+    this.advanceQuests({ kind: 'capture-creeps', amount: 1, tier: def.tier, regionId });
     this.msg(`Captured ${def.name}!`, 'good');
     const { list, merges } = mergeCreeps(this.caught);
     this.caught = list;
@@ -6494,9 +6882,11 @@ export class Game {
           const u = this.sim.unit(simUid);
           if (u && u.alive) this.sim.removeUnit(simUid);
           this.fieldedUnits.delete(instId);
+          this.liveDungeon?.removeEntourage(instId);
         }
       }
     }
+    if (source === 'dungeon') this.msg('The binding holds through the descent.', 'info');
     this.autosave('capture');
   }
 
@@ -6633,6 +7023,10 @@ export class Game {
     if (this.sprintModUid !== -1 && this.sprintModUid !== u.uid) this.sprintModUid = -1;
     const staminaMax = this.staminaMax();
     if (this.stamina > staminaMax) this.stamina = staminaMax;
+
+    // Verticality first (§3.3): a scripted climb/glide or swim takes priority over sprint.
+    if (this.updateTraversal(u, dt)) return;
+
     const moving = u.order.kind === 'move' || u.order.kind === 'attack-move' || u.order.kind === 'attack-unit';
     const sprinting = this.sprintHeld && moving && this.stamina > 0 && !u.summary.rooted && !u.summary.stunned && !u.summary.cycloned && !u.summary.sleeping && !u.summary.frozen;
     this.setSprintMod(u, sprinting);
@@ -6646,6 +7040,152 @@ export class Game {
     if (this.sim.time >= this.staminaRegenReadyAt) {
       this.stamina = Math.min(staminaMax, this.stamina + TUNING.traversal.staminaRegenPerSec * dt);
     }
+  }
+
+  // ---------- verticality & traversal (GAMEPLAY_OVERHAUL §3.3, G3) ----------
+
+  /** Current locomotion state, for HUD readout, render, and traversal prompts. */
+  locomotionState(): 'ground' | 'climb' | 'glide' | 'swim' {
+    if (this.traversal) return this.traversal.kind;
+    return this.swimModUid !== -1 ? 'swim' : 'ground';
+  }
+
+  /** Active hero's elevation tier index (0 = ground). */
+  elevationTier(): number {
+    return this.heroTier;
+  }
+
+  /** World-height of a tier (for render). Falls back to a flat ladder when a region
+   * declares no explicit tier heights. */
+  private tierHeight(tier: number): number {
+    const tiers = this.region.elevation?.tiers;
+    if (tiers && tiers[tier] !== undefined) return tiers[tier];
+    return tier * 220;
+  }
+
+  /** A climb point the active hero can use right now (matching its current tier in either direction). */
+  nearbyClimbPoint(): NonNullable<RegionDef['climbPoints']>[number] | null {
+    const u = this.activeUnit();
+    if (!u || this.traversal) return null;
+    const r = TUNING.traversal.connectorRadius;
+    return (this.region.climbPoints ?? []).find((c) =>
+      dist(u.pos, c.pos) <= r && (c.fromTier === this.heroTier || c.toTier === this.heroTier)
+    ) ?? null;
+  }
+
+  /** A glide point the active hero can launch from right now (must be on its from-tier). */
+  nearbyGlidePoint(): NonNullable<RegionDef['glidePoints']>[number] | null {
+    const u = this.activeUnit();
+    if (!u || this.traversal) return null;
+    const r = TUNING.traversal.connectorRadius;
+    return (this.region.glidePoints ?? []).find((g) =>
+      dist(u.pos, g.pos) <= r && g.fromTier === this.heroTier && this.heroTier > 0
+    ) ?? null;
+  }
+
+  /** Begin a scripted climb at a nearby climb point. Ascends or descends one tier,
+   * draining stamina over the climb; running dry mid-climb slides back down (§3.3). */
+  tryClimb(): boolean {
+    if (this.traversal || this.swimModUid !== -1) return false;
+    const u = this.activeUnit();
+    const point = this.nearbyClimbPoint();
+    if (!u || !point) {
+      this.msg('No climb point in reach', 'bad');
+      return false;
+    }
+    if (this.stamina <= 0) {
+      this.msg('Too winded to climb', 'bad');
+      return false;
+    }
+    const toTier = point.fromTier === this.heroTier ? point.toTier : point.fromTier;
+    u.order = { kind: 'stop' };
+    this.traversal = { kind: 'climb', t: 0, dur: TUNING.traversal.climbDurationSec, fromTier: this.heroTier, toTier };
+    u.setCastGesture('dash', { now: this.sim.time, lockUntil: this.sim.time + TUNING.traversal.climbDurationSec });
+    return true;
+  }
+
+  /** Deploy the glider at a nearby glide point: a free, committing descent of one tier (§3.3). */
+  tryGlide(): boolean {
+    if (this.traversal || this.swimModUid !== -1) return false;
+    const u = this.activeUnit();
+    const point = this.nearbyGlidePoint();
+    if (!u || !point) {
+      this.msg('No height to glide from', 'bad');
+      return false;
+    }
+    u.order = { kind: 'stop' };
+    this.traversal = { kind: 'glide', t: 0, dur: TUNING.traversal.glideDescentSec, fromTier: this.heroTier, toTier: Math.max(0, this.heroTier - 1) };
+    u.setCastGesture('dash', { now: this.sim.time, lockUntil: this.sim.time + TUNING.traversal.glideDescentSec });
+    return true;
+  }
+
+  /** Advance climb/glide scripts and the swim state. Returns true while a vertical state
+   * owns locomotion (so sprint/stamina-regen are skipped this tick). */
+  private updateTraversal(u: Unit, dt: number): boolean {
+    if (this.traversal) {
+      const tr = this.traversal;
+      if (tr.kind === 'climb') {
+        this.stamina = Math.max(0, this.stamina - TUNING.traversal.climbDrainPerSec * dt);
+        this.staminaRegenReadyAt = this.sim.time + TUNING.traversal.regenDelaySec;
+        if (this.stamina <= 0) {
+          // ran dry mid-climb: slide back to where we started
+          this.heroTier = tr.fromTier;
+          u.renderHeight = this.tierHeight(tr.fromTier);
+          this.traversal = null;
+          this.msg('Out of stamina — slid back down', 'bad');
+          return true;
+        }
+      }
+      tr.t = Math.min(tr.dur, tr.t + dt);
+      const p = tr.dur > 0 ? tr.t / tr.dur : 1;
+      u.renderHeight = this.tierHeight(tr.fromTier) + (this.tierHeight(tr.toTier) - this.tierHeight(tr.fromTier)) * p;
+      if (tr.t >= tr.dur) {
+        this.heroTier = tr.toTier;
+        u.renderHeight = this.tierHeight(tr.toTier);
+        this.traversal = null;
+      }
+      return true;
+    }
+
+    // swim: entering a water zone slows movement and drains stamina; deep water at zero
+    // stamina is a soft fail (wash back to the last dry footing), never instant death.
+    const zone = this.waterZoneAt(u.pos);
+    if (zone) {
+      this.setSwimMod(u, true);
+      this.stamina = Math.max(0, this.stamina - TUNING.traversal.swimDrainPerSec * dt);
+      this.staminaRegenReadyAt = this.sim.time + TUNING.traversal.regenDelaySec;
+      if (zone.deep && this.stamina <= 0 && this.lastSafePos) {
+        u.pos = { ...this.lastSafePos };
+        u.order = { kind: 'stop' };
+        this.stamina = Math.min(this.staminaMax(), TUNING.traversal.washbackStaminaRefund);
+        this.setSwimMod(u, false);
+        this.msg('The current washes you back to shore', 'bad');
+      }
+      u.renderHeight = this.tierHeight(this.heroTier);
+      return true;
+    }
+    this.setSwimMod(u, false);
+    this.lastSafePos = { ...u.pos };
+    u.renderHeight = this.tierHeight(this.heroTier);
+    return false;
+  }
+
+  private waterZoneAt(pos: Vec2): NonNullable<RegionDef['waterZones']>[number] | null {
+    for (const z of this.region.waterZones ?? []) {
+      if (pointInPolygon(pos, z.poly)) return z;
+    }
+    return null;
+  }
+
+  private setSwimMod(u: Unit | null, enabled: boolean): void {
+    if (!u) return;
+    const amount = (TUNING.traversal.swimSpeedMult - 1) * 100; // negative: a slow
+    const active = this.swimModUid === u.uid;
+    if (enabled === active) return;
+    u.externalMods.moveSpeedPct = (u.externalMods.moveSpeedPct ?? 0) + (enabled ? amount : -amount);
+    u.markStatsDirty();
+    u.refresh(this.sim.time);
+    this.swimModUid = enabled ? u.uid : -1;
   }
 
   private updateWorldElements(): void {
@@ -6662,6 +7202,23 @@ export class Game {
     }
     if (this.carriedElement && this.carriedElement.until <= this.sim.time) this.carriedElement = null;
     if (this.carriedElement) this.updateElementPuzzles(this.carriedElement.element);
+  }
+
+  /** Ambient elemental weather (GAMEPLAY_OVERHAUL §3.7): on its interval, a region's
+   * weather state applies its element to every outdoor unit through the same field path
+   * an element source uses. Gated by the day/night clock and by Resonance. */
+  private updateWeather(): void {
+    const w = this.region.weather;
+    if (!w || !this.sim.resonanceEnabled) return;
+    if (w.night !== undefined && this.isNight() !== w.night) return;
+    if (this.sim.time < this.weatherNextAt) return;
+    this.weatherNextAt = this.sim.time + w.interval;
+    const src = this.activeUnit();
+    if (!src || !src.alive) return;
+    for (const u of this.sim.unitsArr) {
+      if (!u.alive || u.kind === 'ward' || u.kind === 'npc') continue;
+      applyElementAura(this.sim, src, u, w.element, 1, u.team !== src.team);
+    }
   }
 
   private updateElementPuzzles(element: ActiveElement): void {
@@ -6745,10 +7302,12 @@ export class Game {
       return;
     }
     if (this.cinematic.active) {
+      this.scene.syncQuestGivers?.(this.questGiverViews());
       this.scene.update(this.sim, this.activeUnit(), 0, this.dayTime, this.cinematicPresentationView(), this.visibleGroundItemDrops());
       return;
     }
     if (this.paused) {
+      this.scene.syncQuestGivers?.(this.questGiverViews());
       this.scene.update(this.sim, this.activeUnit(), 0, this.dayTime, this.cinematicPresentationView(), this.visibleGroundItemDrops());
       return;
     }
@@ -6760,6 +7319,7 @@ export class Game {
     this.refreshDayNightMods();
     this.updateLocomotion(dt);
     this.updateWorldElements();
+    this.updateWeather();
 
     // fixed-step sim
     this.accumulator += dt;
@@ -6787,9 +7347,10 @@ export class Game {
     // drain + route events
     this.frameEvents = [...this.sim.events.drain(), ...this.queuedPresentationEvents];
     this.queuedPresentationEvents = [];
+    this.audio.setListener?.(this.activeUnit()?.pos ?? null);
     for (const ev of this.frameEvents) {
       this.scene.pushEvent(ev, this.sim);
-      this.audio.handleEvent(ev);
+      this.routeEventAudio(ev, this.sim);
       this.activeTrial?.observe(ev);
       switch (ev.t) {
         case 'kill-credit':
@@ -6881,6 +7442,7 @@ export class Game {
     }
 
     this.audio.update?.({ biome: this.region.biome, dayTime: this.dayTime, inCombat: this.inCombat(), dt });
+    this.scene.syncQuestGivers?.(this.questGiverViews());
     this.scene.update(this.sim, this.activeUnit(), dt, this.dayTime, this.cinematicPresentationView(), this.visibleGroundItemDrops());
   }
 }

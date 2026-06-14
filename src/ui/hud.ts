@@ -257,12 +257,14 @@ export class Hud {
   private trialChoice: HTMLElement;
   private lastTrialChoiceKey = '';
   private liveGymBar: HTMLElement;
+  private combatReadout: HTMLElement;
   private cinematicLayer: HTMLElement;
   private hoverCard!: HTMLElement;
   private tips = new Map<string, string>();
   private hoverKey: string | null = null;
   private hoverKind: 'ui' | 'world' | null = null;
   private lastLiveGymKey = '';
+  private lastCombatReadoutKey = '';
   private draggingItemSlot: number | null = null;
   private readonly onItemDragOver = (e: DragEvent): void => {
     if (this.draggingItemSlot === null) return;
@@ -290,6 +292,8 @@ export class Hud {
   private coinFx: CoinFx[] = [];
   private shownToasts = 0;
   private modalKind: 'none' | 'party' | 'shop' | 'menu' | 'talents' | 'journal' | 'codex' | 'gambit' | 'prefight' | 'dungeon-entry' | 'services' = 'none';
+  /** When the Journal is opened by talking to a giver, spotlight its board. */
+  private questGiverFocus: string | null = null;
   private captureUntil = 0;
   private captureDur = 1;
   private vec = new THREE.Vector3();
@@ -319,6 +323,7 @@ export class Hud {
       <div id="hero-panel"></div>
       <div id="hud-hint"></div>
       <div id="trial-choice" class="hidden"></div>
+      <div id="combat-readout" class="hidden"></div>
       <div id="live-gym-bar" class="hidden"></div>
       <div id="cinematic-layer" class="hidden"></div>
       <div id="modal-root" class="hidden"></div>
@@ -340,6 +345,7 @@ export class Hud {
       if (btn?.dataset.choice) this.game.resolveTrialChoice(btn.dataset.choice);
     });
     this.liveGymBar = this.root.querySelector('#live-gym-bar')!;
+    this.combatReadout = this.root.querySelector('#combat-readout')!;
     this.cinematicLayer = this.root.querySelector('#cinematic-layer')!;
     this.liveGymBar.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('[data-livegym]') as HTMLElement | null;
@@ -366,6 +372,7 @@ export class Hud {
     });
     this.game.onOpenGymPrefight = (gymId) => this.openGymPrefight(gymId);
     this.game.onOpenDungeonEntry = (dungeonId) => this.openDungeonEntry(dungeonId);
+    this.game.onOpenQuestGiver = (giverId) => this.openQuestGiver(giverId);
     this.displayGold = this.game.gold;
     this.goldTweenFrom = this.game.gold;
     this.goldTweenTo = this.game.gold;
@@ -627,6 +634,7 @@ export class Hud {
     this.renderWorldHoverCard();
     this.renderTrialChoice();
     this.renderLiveGym();
+    this.renderCombatReadout();
     this.renderCinematic();
     if (this.modalKind === 'shop' || this.modalKind === 'party') this.refreshModalDynamic();
   }
@@ -656,9 +664,16 @@ export class Hud {
         <span class="gold-amount">${Math.floor(this.displayGold)}</span><span class="gold-unit">g</span>
         ${streakActive ? `<span class="gold-streak">×${this.goldStreak}</span>` : ''}
       </span>
-      <span class="stamina-chip" title="Stamina: sprint and dash (${Math.round(g.stamina)}/${staminaMax})">
+      <span class="stamina-chip" title="Stamina: sprint, dash, climb and swim (${Math.round(g.stamina)}/${staminaMax})">
         <span>STA</span><b>${staminaPct}%</b><i><em style="width:${staminaPct}%"></em></i>
       </span>
+      ${(() => {
+        const state = g.locomotionState();
+        if (state !== 'ground') return `<span class="loco-chip" title="Traversal state">${state.toUpperCase()}</span>`;
+        if (g.nearbyClimbPoint()) return `<span class="loco-chip prompt" title="Elevation connector">G to climb</span>`;
+        if (g.nearbyGlidePoint()) return `<span class="loco-chip prompt" title="Elevation connector">G to glide</span>`;
+        return '';
+      })()}
       <span class="explore-chip" title="Region exploration">${exploration}% explored</span>
       <span class="resin-chip" title="Soft pacing resource">${resin}/${TUNING.resin.max} moonflow</span>
       <button class="top-btn" data-open="journal">Journal</button>
@@ -706,6 +721,10 @@ export class Hud {
     for (const src of g.region.elementSources ?? []) dot(src.pos.x, src.pos.y, 1.8, '#ff9f57');
     dot(g.region.town.pos.x, g.region.town.pos.y, 4, '#ffd86a', true);
     dot(g.region.shrine.pos.x, g.region.shrine.pos.y, 2.4, '#67d7ff');
+    // Walking quest givers: gold when a reward is ready, cyan when one is active.
+    for (const giver of g.questGiverViews()) {
+      dot(giver.x, giver.y, 2.6, giver.hasClaimable ? '#ffd24a' : giver.hasActive ? '#73d9ff' : '#8aa0b8', true);
+    }
     const u = g.activeUnit();
     if (u) {
       dot(u.pos.x, u.pos.y, 3.3, '#ffffff');
@@ -1210,6 +1229,10 @@ export class Hud {
       const def = REG.gym(gym.gymId);
       hint = `${def.name} — press G to challenge`;
     }
+    const giver = g.nearbyQuestGiver();
+    if (giver && this.modalKind === 'none' && !hint) {
+      hint = `${giver.name} — press G for bounties`;
+    }
     const gate = g.nearbyGate();
     if (gate && this.modalKind === 'none' && !hint) {
       const blockReason = g.gateTravelBlockReason(gate);
@@ -1259,7 +1282,10 @@ export class Hud {
     if (kind === 'shop') this.renderShopModal();
     if (kind === 'menu') this.renderMenuModal();
     if (kind === 'talents') this.renderTalentModal();
-    if (kind === 'journal') this.renderJournalModal();
+    if (kind === 'journal') {
+      this.questGiverFocus = null;
+      this.renderJournalModal();
+    }
     if (kind === 'codex') this.renderCodexModal();
     if (kind === 'services') this.renderServicesModal();
   }
@@ -1267,6 +1293,7 @@ export class Hud {
   closeModal(): void {
     if (this.modalKind === 'gambit') this.commitGambit();
     this.modalKind = 'none';
+    this.questGiverFocus = null;
     this.input.uiModalOpen = false;
     this.modal.classList.add('hidden');
     this.modal.innerHTML = '';
@@ -1680,9 +1707,20 @@ export class Hud {
     this.renderDungeonEntryModal();
   }
 
+  /** Talk to a walking quest giver: open the Journal focused on its board. */
+  openQuestGiver(giverId: string): void {
+    this.questGiverFocus = giverId;
+    if (this.modalKind !== 'journal') {
+      this.modalKind = 'journal';
+      this.input.uiModalOpen = true;
+      this.modal.classList.remove('hidden');
+    }
+    this.renderJournalModal();
+  }
+
   private renderDungeonEntryModal(): void {
     const dungeonId = this.dungeonEntryId!;
-    const { def, tiers, modifiers, progress } = this.game.dungeonEntryOptions(dungeonId);
+    const { def, tiers, modifiers, progress, lockReason } = this.game.dungeonEntryOptions(dungeonId);
     const tierButtons = (['normal', 'nightmare', 'hell'] as const)
       .map((tier) => `<label class="svc-row"><span class="svc-main"><b>${tier[0].toUpperCase()}${tier.slice(1)}</b></span><span class="svc-actions"><input type="radio" name="dungeon-tier" value="${tier}" ${tier === 'normal' ? 'checked' : ''} ${tiers.includes(tier) ? '' : 'disabled'}></span></label>`)
       .join('');
@@ -1697,17 +1735,21 @@ export class Hud {
     const progressText = progress
       ? `Clears ${progress.clears} · wipes ${progress.wipes} · best depth ${progress.bestDepth} · best tier ${progress.bestTier}${bestEndless !== undefined ? ` · endless L${bestEndless + 1}` : ''}`
       : 'No clears recorded yet.';
+    const lockHtml = lockReason ? `<section><h3>Locked</h3><p class="bad">${esc(lockReason)}</p></section>` : '';
+    const disabled = lockReason ? 'disabled' : '';
 
     this.modalShell(
       `${def.name} — Entry`,
       `<div class="services">
+        ${lockHtml}
         <section><h3>Tier</h3>${tierButtons}</section>
         <section><h3>Map Modifiers</h3>${modRows}</section>
         <section><h3>Progress</h3><p class="rr-sub">${progressText}</p></section>
         <div class="pf-foot">
-          <button class="btn accent big" data-dungeon-start="1">Open Descent</button>
-          <button class="btn big" data-dungeon-endless="1">Endless L${nextEndless + 1}</button>
-          <button class="btn" data-dungeon-daily="1">Daily</button>
+          <button class="btn accent big" data-dungeon-start="1" ${disabled}>Open Descent</button>
+          <button class="btn big" data-dungeon-endless="1" ${disabled}>Endless L${nextEndless + 1}</button>
+          <button class="btn" data-dungeon-daily="1" ${disabled}>Daily</button>
+          <button class="btn" data-dungeon-weekly="1" ${disabled}>Weekly</button>
           <button class="btn" data-dungeon-cancel="1">Back</button>
         </div>
       </div>`
@@ -1731,6 +1773,11 @@ export class Hud {
       const { tier, selected } = readTierMods();
       this.closeModal();
       this.game.startDungeon(dungeonId, tier, { modifiers: selected, seedMode: 'daily' });
+    });
+    this.modal.querySelector<HTMLElement>('[data-dungeon-weekly]')?.addEventListener('click', () => {
+      const { tier, selected } = readTierMods();
+      this.closeModal();
+      this.game.startDungeon(dungeonId, tier, { modifiers: selected, seedMode: 'weekly' });
     });
   }
 
@@ -2155,6 +2202,15 @@ export class Hud {
         </div>
       </div>`
     ).join('');
+    const cookKind = (k: 'heal' | 'revive' | 'buff') => k === 'heal' ? 'restores the party' : k === 'revive' ? 'revives a fallen hero' : 'short exploration buff';
+    const cookHtml = g.cookableDishes().map((d) =>
+      `<div class="svc-row">
+        <div class="svc-main"><b>${d.name}</b> <em>${cookKind(d.kind)}</em></div>
+        <div class="svc-actions">
+          <button class="btn small" data-cook="${d.id}" ${g.gold >= d.cost ? '' : 'disabled'}>Cook ${d.cost}g</button>
+        </div>
+      </div>`
+    ).join('');
 
     this.modalShell('Town Services', `
       <div class="services">
@@ -2183,6 +2239,7 @@ export class Hud {
               <button class="btn small accent" data-buyback="1" ${downIdx >= 0 ? '' : 'disabled'}>${buyLabel}</button>
             </div>
           </div>
+          <div class="svc-sub">Field Kitchen</div>${cookHtml}
           ${sinkHtml}
         </section>
       </div>`);
@@ -2306,10 +2363,59 @@ export class Hud {
     this.modal.querySelectorAll<HTMLElement>('[data-tome]').forEach((el) => el.addEventListener('click', () => { g.buyTome(Number(el.dataset.tome)); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-respec]').forEach((el) => el.addEventListener('click', () => { g.respec(Number(el.dataset.respec)); rerender(); }));
     this.modal.querySelector<HTMLElement>('[data-heal]')?.addEventListener('click', () => { g.healParty(); rerender(); });
+    this.modal.querySelectorAll<HTMLElement>('[data-cook]').forEach((el) => el.addEventListener('click', () => { g.cookDish(el.dataset.cook!); rerender(); }));
     this.modal.querySelector<HTMLElement>('[data-buyback]')?.addEventListener('click', () => { g.buyback(downIdx >= 0 ? downIdx : undefined); rerender(); });
   }
 
   // --- live gym overlay (§3.5): round score + both teams' Captain Call charges ---
+
+  // --- combat readability (COMBAT_OVERHAUL §3.4, C4): cast bars, boss threat, shared
+  //     focus, and the "ult ready → seize" prompt; full overlay during a live raid/gym ---
+  private renderCombatReadout(): void {
+    const r = this.game.combatReadout();
+    if (!r.active || this.game.cinematic.active) {
+      if (!this.combatReadout.classList.contains('hidden')) {
+        this.combatReadout.classList.add('hidden');
+        this.combatReadout.innerHTML = '';
+        this.lastCombatReadoutKey = '';
+      }
+      return;
+    }
+    const esc = (s: string) => s.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
+    const bars = r.castBars.slice(0, 4);
+    const key = [
+      r.live ? 'L' : 'C',
+      bars.map((b) => `${b.uid}:${b.ability}:${Math.round(b.pct * 12)}:${b.enemy ? 'e' : 'a'}:${b.isUlt ? 'u' : ''}`).join(','),
+      r.bossThreat ? `${r.bossThreat.bossName}>${r.bossThreat.targetName ?? '-'}${r.bossThreat.taunted ? '!' : ''}` : '',
+      r.sharedFocus?.name ?? '',
+      r.ultReady.map((u) => u.name).join('+')
+    ].join('|');
+    if (key === this.lastCombatReadoutKey) return;
+    this.lastCombatReadoutKey = key;
+
+    const castHtml = bars.map((b) =>
+      `<div class="cast-bar ${b.enemy ? 'enemy' : 'ally'} ${b.isUlt ? 'ult' : ''}">
+        <span class="cast-name">${esc(b.name)} — ${esc(b.ability)}${b.isUlt ? ' ✦' : ''}</span>
+        <i><em style="width:${Math.round(b.pct * 100)}%"></em></i>
+      </div>`
+    ).join('');
+    const threatHtml = r.bossThreat
+      ? `<div class="threat-line ${r.bossThreat.taunted ? 'taunted' : ''}">
+          <b>${esc(r.bossThreat.bossName)}</b> ${r.bossThreat.taunted ? 'is taunted onto' : '▸ targeting'} <span>${esc(r.bossThreat.targetName ?? 'no one')}</span>
+        </div>`
+      : '';
+    const focusHtml = r.sharedFocus
+      ? `<div class="focus-line">Team focus ▸ <span>${esc(r.sharedFocus.name)}</span></div>`
+      : '';
+    const ultHtml = r.ultReady.length
+      ? `<div class="ult-line">Ult ready: ${r.ultReady.map((u) => esc(u.name)).join(', ')}${r.live && !this.game.controlledUnit() ? ' — click a portrait to seize' : ''}</div>`
+      : '';
+
+    this.combatReadout.classList.remove('hidden');
+    this.combatReadout.innerHTML = `
+      <div class="readout-casts">${castHtml}</div>
+      <div class="readout-status">${threatHtml}${focusHtml}${ultHtml}</div>`;
+  }
 
   private renderLiveGym(): void {
     const fight = this.game.liveGym;
@@ -2342,6 +2448,12 @@ export class Hud {
         const nextType = next.type[0].toUpperCase() + next.type.slice(1);
         return `<button class="btn small" data-dungeon-exit="${next.index}">${next.index + 1}: ${nextType} · ${rewardText(next.reward.kind, next.reward.rarity)}</button>`;
       }).join('');
+      const routeRooms = [room, ...exitRooms].slice(0, 4);
+      const routeHtml = routeRooms.map((r, i) => {
+        const type = r.type[0].toUpperCase() + r.type.slice(1);
+        const marker = i === 0 ? 'Here' : 'Door';
+        return `${marker} ${r.index + 1}:${type}/${rewardText(r.reward.kind, r.reward.rarity)}`;
+      }).join(' → ');
       const exitLine = enemies > 0
         ? `${enemies} foes seal the exits`
         : dungeon.exitsUnlocked()
@@ -2352,13 +2464,14 @@ export class Hud {
       const modNames = mods.map((id) => dungeon.def.modifiers?.find((m) => m.id === id)?.name ?? id);
       const titleSuffix = endless.active ? ` · Endless L${endless.level + 1}` : '';
       const endlessLine = endless.active
-        ? `<div class="lg-calls">Greater progress ${endlessPct}% ${endlessPct >= 100 ? '· guardian!' : ''}</div>`
+        ? `<div class="lg-calls">Greater progress ${endlessPct}% ${endlessPct >= 100 ? '· guardian route open' : ''}</div>`
         : '';
       this.liveGymBar.innerHTML = `
         <div class="lg-score"><b>${dungeon.def.name}</b> · ${dungeon.tier}${titleSuffix} · Room ${room.index + 1}/${dungeon.layout.depth} · ${roomType}</div>
         <div class="lg-calls">Template <b>${template.id}</b> · ${Math.round(template.size.x)}×${Math.round(template.size.y)} · ${template.connectors.length} doors</div>
         <div class="lg-calls">Selected <b>${selectedName}</b></div>
         <div class="lg-calls">Packs ${pacing.spawnedPacks}/${pacing.plannedPacks}${modNames.length > 0 ? ` · ${modNames.join(', ')}` : ''}</div>
+        <div class="lg-calls">Route ${routeHtml}</div>
         ${endlessLine}
         <div class="lg-calls">${exitLine}</div>`;
       this.liveGymBar.querySelectorAll<HTMLElement>('[data-dungeon-exit]').forEach((el) => {
@@ -2574,13 +2687,38 @@ export class Hud {
       ? 'Champion dethroned — the ancients answer to you now.'
       : `Elite Five defeated: ${j.elite.defeated}/5${j.elite.defeated >= 5 ? ' — the Champion awaits.' : ''}`;
     const badges = j.badges.map((b) => b.replace(/-/g, ' ')).join(', ') || 'none yet';
-    const board = g.questBoard();
+    let board = g.questBoard();
+    // If the journal was opened by talking to a giver, float its board to the top.
+    const focusGiver = this.questGiverFocus && REG.questGivers.has(this.questGiverFocus) ? REG.questGiver(this.questGiverFocus) : null;
+    if (focusGiver) {
+      board = [...board].sort((a, b) => (a.giver === focusGiver.board ? 0 : 1) - (b.giver === focusGiver.board ? 0 : 1));
+    }
+    const giverHeader = focusGiver
+      ? `<p class="jr-flavor dim">Speaking with <b>${focusGiver.name}</b>${focusGiver.title ? ` — ${focusGiver.title}` : ''}.</p>`
+      : '';
+    const fmtTime = (s: number) => (s >= 3600 ? `${Math.ceil(s / 3600)}h` : s >= 60 ? `${Math.ceil(s / 60)}m` : `${s}s`);
     const questRows = board
       .map((q) => {
         const tag = q.kind === 'event' ? 'Chapter' : 'Bounty';
-        const stateLabel = q.claimable ? 'Ready' : q.status === 'cooldown' ? `Cooldown ${q.cooldownLeft ?? 0}s` : tag;
+        const stateLabel = q.claimable
+          ? 'Ready'
+          : q.status === 'cooldown'
+            ? `Cooldown ${fmtTime(q.cooldownLeft ?? 0)}`
+            : q.expiresIn !== undefined
+              ? `Expires ${fmtTime(q.expiresIn)}`
+              : tag;
         const objs = q.objectives.map((o) => `${o.text} ${Math.min(o.have, o.need)}/${o.need}`).join(' · ');
-        const claimBtn = q.claimable ? `<button class="btn small accent" data-claim-quest="${q.id}">Claim</button>` : '';
+        // A fork offers a button per branch; everything else a single Claim.
+        const claimBtn = q.claimable
+          ? q.choices && q.choices.length > 0
+            ? `<div class="jr-choices">${q.choices
+                .map(
+                  (c) =>
+                    `<button class="btn small accent" data-claim-quest="${q.id}" data-claim-choice="${c.id}" title="${c.note ? c.note.replace(/"/g, '&quot;') : ''}">${c.label}<span class="dim"> · ${c.rewards.join(', ')}</span></button>`
+                )
+                .join('')}</div>`
+            : `<button class="btn small accent" data-claim-quest="${q.id}">Claim</button>`
+          : '';
         const source = [q.giver ?? tag, q.region].filter(Boolean).join(' · ');
         const flavor = q.dialogue?.[0] ? `<p class="jr-flavor dim">&ldquo;${q.dialogue[0]}&rdquo;</p>` : '';
         return `
@@ -2610,6 +2748,7 @@ export class Hud {
         <b>${g.region.name}</b> · reputation ${repText} · recruited ${g.recruited.size}/${REG.heroes.size}
       </div>
       <h3>Bounties &amp; Chapters</h3>
+      ${giverHeader}
       ${questRows || '<p class="dim">No bounties or chapters open yet. They unlock as you recruit, badge up, and descend.</p>'}
       <h3>Recruitment</h3>
       ${rows || '<p class="dim">No open quest leads in this region yet. Find echo scars, gyms, and hero rumors to fill the journal.</p>'}
@@ -2627,7 +2766,7 @@ export class Hud {
     );
     this.modal.querySelectorAll<HTMLElement>('[data-claim-quest]').forEach((el) => {
       el.addEventListener('click', () => {
-        if (this.game.claimQuest(el.dataset.claimQuest!)) this.renderJournalModal();
+        if (this.game.claimQuest(el.dataset.claimQuest!, el.dataset.claimChoice)) this.renderJournalModal();
       });
     });
   }
