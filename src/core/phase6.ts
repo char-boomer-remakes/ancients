@@ -1,4 +1,4 @@
-import type { ArmoryLoadouts, DifficultyTier, DungeonProgressSave, GameSave, HeroLoadoutSlots } from './types';
+import type { ArmoryLoadouts, DifficultyTier, DungeonProgressSave, GameSave, HeroAugments, HeroLoadoutSlots, HeroSave, ItemSave } from './types';
 import { migratePhase5Save } from './phase5';
 
 // ------------------------------------------------------------------
@@ -71,11 +71,30 @@ export function higherDungeonTier(a: DifficultyTier, b: DifficultyTier): Difficu
   return TIER_RANK[a] >= TIER_RANK[b] ? a : b;
 }
 
+function augmentKindForItem(item: ItemSave | null | undefined): keyof HeroAugments | null {
+  if (!item) return null;
+  if (item.id === 'aghanims-scepter' || item.id === 'aghanims-blessing') return 'scepter';
+  if (item.id === 'aghanims-shard') return 'shard';
+  return null;
+}
+
+export function migrateHeroAugments(hero: HeroSave): HeroSave {
+  const augments: HeroAugments = { ...(hero.augments ?? {}) };
+  const items = hero.items.map((item) => {
+    const kind = augmentKindForItem(item);
+    if (!kind) return item;
+    augments[kind] = true;
+    return null;
+  }) as HeroSave['items'];
+  return { ...hero, items, augments };
+}
+
 export function migratePhase6Save(s: GameSave | { version: number; [k: string]: unknown }): GameSave {
   const base = migratePhase5Save(s as GameSave);
   return {
     ...base,
     version: 6,
+    roster: base.roster.map(migrateHeroAugments),
     loadouts: normalizeArmoryLoadouts((base as GameSave & { loadouts?: unknown }).loadouts),
     dungeonProgress: normalizeDungeonProgress((base as GameSave & { dungeonProgress?: unknown }).dungeonProgress)
   };

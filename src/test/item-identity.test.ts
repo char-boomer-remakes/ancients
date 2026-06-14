@@ -252,6 +252,37 @@ describe('rolled item identity', () => {
     expect(me.collectAttackMods().some((mod) => mod.spec.procDamage === 120)).toBe(true);
   });
 
+  it('applies rolled aura affixes through the item aura pass', () => {
+    const { sim, me } = lab();
+    const ally = sim.spawnHero(REG.hero('sven'), { team: 0, pos: { x: 1200, y: 1000 }, level: 10, ctrl: { kind: 'none' } });
+    const item = makeItemState(REG.item('platemail'));
+    item.affixes = [{ affixId: 'commanding', roll: 1, resolved: {} }];
+    me.items[0] = item;
+    me.markStatsDirty();
+    me.refresh(sim.time);
+    const beforeAllyArmor = ally.stats.armor;
+    const beforeSelfArmor = me.stats.armor;
+
+    sim.run(0.6);
+
+    expect(ally.stats.armor).toBeGreaterThanOrEqual(beforeAllyArmor + 2);
+    expect(me.stats.armor).toBeCloseTo(beforeSelfArmor);
+  });
+
+  it('applies rolled trigger affixes through item trigger dispatch', () => {
+    const { sim, me, foe } = lab();
+    const item = makeItemState(REG.item('daedalus'));
+    item.affixes = [{ affixId: 'battle-fed', roll: 1, resolved: {} }];
+    me.items[0] = item;
+    const beforeDamage = me.stats.damage;
+
+    applyDamage(sim, me, foe, 1e9, 'physical');
+    me.refresh(sim.time);
+
+    expect(me.triggerStacks.get('item:daedalus:on-kill')).toBe(1);
+    expect(me.stats.damage).toBeGreaterThanOrEqual(beforeDamage + 1);
+  });
+
   it('uses drop source floors when instancing boss loot', () => {
     const roll = rollItemDrops({
       guaranteed: ['daedalus'],
@@ -259,6 +290,16 @@ describe('rolled item identity', () => {
     }, 'normal', {}, new Rng(7), 'late', { source: 'boss' });
 
     expect(['sharp', 'refined', 'pristine']).toContain(roll.items[0].grade);
+  });
+
+  it('applies regional badge grade-floor bumps without changing the drop table', () => {
+    const roll = rollItemDrops({
+      guaranteed: ['broadsword'],
+      slots: []
+    }, 'normal', {}, new Rng(2), 'early', { gradeFloorBump: 1 });
+
+    expect(roll.items[0].id).toBe('broadsword');
+    expect(roll.items[0].grade).not.toBe('broken');
   });
 });
 

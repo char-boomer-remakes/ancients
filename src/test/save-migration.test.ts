@@ -189,6 +189,19 @@ describe('save v6 round-trip and migration', () => {
     expect(migrated?.dungeonProgress['frost-hollow']).toMatchObject({ clears: 2, wipes: 1, bestDepth: 8, bestTier: 'nightmare', lastModifiers: ['deep-map'] });
   });
 
+  it('migrates equipped Aghanim items into permanent hero augments', () => {
+    const save = newGameSave('juggernaut') as GameSave;
+    save.roster[0].items[0] = { id: 'aghanims-scepter', bound: true };
+    save.roster[0].items[1] = { id: 'aghanims-shard', bound: true };
+
+    const migrated = migratePhase6Save(save);
+
+    expect(migrated.roster[0].augments).toEqual({ scepter: true, shard: true });
+    expect(migrated.roster[0].items[0]).toBeNull();
+    expect(migrated.roster[0].items[1]).toBeNull();
+    expect(migratePhase6Save(migrated)).toEqual(migrated);
+  });
+
   it('migratePhase4Save is idempotent on a v4 save', () => {
     const save = newGameSave('juggernaut') as GameSave;
     save.reputation = 3;

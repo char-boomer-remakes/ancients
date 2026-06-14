@@ -1702,6 +1702,10 @@ export class Game {
 
   /** Difficulty tiers currently selectable for a boss (§3.6). */
   bossUnlockedTiers(bossId: string): DifficultyTier[] {
+  private regionalGradeFloorBump(regionId = this.region.id): number {
+    return this.badgeClearedFor(regionId) ? 1 : 0;
+  }
+
     const boss = REG.boss(bossId);
     const badge = this.badgeClearedFor(boss.region);
     const prog = this.difficulty[bossId];
@@ -1733,7 +1737,7 @@ export class Game {
       return { won: false };
     }
     const dryStreak = this.difficulty[bossId]?.dryClears ?? 0;
-    const loot = rollLoot(boss.loot, tier, dryStreak, bossLootSeed(boss, tier, dryStreak), this.lootBandForRegion(boss.region), 'boss');
+    const loot = rollLoot(boss.loot, tier, dryStreak, bossLootSeed(boss, tier, dryStreak), this.lootBandForRegion(boss.region), 'boss', { gradeFloorBump: this.regionalGradeFloorBump(boss.region) });
     const fullLoot = this.spendResinForLoot(TUNING.resin.bossCost);
     if (fullLoot) {
       this.deliverLoot(loot);
@@ -2112,7 +2116,7 @@ export class Game {
       dryStreaks,
       new Rng(stableContentSeed(`${def.id}:room-reward:${tier}:${room.index}${modSalt}`, Math.round(this.playtime))),
       this.lootBandForRegion(def.regionId),
-      { source: reward.kind === 'guardian' ? 'boss' : undefined }
+      { source: reward.kind === 'guardian' ? 'boss' : undefined, gradeFloorBump: this.regionalGradeFloorBump(def.regionId) }
     );
     this.dungeonProgress[def.id] = { ...(prev ?? { clears: 0, wipes: 0, bestDepth: 0, bestTier: 'normal' as DifficultyTier }), dryStreaks: roll.dryStreaks };
     if (roll.items.length === 0) return;
@@ -2173,7 +2177,7 @@ export class Game {
       this.msg('Title earned: True Champion — you held the Pit at its hardest.', 'good');
     }
     const dryStreak = this.raidProgress[raidId]?.dryStreak ?? 0;
-    const loot = rollLoot(def.loot, tier, dryStreak, stableContentSeed(`${raidId}:loot:${tier}`, clears), this.currentLootBand(), 'raid');
+    const loot = rollLoot(def.loot, tier, dryStreak, stableContentSeed(`${raidId}:loot:${tier}`, clears), this.currentLootBand(), 'raid', { gradeFloorBump: this.regionalGradeFloorBump() });
     const next = { ...(this.raidProgress[raidId] ?? { clears: 0, dryStreak: 0 }) };
     next.clears = clears + 1;
     next.dryStreak = loot.dryStreak;
@@ -2664,7 +2668,7 @@ export class Game {
   private rollItemDropsForCreep(creepId: string | undefined, tier: CreepTier, salt: number, difficulty: DifficultyTier = 'normal'): void {
     const table = (creepId ? REG.creep(creepId).drops : undefined) ?? DEFAULT_CREEP_DROP_TABLES[tier];
     const seed = stableContentSeed(`${this.region.id}:creep-drops:${tier}:${difficulty}`, Math.round(this.sim.time * 1000) + salt);
-    const roll = rollItemDrops(table, difficulty, {}, new Rng(seed), this.currentLootBand());
+    const roll = rollItemDrops(table, difficulty, {}, new Rng(seed), this.currentLootBand(), { gradeFloorBump: this.regionalGradeFloorBump() });
     if (roll.items.length === 0) return;
     this.addDroppedItems(roll.items);
     const names = roll.items.map((it) => REG.item(it.id).name).join(', ');
@@ -2682,7 +2686,7 @@ export class Game {
       .map((item) => item.id);
     const id = this.rollMarketItem(candidates, `elite-creep:${tier}:${salt}`);
     if (!id) return;
-    const item = instantiateDroppedItem(id, difficulty, new Rng(stableContentSeed(`elite-creep-copy:${id}`, salt)), undefined, 'creep');
+    const item = instantiateDroppedItem(id, difficulty, new Rng(stableContentSeed(`elite-creep-copy:${id}`, salt)), undefined, 'elite', this.regionalGradeFloorBump());
     const drops = this.addDroppedItems([item]);
     if (drops.length > 0) this.msg(`Elite drop: ${REG.item(id).name} (→ Armory)`, 'good', this.dropAccent(drops));
   }
@@ -2757,7 +2761,7 @@ export class Game {
   private rollEchoComponentDrop(heroId: string): ItemSave[] {
     const difficulty = creepCombatTier(this.region.id);
     const seed = stableContentSeed(`${heroId}:echo-drop:${difficulty}`, this.party.find((r) => r.heroId === heroId)?.echo.kills ?? 0);
-    const roll = rollItemDrops(this.echoComponentTable(heroId), difficulty, {}, new Rng(seed), this.currentLootBand());
+    const roll = rollItemDrops(this.echoComponentTable(heroId), difficulty, {}, new Rng(seed), this.currentLootBand(), { gradeFloorBump: this.regionalGradeFloorBump() });
     if (roll.items.length === 0) return [];
     const drops = this.addDroppedItems(roll.items);
     this.msg(`Echo drop: ${roll.items.map((it) => REG.item(it.id).name).join(', ')} (→ Armory)`, 'good', this.dropAccent(roll.items));
@@ -3155,7 +3159,8 @@ export class Game {
       creepCombatTier(this.region.id),
       new Rng(stableContentSeed(`market-copy:${source}:${salt}:${id}`, Math.round(this.playtime))),
       opts.quality,
-      source
+      source,
+      this.regionalGradeFloorBump()
     );
     if (opts.bound) item.bound = true;
     return item;

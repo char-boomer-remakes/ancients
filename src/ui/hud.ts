@@ -4,6 +4,7 @@ import { QUALITY_GRADES, qualityColor, rarityColor } from '../data/quality';
 import { affixDef } from '../data/affixes';
 import { GRADE_DEFS } from '../data/grade';
 import { gemDef } from '../data/gems';
+import { itemSetDef } from '../data/sets';
 import { xpProgress } from '../core/progression';
 import { itemReady, sellValue, computeBuyPlan } from '../core/items';
 import { buybackCost } from '../core/phase3';
@@ -178,7 +179,24 @@ function gradeLabel(item: { grade?: ItemSave['grade']; affixes?: ItemSave['affix
   return `${def.name}${pips}${affixes ? ` · ${affixes}` : ''}${sockets}`;
 }
 
-function itemTooltip(def: ItemDef, item: ItemSave): string {
+function setProgressLines(item: ItemSave, equipped: (ItemSave | null)[] = []): string[] {
+  const def = REG.item(item.id);
+  if (!def.set) return [];
+  const set = itemSetDef(def.set);
+  if (!set) return [];
+  const equippedIds = new Set(equipped.filter((it): it is ItemSave => !!it).map((it) => it.id));
+  equippedIds.add(item.id);
+  const pieces = set.pieces.filter((id) => equippedIds.has(id)).length;
+  const pieceNames = set.pieces.map((id) => `${equippedIds.has(id) ? '+' : '-'} ${REG.item(id).name}`).join(' · ');
+  const bonuses = set.bonuses
+    .map((bonus) => {
+      const mods = bonus.mods ? statLines(bonus.mods, 5).join(', ') : 'special bonus';
+      return `${bonus.atPieces}p ${pieces >= bonus.atPieces ? 'active' : 'locked'}: ${mods}`;
+    });
+  return [`Set: ${set.name} ${pieces}/${set.pieces.length}`, ...bonuses, `Pieces: ${pieceNames}`];
+}
+
+function itemTooltip(def: ItemDef, item: ItemSave, equipped: (ItemSave | null)[] = []): string {
   const lines = [
     def.name,
     gradeLabel(item),
@@ -192,7 +210,7 @@ function itemTooltip(def: ItemDef, item: ItemSave): string {
       const gem = socket ? gemDef(socket) : null;
       return `Socket ${i + 1}: ${gem ? gem.name : 'empty'}`;
     }),
-    def.set ? `Set: ${def.set}` : '',
+    ...setProgressLines(item, equipped),
     def.lore
   ].filter(Boolean);
   return lines.join('\n');
@@ -536,6 +554,7 @@ export class Hud {
     });
 
     let itemsHtml = '';
+    const equippedSaves = u.items.map((slot) => (slot ? ({ ...slot, id: slot.defId } as ItemSave) : null));
     u.items.forEach((it, i) => {
       const keyed = i < TUNING.activeItemSlots;
       if (!it) {
@@ -556,7 +575,7 @@ export class Hud {
       const gTip = ` [${gradeLabel(savedItem)}]`;
       const gradeFrame = `outline:2px solid ${gDef.frame};`;
       itemsHtml += `
-        <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}" title="${esc(itemTooltip(idef, savedItem))}${qTip}${gTip}" style="border-color:${rarityColor(idef.rarity)};${gradeFrame}${qBorder}">
+        <div class="item-slot ${keyed ? '' : 'passive-slot'} ${lockout ? 'lockout' : ''}" title="${esc(itemTooltip(idef, savedItem, equippedSaves))}${qTip}${gTip}" style="border-color:${rarityColor(idef.rarity)};${gradeFrame}${qBorder}">
           <img src="${itemIcon(idef)}" alt="">
           ${cdLeft > 0 ? `<span class="cd-num">${cdLeft.toFixed(cdLeft > 5 ? 0 : 1)}</span>` : ''}
           ${it.charges >= 0 ? `<span class="charges">${it.charges}</span>` : ''}
@@ -1573,8 +1592,10 @@ export class Hud {
             ? `<div class="item-compare ${comparison.cls}"><b>${comparison.verdict}</b> vs ${equipped ? REG.item(equipped.id).name : 'empty'} <span>${comparison.delta > 0 ? '+' : ''}${comparison.delta}</span>${comparison.lines.length ? `<em>${comparison.lines.join(' · ')}</em>` : ''}</div>`
             : '';
           const detailLines = !gem ? statLines(itemMods(it, def), 8) : statLines(gem.mods, 4);
+          const setLines = !gem ? setProgressLines(it, activeHero?.items ?? []) : [];
           const detailsHtml = [
             detailLines.length ? `<div class="item-stat-lines">${detailLines.map(esc).join(' · ')}</div>` : '',
+            setLines.length ? `<div class="item-stat-lines">${setLines.slice(0, 3).map(esc).join(' · ')}</div>` : '',
             !gem && (it.affixes ?? []).length > 0
               ? `<div class="affix-lines">${(it.affixes ?? []).map((affix, affixIdx) => {
                   const aDef = affixDef(affix.affixId);
@@ -1613,7 +1634,7 @@ export class Hud {
           const augmentButton = augmentKind
             ? `<button class="btn small accent" data-arm-augment="${i}" ${activeHero?.augments?.[augmentKind] ? 'disabled' : ''}>Absorb</button>`
             : '';
-          return `<div class="svc-row item-row ${it.locked ? 'locked' : ''}" title="${esc(itemTooltip(def, it))}" style="border-left:3px solid ${rarityColor(def.rarity)}; outline:1px solid ${gDef.frame}">
+          return `<div class="svc-row item-row ${it.locked ? 'locked' : ''}" title="${esc(itemTooltip(def, it, activeHero?.items ?? []))}" style="border-left:3px solid ${rarityColor(def.rarity)}; outline:1px solid ${gDef.frame}">
             <div class="svc-main"><b style="color:${rarityColor(def.rarity)}">${def.name}</b> <em>${flags}${qLabel}${it.locked ? ' · locked' : ''}</em><div class="rr-sub">${def.lore}</div>${comparisonHtml}${detailsHtml}</div>
             <div class="svc-actions">
               ${gem ? '' : `<select class="small-select" data-arm-pick="${i}">${heroOptions}</select><button class="btn small" data-arm-hero-eq="${i}">Equip</button>`}

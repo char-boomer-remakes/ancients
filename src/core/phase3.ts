@@ -1,7 +1,7 @@
 import { TUNING } from '../data/tuning';
 import { rollAffixesFor } from '../data/affixes';
 import { refreshResolvedMods } from '../data/forge';
-import { gradeFloor, rollGrade, type GradeFloorSource } from '../data/grade';
+import { gradeFloor, ITEM_GRADES, rollGrade, type GradeFloorSource } from '../data/grade';
 import { isGemId, socketsForDrop } from '../data/gems';
 import { REG } from './registry';
 import { Rng, hashString } from './rng';
@@ -14,6 +14,7 @@ import type {
   DraftDef,
   GameSave,
   ItemDropTable,
+  ItemGrade,
   ItemQuality,
   ItemRarity,
   ItemSave,
@@ -36,6 +37,11 @@ export interface ItemDropRoll {
   items: ItemSave[];
   dryStreaks: Record<string, number>;
   pityUsed: boolean;
+}
+
+export interface ItemDropRollOptions {
+  source?: DropSource | GradeFloorSource;
+  gradeFloorBump?: number;
 }
 
 const QUALITY_ORDER: ItemQuality[] = ['unusual', 'corrupted', 'frozen', 'genuine', 'inscribed', 'standard'];
@@ -106,13 +112,19 @@ function gradeSourceForDrop(source?: DropSource | GradeFloorSource): GradeFloorS
   }
 }
 
-export function instantiateDroppedItem(id: string, tier: DifficultyTier, rng: Rng, quality?: ItemQuality, source?: DropSource | GradeFloorSource): ItemSave {
+function bumpGradeFloor(floor: ItemGrade, bump = 0): ItemGrade {
+  if (bump <= 0) return floor;
+  const idx = ITEM_GRADES.indexOf(floor);
+  return ITEM_GRADES[Math.min(ITEM_GRADES.length - 1, idx + Math.floor(bump))];
+}
+
+export function instantiateDroppedItem(id: string, tier: DifficultyTier, rng: Rng, quality?: ItemQuality, source?: DropSource | GradeFloorSource, gradeFloorBump = 0): ItemSave {
   const item: ItemSave = { id };
   if (quality) item.quality = quality;
   if (!itemSupportsRolledIdentity(id)) return item;
 
   const def = REG.item(id);
-  const floor = gradeFloor(def, { difficulty: tier, source: gradeSourceForDrop(source) });
+  const floor = bumpGradeFloor(gradeFloor(def, { difficulty: tier, source: gradeSourceForDrop(source) }), gradeFloorBump);
   const grade = rollGrade(floor, rng.next());
   const gradeRoll = rng.next();
   const affixes = rollAffixesFor(def, grade, tier, rng);
@@ -151,8 +163,8 @@ export function lootTableToDropTable(table: LootTable, source?: DropSource): Ite
   };
 }
 
-export function rollItemDrops(table: ItemDropTable, tier: DifficultyTier, dryStreaks: Record<string, number>, rng: Rng, band?: LootBand, opts: { source?: DropSource | GradeFloorSource } = {}): ItemDropRoll {
-  const items: ItemSave[] = table.guaranteed.map((id) => instantiateDroppedItem(id, tier, rng, undefined, opts.source));
+export function rollItemDrops(table: ItemDropTable, tier: DifficultyTier, dryStreaks: Record<string, number>, rng: Rng, band?: LootBand, opts: ItemDropRollOptions = {}): ItemDropRoll {
+  const items: ItemSave[] = table.guaranteed.map((id) => instantiateDroppedItem(id, tier, rng, undefined, opts.source, opts.gradeFloorBump));
   const nextDry = { ...dryStreaks };
   let pityUsed = false;
 
@@ -169,7 +181,7 @@ export function rollItemDrops(table: ItemDropTable, tier: DifficultyTier, dryStr
       }
       const entry = pickDropEntry(slot, rng, band);
       const quality = rollQuality(entry, slot, tier, rng);
-      items.push(instantiateDroppedItem(entry.id, tier, rng, quality, slot.source ?? opts.source));
+      items.push(instantiateDroppedItem(entry.id, tier, rng, quality, slot.source ?? opts.source, opts.gradeFloorBump));
       dry = 0;
       pityUsed = pityUsed || pity;
     }
@@ -179,8 +191,8 @@ export function rollItemDrops(table: ItemDropTable, tier: DifficultyTier, dryStr
   return { items, dryStreaks: nextDry, pityUsed };
 }
 
-export function rollLoot(table: LootTable, tier: DifficultyTier, dryStreak: number, seed: number, band?: LootBand, source?: DropSource): LootRoll {
-  const roll = rollItemDrops(lootTableToDropTable(table, source), tier, { assembled: dryStreak }, new Rng(seed), band, { source });
+export function rollLoot(table: LootTable, tier: DifficultyTier, dryStreak: number, seed: number, band?: LootBand, source?: DropSource, opts: { gradeFloorBump?: number } = {}): LootRoll {
+  const roll = rollItemDrops(lootTableToDropTable(table, source), tier, { assembled: dryStreak }, new Rng(seed), band, { source, gradeFloorBump: opts.gradeFloorBump });
   const guaranteed = roll.items.slice(0, table.guaranteed.length);
   const assembled = roll.items[table.guaranteed.length];
   return {
