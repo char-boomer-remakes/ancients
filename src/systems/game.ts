@@ -1240,7 +1240,7 @@ export class Game {
       return { won: false };
     }
     const dryStreak = this.difficulty[bossId]?.dryClears ?? 0;
-    const loot = rollLoot(boss.loot, tier, dryStreak, bossLootSeed(boss, tier, dryStreak));
+    const loot = rollLoot(boss.loot, tier, dryStreak, bossLootSeed(boss, tier, dryStreak), this.lootBandForRegion(boss.region));
     const fullLoot = this.spendResinForLoot(TUNING.resin.bossCost);
     if (fullLoot) {
       this.deliverLoot(loot);
@@ -1586,7 +1586,7 @@ export class Game {
     // anchor's `pity: 4`) actually accrues instead of resetting every roll (GAMEPLAY_2.0 §0.2).
     const prev = this.dungeonProgress[def.id];
     const dryStreaks = { ...(prev?.dryStreaks ?? {}) };
-    const roll = rollItemDrops(table, tier, dryStreaks, new Rng(stableContentSeed(`${def.id}:room-reward:${tier}:${room.index}${modSalt}`, Math.round(this.playtime))));
+    const roll = rollItemDrops(table, tier, dryStreaks, new Rng(stableContentSeed(`${def.id}:room-reward:${tier}:${room.index}${modSalt}`, Math.round(this.playtime))), this.lootBandForRegion(def.regionId));
     this.dungeonProgress[def.id] = { ...(prev ?? { clears: 0, wipes: 0, bestDepth: 0, bestTier: 'normal' as DifficultyTier }), dryStreaks: roll.dryStreaks };
     if (roll.items.length === 0) return;
     if (reward.kind === 'guardian' && !this.spendResinForLoot(TUNING.resin.dungeonGuardianCost)) {
@@ -1640,7 +1640,7 @@ export class Game {
   /** Deliver a raid clear's loot + pity; Roshan also grants the Aegis, sets the respawn timer, and re-drops cheese. */
   private deliverRaidLoot(def: RaidDef, tier: DifficultyTier, raidId: string, clears: number): void {
     const dryStreak = this.raidProgress[raidId]?.dryStreak ?? 0;
-    const loot = rollLoot(def.loot, tier, dryStreak, stableContentSeed(`${raidId}:loot:${tier}`, clears));
+    const loot = rollLoot(def.loot, tier, dryStreak, stableContentSeed(`${raidId}:loot:${tier}`, clears), this.currentLootBand());
     const next = { ...(this.raidProgress[raidId] ?? { clears: 0, dryStreak: 0 }) };
     next.clears = clears + 1;
     next.dryStreak = loot.dryStreak;
@@ -2029,7 +2029,7 @@ export class Game {
   private rollItemDropsForCreep(creepId: string | undefined, tier: CreepTier, salt: number, difficulty: DifficultyTier = 'normal'): void {
     const table = (creepId ? REG.creep(creepId).drops : undefined) ?? DEFAULT_CREEP_DROP_TABLES[tier];
     const seed = stableContentSeed(`${this.region.id}:creep-drops:${tier}:${difficulty}`, Math.round(this.sim.time * 1000) + salt);
-    const roll = rollItemDrops(table, difficulty, {}, new Rng(seed));
+    const roll = rollItemDrops(table, difficulty, {}, new Rng(seed), this.currentLootBand());
     if (roll.items.length === 0) return;
     this.addDroppedItems(roll.items);
     const names = roll.items.map((it) => REG.item(it.id).name).join(', ');
@@ -2076,9 +2076,10 @@ export class Game {
           rarity: 'legendary',
           rolls: 1,
           chance: TUNING.overworldEgSlotPct.echo,
-          pool: this.echoEndgamePool(hero.attribute).map((id) => ({ id, weight: REG.item(id).cost })),
+          pool: this.echoEndgamePool(hero.attribute).map((id) => ({ id, weight: REG.item(id).cost, rarity: REG.item(id).rarity ?? 'legendary' })),
           qualityOddsByTier: qualityOddsByTier(),
-          source: 'echo'
+          source: 'echo',
+          raritySplit: true
         }
       ]
     };
@@ -2090,13 +2091,13 @@ export class Game {
       : attribute === 'str'
         ? ['black-king-bar', 'assault-cuirass', 'sange-and-yasha', 'guardian-greaves', 'bloodstone']
         : ['shivas-guard', 'ethereal-blade', 'wind-waker', 'kaya-and-sange', 'yasha-and-kaya', 'bloodstone'];
-    return ids.filter((id) => REG.items.has(id) && itemAllowedFromSource(id, 'echo') && !GATED_TOP_TIER.has(id));
+    return ids.filter((id) => REG.items.has(id) && RARITY_RANK[REG.item(id).rarity ?? 'common'] >= RARITY_RANK.legendary && itemAllowedFromSource(id, 'echo') && !GATED_TOP_TIER.has(id));
   }
 
   private rollEchoComponentDrop(heroId: string): ItemSave[] {
     const difficulty = creepCombatTier(this.region.id);
     const seed = stableContentSeed(`${heroId}:echo-drop:${difficulty}`, this.party.find((r) => r.heroId === heroId)?.echo.kills ?? 0);
-    const roll = rollItemDrops(this.echoComponentTable(heroId), difficulty, {}, new Rng(seed));
+    const roll = rollItemDrops(this.echoComponentTable(heroId), difficulty, {}, new Rng(seed), this.currentLootBand());
     if (roll.items.length === 0) return [];
     const drops = this.addDroppedItems(roll.items);
     this.msg(`Echo drop: ${roll.items.map((it) => REG.item(it.id).name).join(', ')} (→ Armory)`, 'good', this.dropAccent(roll.items));
@@ -2376,11 +2377,15 @@ export class Game {
     return REG.item(id).rarity ?? 'common';
   }
 
-  private currentLootBand(): LootBand {
-    const mult = TUNING.regionRewardMult[this.region.id as keyof typeof TUNING.regionRewardMult] ?? 1;
+  private lootBandForRegion(regionId: string): LootBand {
+    const mult = TUNING.regionRewardMult[regionId as keyof typeof TUNING.regionRewardMult] ?? 1;
     if (mult >= 2.0) return 'late';
     if (mult >= 1.4) return 'mid';
     return 'early';
+  }
+
+  private currentLootBand(): LootBand {
+    return this.lootBandForRegion(this.region.id);
   }
 
   private awardLootMarks(count: number, band: LootBand = this.currentLootBand()): number {

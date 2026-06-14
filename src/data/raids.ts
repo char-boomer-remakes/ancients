@@ -1,4 +1,4 @@
-import type { RaidDef, SummonSpec, ZoneSpec } from '../core/types';
+import type { ItemRarity, LootTable, RaidDef, SummonSpec, ZoneSpec } from '../core/types';
 import { TUNING } from './tuning';
 
 const fallen: SummonSpec = {
@@ -39,6 +39,37 @@ const frostZone: ZoneSpec = {
 // reserved prestige grade raids alone can drop.
 const RAID_QUALITY_ODDS = { inscribed: 0.12, frozen: 0.08, genuine: 0.06, unusual: 0.03 };
 
+const RAID_ITEM_RARITY: Partial<Record<string, ItemRarity>> = {
+  'divine-rapier': 'immortal',
+  butterfly: 'immortal',
+  'scythe-of-vyse': 'immortal',
+  'heart-of-tarrasque': 'immortal',
+  'eye-of-skadi': 'immortal',
+  'refresher-orb': 'immortal',
+  'aghanims-scepter': 'immortal',
+  'aegis-of-the-immortal': 'arcana',
+  'assault-cuirass': 'legendary',
+  'black-king-bar': 'mythical',
+  'diffusal-blade': 'mythical',
+  maelstrom: 'mythical'
+};
+
+function raidLoot(guaranteed: string[], assembledPool: string[]): LootTable {
+  const assembledRarityPools: LootTable['assembledRarityPools'] = {};
+  for (const id of assembledPool) {
+    const rarity = RAID_ITEM_RARITY[id] ?? 'legendary';
+    assembledRarityPools[rarity] = [...(assembledRarityPools[rarity] ?? []), id];
+  }
+  return {
+    guaranteed,
+    assembledPool,
+    assembledRarityPools,
+    dropPct: TUNING.raidAssembledDropPct,
+    pity: TUNING.raidBadLuckPity,
+    qualityOdds: RAID_QUALITY_ODDS
+  };
+}
+
 export const ALL_RAIDS: RaidDef[] = [
   {
     id: 'roshan-pit',
@@ -50,7 +81,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 55, summon: fallen, count: 3 }],
     zones: [{ atHpPct: 70, zone: { ...fireZone, radius: 260 } }],
     enrageSec: 120,
-    loot: { guaranteed: ['aegis-of-the-immortal'], assembledPool: ['divine-rapier', 'aghanims-scepter'], dropPct: TUNING.raidAssembledDropPct, pity: TUNING.raidBadLuckPity, qualityOdds: RAID_QUALITY_ODDS },
+    loot: raidLoot(['aegis-of-the-immortal'], ['divine-rapier', 'aghanims-scepter']),
     signatureExotic: 'roshan-respawn',
     dialogue: ['You came for the prize the whole map is afraid to time.', 'Fall here and I simply rise again. Can you say the same?']
   },
@@ -64,7 +95,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 75, summon: fallen, count: 4 }, { atHpPct: 35, summon: fallen, count: 5 }],
     zones: [{ atHpPct: 80, zone: fireZone }, { atHpPct: 45, zone: { ...fireZone, wall: true } }],
     enrageSec: 135,
-    loot: { guaranteed: ['reaver'], assembledPool: ['heart-of-tarrasque'], dropPct: TUNING.raidAssembledDropPct, pity: TUNING.raidBadLuckPity, qualityOdds: RAID_QUALITY_ODDS },
+    loot: raidLoot(['reaver'], ['heart-of-tarrasque']),
     signatureExotic: 'terror-fear',
     dialogue: ['Your draft dies the moment I deign to look at it.', 'There is no buyback from the abyss.']
   },
@@ -78,7 +109,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 65, summon: fallen, count: 3 }, { atHpPct: 30, summon: fallen, count: 4 }],
     zones: [{ atHpPct: 90, zone: frostZone }, { atHpPct: 50, zone: { ...frostZone, radius: 480 } }],
     enrageSec: 135,
-    loot: { guaranteed: ['ultimate-orb'], assembledPool: ['eye-of-skadi'], dropPct: TUNING.raidAssembledDropPct, pity: TUNING.raidBadLuckPity, qualityOdds: RAID_QUALITY_ODDS },
+    loot: raidLoot(['ultimate-orb'], ['eye-of-skadi']),
     signatureExotic: 'defile-growth',
     dialogue: ['Climb my glacier and freeze beside everyone who tried.', 'Every nova writes your name in the frost.']
   },
@@ -92,7 +123,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 85, summon: swarm, count: 4 }, { atHpPct: 55, summon: swarm, count: 5 }, { atHpPct: 25, summon: swarm, count: 6 }],
     zones: [{ atHpPct: 75, zone: { ...fireZone, radius: 300 } }, { atHpPct: 40, zone: { ...fireZone, radius: 420 } }],
     enrageSec: 135,
-    loot: { guaranteed: ['mystic-staff'], assembledPool: ['refresher-orb'], dropPct: TUNING.raidAssembledDropPct, pity: TUNING.raidBadLuckPity, qualityOdds: RAID_QUALITY_ODDS },
+    loot: raidLoot(['mystic-staff'], ['refresher-orb']),
     signatureExotic: 'swarm-spread',
     dialogue: ['My children outnumber your cooldowns.', 'The crater is a web — and you already walked in.']
   },
@@ -111,7 +142,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 60, summon: fallen, count: 3 }, { atHpPct: 25, summon: fallen, count: 4 }],
     zones: [{ atHpPct: 75, zone: { ...fireZone, radius: 280 } }],
     enrageSec: 130,
-    loot: { guaranteed: ['eaglesong'], assembledPool: ['maelstrom', 'butterfly'], dropPct: TUNING.raidAssembledDropPct, pity: TUNING.raidBadLuckPity, qualityOdds: RAID_QUALITY_ODDS },
+    loot: raidLoot(['eaglesong'], ['maelstrom', 'butterfly']),
     dialogue: ['This whole fleet died screaming. Want to hear how it sounded?', "I don't miss. Ask the wreck behind me."]
   },
   {
@@ -124,7 +155,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 70, summon: swarm, count: 3 }, { atHpPct: 35, summon: swarm, count: 4 }],
     zones: [{ atHpPct: 80, zone: { ...frostZone, radius: 300 } }],
     enrageSec: 130,
-    loot: { guaranteed: ['eaglesong'], assembledPool: ['butterfly', 'diffusal-blade', 'eye-of-skadi'], dropPct: TUNING.raidAssembledDropPct, pity: TUNING.raidBadLuckPity, qualityOdds: RAID_QUALITY_ODDS },
+    loot: raidLoot(['eaglesong'], ['butterfly', 'diffusal-blade', 'eye-of-skadi']),
     dialogue: ['You see the blade only after it has already chosen you.', 'The dark between the stars remembers every name.']
   },
   {
@@ -137,7 +168,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 65, summon: fallen, count: 3 }, { atHpPct: 30, summon: fallen, count: 4 }],
     zones: [{ atHpPct: 85, zone: frostZone }, { atHpPct: 45, zone: { ...frostZone, radius: 460 } }],
     enrageSec: 135,
-    loot: { guaranteed: ['eaglesong'], assembledPool: ['eye-of-skadi', 'butterfly'], dropPct: TUNING.raidAssembledDropPct, pity: TUNING.raidBadLuckPity, qualityOdds: RAID_QUALITY_ODDS },
+    loot: raidLoot(['eaglesong'], ['eye-of-skadi', 'butterfly']),
     dialogue: ['My arrows do not thaw. Neither will the silence after them.', 'Death freed me of mercy. You will find that inconvenient.']
   },
   {
@@ -150,7 +181,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 75, summon: fallen, count: 4 }, { atHpPct: 35, summon: fallen, count: 5 }],
     zones: [{ atHpPct: 80, zone: fireZone }, { atHpPct: 40, zone: { ...fireZone, wall: true } }],
     enrageSec: 135,
-    loot: { guaranteed: ['reaver'], assembledPool: ['heart-of-tarrasque', 'assault-cuirass', 'black-king-bar'], dropPct: TUNING.raidAssembledDropPct, pity: TUNING.raidBadLuckPity, qualityOdds: RAID_QUALITY_ODDS },
+    loot: raidLoot(['reaver'], ['heart-of-tarrasque', 'assault-cuirass', 'black-king-bar']),
     dialogue: ['The last of my brothers fell. I did not.', 'Your world keeps a stone at its heart. I came down for it.']
   },
   {
@@ -163,7 +194,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 60, summon: swarm, count: 4 }],
     zones: [{ atHpPct: 80, zone: fireZone }, { atHpPct: 45, zone: { ...fireZone, radius: 400 } }],
     enrageSec: 135,
-    loot: { guaranteed: ['mystic-staff'], assembledPool: ['scythe-of-vyse', 'refresher-orb', 'aghanims-scepter'], dropPct: TUNING.raidAssembledDropPct, pity: TUNING.raidBadLuckPity, qualityOdds: RAID_QUALITY_ODDS },
+    loot: raidLoot(['mystic-staff'], ['scythe-of-vyse', 'refresher-orb', 'aghanims-scepter']),
     dialogue: ['Every hatred in this world borrows my voice.', 'Speak my name aloud and the hall goes dark.']
   },
   {
@@ -176,7 +207,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 70, summon: swarm, count: 3 }, { atHpPct: 35, summon: fallen, count: 4 }],
     zones: [{ atHpPct: 80, zone: fireZone }, { atHpPct: 40, zone: { ...fireZone, radius: 420, wall: true } }],
     enrageSec: 140,
-    loot: { guaranteed: ['reaver'], assembledPool: ['heart-of-tarrasque', 'aghanims-scepter', 'assault-cuirass'], dropPct: TUNING.raidAssembledDropPct, pity: TUNING.raidBadLuckPity, qualityOdds: RAID_QUALITY_ODDS },
+    loot: raidLoot(['reaver'], ['heart-of-tarrasque', 'aghanims-scepter', 'assault-cuirass']),
     dialogue: ['The last of the dragons does not flee a falling moon.', 'Embers older than your gods wait beneath my wings.']
   }
 ];

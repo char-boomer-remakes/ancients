@@ -1,5 +1,5 @@
 import { TUNING } from './tuning';
-import type { CreepTier, DifficultyTier, ItemDropTable, ItemQuality } from '../core/types';
+import type { CreepTier, DifficultyTier, ItemDropTable, ItemQuality, ItemRarity } from '../core/types';
 
 const COMMON_CONSUMABLES = [
   'tango',
@@ -10,6 +10,10 @@ const COMMON_CONSUMABLES = [
   'sentry-ward',
   'smoke-of-deceit'
 ].map((id) => ({ id, weight: 1 }));
+
+function itemEntry(id: string, rarity: ItemRarity = 'legendary', weight = 1) {
+  return { id, weight, rarity };
+}
 
 const EARLY_COMPONENTS = [
   'iron-branch',
@@ -37,21 +41,12 @@ const DEEP_COMPONENTS = [
 ].map((id) => ({ id, weight: 1 }));
 
 const LARGE_ENDGAME_CORES = [
-  'black-king-bar',
-  'battlefury',
-  'shivas-guard',
   'guardian-greaves',
   'manta-style',
-  'sange-and-yasha',
-  'kaya-and-sange',
-  'yasha-and-kaya',
   'daedalus',
   'monkey-king-bar',
-  'silver-edge',
-  'ethereal-blade',
-  'bloodstone',
-  'moon-shard'
-].map((id) => ({ id, weight: 1 }));
+  'ethereal-blade'
+].map((id) => itemEntry(id));
 
 const ANCIENT_ENDGAME_CORES = [
   'assault-cuirass',
@@ -60,10 +55,8 @@ const ANCIENT_ENDGAME_CORES = [
   'monkey-king-bar',
   'mjollnir',
   'ethereal-blade',
-  'wind-waker',
-  'bloodstone',
-  'moon-shard'
-].map((id) => ({ id, weight: 1 }));
+  'wind-waker'
+].map((id) => itemEntry(id));
 
 export function qualityOddsByTier(): Record<DifficultyTier, Partial<Record<ItemQuality, number>>> {
   const out = {} as Record<DifficultyTier, Partial<Record<ItemQuality, number>>>;
@@ -100,7 +93,7 @@ export const DEFAULT_CREEP_DROP_TABLES: Record<CreepTier, ItemDropTable> = {
     slots: [
       { id: 'creep-common-consumable', rarity: 'common', rolls: 1, chance: { normal: 0.16, nightmare: 0.2, hell: 0.24 }, pool: COMMON_CONSUMABLES, source: 'creep' },
       { id: 'creep-uncommon-component', rarity: 'uncommon', rolls: 1, chance: { normal: 0.22, nightmare: 0.28, hell: 0.34 }, pool: EARLY_COMPONENTS, source: 'creep' },
-      { id: 'creep-large-endgame', rarity: 'legendary', rolls: 1, chance: TUNING.overworldEgSlotPct.largeCreep, pool: LARGE_ENDGAME_CORES, qualityOddsByTier: qualityOddsByTier(), source: 'creep' }
+      { id: 'creep-large-endgame', rarity: 'legendary', rolls: 1, chance: TUNING.overworldEgSlotPct.largeCreep, pool: LARGE_ENDGAME_CORES, qualityOddsByTier: qualityOddsByTier(), source: 'creep', raritySplit: true }
     ]
   },
   ancient: {
@@ -108,7 +101,7 @@ export const DEFAULT_CREEP_DROP_TABLES: Record<CreepTier, ItemDropTable> = {
     slots: [
       { id: 'creep-rare-component', rarity: 'rare', rolls: 1, chance: { normal: 0.25, nightmare: 0.32, hell: 0.4 }, pool: DEEP_COMPONENTS, source: 'creep' },
       { id: 'creep-mythical-component', rarity: 'mythical', rolls: 1, chance: { normal: 0.08, nightmare: 0.12, hell: 0.18 }, pool: DEEP_COMPONENTS, source: 'creep' },
-      { id: 'creep-ancient-endgame', rarity: 'legendary', rolls: 1, chance: TUNING.overworldEgSlotPct.ancientCreep, pool: ANCIENT_ENDGAME_CORES, qualityOddsByTier: qualityOddsByTier(), source: 'creep' }
+      { id: 'creep-ancient-endgame', rarity: 'legendary', rolls: 1, chance: TUNING.overworldEgSlotPct.ancientCreep, pool: ANCIENT_ENDGAME_CORES, qualityOddsByTier: qualityOddsByTier(), source: 'creep', raritySplit: true }
     ]
   }
 };

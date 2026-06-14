@@ -1,5 +1,19 @@
-import type { DungeonDef, ItemDropTable, RoomType } from '../core/types';
+import type { DungeonDef, ItemDropTable, ItemRarity, RoomType } from '../core/types';
 import { dungeonAffixes } from './dungeon-affixes';
+
+const DUNGEON_ITEM_RARITY: Partial<Record<string, ItemRarity>> = {
+  butterfly: 'immortal',
+  'heart-of-tarrasque': 'immortal',
+  'eye-of-skadi': 'immortal',
+  'refresher-orb': 'immortal',
+  'aghanims-scepter': 'immortal',
+  'assault-cuirass': 'legendary',
+  'diffusal-blade': 'mythical'
+};
+
+function entry(id: string, weight = 1) {
+  return { id, weight, rarity: DUNGEON_ITEM_RARITY[id] ?? 'legendary' };
+}
 
 const COMMON_ROOM_DROP: ItemDropTable = {
   guaranteed: ['clarity'],
@@ -61,12 +75,13 @@ const GUARDIAN_DROP: ItemDropTable = {
       rolls: 1,
       chance: { normal: 0.16, nightmare: 0.28, hell: 0.42 },
       pool: [
-        { id: 'eye-of-skadi', weight: 2 },
-        { id: 'refresher-orb', weight: 1 }
+        entry('eye-of-skadi', 2),
+        entry('refresher-orb', 1)
       ],
       qualityOdds: { inscribed: 0.14, frozen: 0.09, genuine: 0.06 },
       pity: 4,
-      source: 'dungeon'
+      source: 'dungeon',
+      raritySplit: true
     }
   ]
 };
@@ -193,10 +208,11 @@ function marqueeGuardianDrop(id: string, guaranteed: string, anchors: string[]):
         rarity: 'legendary',
         rolls: 1,
         chance: { normal: 0.16, nightmare: 0.28, hell: 0.42 },
-        pool: anchors.map((itemId) => ({ id: itemId, weight: 1 })),
+        pool: anchors.map((itemId) => entry(itemId)),
         qualityOdds: { inscribed: 0.14, frozen: 0.09, genuine: 0.06 },
         pity: 4,
-        source: 'dungeon'
+        source: 'dungeon',
+        raritySplit: true
       }
     ]
   };

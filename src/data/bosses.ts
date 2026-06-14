@@ -1,4 +1,4 @@
-import type { BossDef, LootTable } from '../core/types';
+import type { BossDef, ItemRarity, LootTable } from '../core/types';
 import { TUNING } from './tuning';
 
 const AGILITY_CARRIES = new Set([
@@ -12,6 +12,27 @@ const STRENGTH_TITANS = new Set([
 const INTELLIGENCE_BOSSES = new Set([
   'invoker', 'zeus', 'silencer', 'outworld-destroyer', 'skywrath-mage', 'tinker', 'lich', 'crystal-maiden', 'lina'
 ]);
+
+const BOSS_ITEM_RARITY: Partial<Record<string, ItemRarity>> = {
+  butterfly: 'immortal',
+  'scythe-of-vyse': 'immortal',
+  'heart-of-tarrasque': 'immortal',
+  'eye-of-skadi': 'immortal',
+  'refresher-orb': 'immortal',
+  'aghanims-scepter': 'immortal',
+  'assault-cuirass': 'legendary',
+  'black-king-bar': 'mythical',
+  'diffusal-blade': 'mythical'
+};
+
+function rarityPools(ids: string[]): LootTable['assembledRarityPools'] {
+  const pools: LootTable['assembledRarityPools'] = {};
+  for (const id of ids) {
+    const rarity = BOSS_ITEM_RARITY[id] ?? 'legendary';
+    pools[rarity] = [...(pools[rarity] ?? []), id];
+  }
+  return pools;
+}
 
 function themedLoot(heroId: string, rank: BossDef['rank']): LootTable {
   const isMini = rank === 'mini-boss';
@@ -40,9 +61,11 @@ function themedLoot(heroId: string, rank: BossDef['rank']): LootTable {
   const qualityOdds = isMini
     ? { inscribed: 0.04, genuine: 0.03 }
     : { inscribed: 0.07, frozen: 0.05, genuine: 0.04 };
+  const pool = isMini ? assembledPool.filter((id) => id !== 'aghanims-scepter').slice(0, 2) : assembledPool;
   return {
     guaranteed,
-    assembledPool: isMini ? assembledPool.filter((id) => id !== 'aghanims-scepter').slice(0, 2) : assembledPool,
+    assembledPool: pool,
+    assembledRarityPools: rarityPools(pool),
     dropPct,
     pity: isMini ? TUNING.raidBadLuckPity + 2 : TUNING.raidBadLuckPity,
     qualityOdds

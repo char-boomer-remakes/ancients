@@ -412,7 +412,9 @@ export type ItemAppearancePart =
   | 'wing-blades'
   | 'crystal-edge'
   | 'mana-orb'
-  | 'hex-sigil';
+  | 'hex-sigil'
+  | 'cloak'
+  | 'halo';
 
 export interface ItemAppearanceSpec {
   weapon?: { kind: ItemWeaponVisualKind; color?: string; emissive?: string };
@@ -426,7 +428,8 @@ export type AttackVisualKind =
   | 'ranged-conversion'
   | 'lightning-bounce'
   | 'tinted-impact'
-  | 'crit-lunge';
+  | 'crit-lunge'
+  | 'armor-shred-flash';
 
 export interface AttackVisualSpec {
   kind: AttackVisualKind;
@@ -507,6 +510,7 @@ export interface DropEntry {
   id: string;
   weight: number;
   quality?: ItemQuality;
+  rarity?: ItemRarity;
 }
 
 export interface DropSlot {
@@ -519,6 +523,7 @@ export interface DropSlot {
   qualityOddsByTier?: Partial<Record<DifficultyTier, Partial<Record<ItemQuality, number>>>>;
   pity?: number;
   source?: DropSource;
+  raritySplit?: boolean;
 }
 
 export interface ItemDropTable {
@@ -557,6 +562,7 @@ export type DifficultyTier = 'normal' | 'nightmare' | 'hell';
 export interface LootTable {
   guaranteed: string[];
   assembledPool: string[];
+  assembledRarityPools?: Partial<Record<ItemRarity, string[]>>;
   dropPct: Record<DifficultyTier, number>;
   pity: number;
   /** Optional luck-at-source quality odds for the assembled drop (LOOT L5). */
