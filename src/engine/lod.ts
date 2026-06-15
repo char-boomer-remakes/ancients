@@ -50,6 +50,12 @@ export function shouldUseCrowdImpostor(opts: {
   // cone/procedural placeholder into a fuller model as the camera approaches.
   if (opts.crowdDetail === 'full' || opts.crowdDetail === 'auto') return false;
   if (opts.crowdDetail === 'reduced') return true;
+  // Balanced: distant units are cones, but near units stay full until the
+  // full-rig budget is actually spent. The caller hands out budget nearest-first
+  // and the balanced budget is itself clamped (<=24), so a constant threshold
+  // here (the old `<= 24`) coned EVERY near unit from the first one onward — the
+  // "creeps turn into cones at night" bug. Gate on a truly exhausted budget so
+  // the nearest `budget` units keep their real model and only the overflow cones.
   if (opts.tier !== 'full') return true;
-  return opts.fullAnimationBudget <= 24;
+  return opts.fullAnimationBudget <= 0;
 }

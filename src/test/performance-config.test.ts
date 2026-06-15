@@ -57,7 +57,13 @@ describe('performance quality presets', () => {
     const base = { selected: false, alive: true, isHero: false, isNpc: false };
     expect(shouldUseCrowdImpostor({ ...base, tier: 'reduced', crowdDetail: 'auto', fullAnimationBudget: 20 })).toBe(false);
     expect(shouldUseCrowdImpostor({ ...base, tier: 'full', crowdDetail: 'auto', fullAnimationBudget: 0 })).toBe(false);
-    expect(shouldUseCrowdImpostor({ ...base, tier: 'full', crowdDetail: 'balanced', fullAnimationBudget: 12 })).toBe(true);
+    // Balanced: a near (full-tier) unit keeps its real model while the full-rig
+    // budget has slots left, and only cones once the budget is truly exhausted.
+    // (Regression guard for "creeps turn into cones at night": with the budget
+    // clamped to <=24, a near unit must NOT cone just because budget <= 24.)
+    expect(shouldUseCrowdImpostor({ ...base, tier: 'full', crowdDetail: 'balanced', fullAnimationBudget: 24 })).toBe(false);
+    expect(shouldUseCrowdImpostor({ ...base, tier: 'full', crowdDetail: 'balanced', fullAnimationBudget: 12 })).toBe(false);
+    expect(shouldUseCrowdImpostor({ ...base, tier: 'full', crowdDetail: 'balanced', fullAnimationBudget: 0 })).toBe(true);
     expect(shouldUseCrowdImpostor({ ...base, tier: 'reduced', crowdDetail: 'balanced', fullAnimationBudget: 40 })).toBe(true);
     expect(shouldUseCrowdImpostor({ ...base, tier: 'full', crowdDetail: 'balanced', fullAnimationBudget: 40 })).toBe(false);
     expect(shouldUseCrowdImpostor({ ...base, tier: 'full', crowdDetail: 'reduced', fullAnimationBudget: 40 })).toBe(true);

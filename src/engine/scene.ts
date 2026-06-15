@@ -176,6 +176,13 @@ const NIGHT = {
   sunI: 0.72
 };
 
+// DAY/NIGHT keep the hemisphere light deliberately low because the PBR env map
+// supplies most of the ambient fill. Tiers without an IBL env map (low) lose
+// that fill entirely, so terrain/units/bosses read near-black. This factor folds
+// the cycle's would-be IBL diffuse intensity (envI) back into the hemi light on
+// those tiers, restoring a comparable ambient read (GRAPHICS_SPEC §3.2).
+const ENV_FALLBACK_TO_HEMI = 2.2;
+
 // Color-grade + vignette post pass (GRAPHICS_SPEC §3.1). Tint/saturation/
 // contrast are driven per-frame from the active biome blended toward a cool
 // night look. Keeps the Dota-style painterly, high-contrast read.
@@ -2121,8 +2128,11 @@ export class GameScene {
     }
 
     // Phase 3 (GRAPHICS_SPEC §13): mount an authored Quaternius creature (CC0)
-    // for creeps. Keep the procedural body visible underneath as a guaranteed
-    // readable fallback; creature assets are an enhancement layer, not the floor.
+    // for creeps. The procedural body is the floor while the GLB streams in, then
+    // gets hidden once the creature mounts — otherwise the procedural humanoid
+    // renders *through* the authored creature ("creeps still look like creeps").
+    // mountHeroModel only hides the floor when the GLB carries real geometry (its
+    // hasMesh guard), so an empty/failed creature clone still leaves the floor up.
     if (u.kind === 'creep') {
       const creatureUrl = creepCreatureUrl(u.creepId, sil.build);
       if (creatureUrl) {
@@ -2130,7 +2140,7 @@ export class GameScene {
           if (asset && this.isLive() && token === this.sceneToken && this.views.get(u.uid)?.rig === rig) {
             const model = cloneModel(asset.scene);
             recolorToPalette(model, palette, undefined, { solid: true, opaque: true });
-            mountHeroModel(rig, model, asset.animations, undefined, { hideProcedural: false });
+            mountHeroModel(rig, model, asset.animations);
           }
         });
       }
@@ -2557,7 +2567,6 @@ export class GameScene {
 
     (this.scene.background as THREE.Color).copy(sky);
     (this.scene.fog as THREE.Fog).color.copy(fog);
-    this.hemi.intensity = hemiI;
     this.sun.color.copy(sunC);
     this.sun.intensity = sunI;
 
@@ -2567,6 +2576,10 @@ export class GameScene {
     // day and night while keeping night clearly dimmer than noon (§3.2).
     const envI = (isDay ? 0.55 + 0.45 * elev : 0.7 + 0.2 * elev) * 0.46;
     (this.scene as unknown as { environmentIntensity: number }).environmentIntensity = envI;
+
+    // On tiers with no IBL env map (low), the env fill above is a no-op, so fold
+    // it into the hemisphere light or the scene reads near-black (ENV_FALLBACK_TO_HEMI).
+    this.hemi.intensity = this.quality.envMap ? hemiI : hemiI + envI * ENV_FALLBACK_TO_HEMI;
 
     // Sky dome gradient: deepened zenith over a hazy horizon that matches fog.
     (this.skyMat.uniforms.uTop.value as THREE.Color).copy(sky).multiplyScalar(0.78);
