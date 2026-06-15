@@ -111,7 +111,7 @@ function applyReactionStatus(sim: Sim, source: Unit, target: Unit, reactionId: s
   if (applied) sim.events.emit({ t: 'status-apply', uid: target.uid, status: 'buff', duration });
 }
 
-export function applyElementAura(sim: Sim, source: Unit, target: Unit, element: ActiveElement, baseAmount = 1, resolveReactions = true): { damageMultiplier: number } {
+export function applyElementAura(sim: Sim, source: Unit, target: Unit, element: ActiveElement, baseAmount = 1, resolveReactions = true, allowSpread = true): { damageMultiplier: number } {
   const now = sim.time;
   for (const key of Object.keys(target.elementAuras) as ActiveElement[]) {
     if ((target.elementAuras[key]?.until ?? 0) <= now) delete target.elementAuras[key];
@@ -119,6 +119,9 @@ export function applyElementAura(sim: Sim, source: Unit, target: Unit, element: 
 
   const existing = (Object.keys(target.elementAuras) as ActiveElement[]).find((e) => e !== element);
   const reaction = existing ? reactionFor(existing, element) : null;
+  // Catalyst Prism (PROGRESSION §5): reactions the carrier triggers spread to nearby
+  // enemies and leave a longer residual field on the unit they react on.
+  const catalyst = source.items.some((it) => it?.defId === 'catalyst-prism');
   let damageMultiplier = 1;
   if (resolveReactions && reaction) {
     const reactionAmp = 1 + Math.max(0, source.stats.reactionAmpPct) / 100;
@@ -145,11 +148,18 @@ export function applyElementAura(sim: Sim, source: Unit, target: Unit, element: 
       applyReactionStatus(sim, source, target, reaction.id, reaction.statMods as Record<string, number>, reaction.statDuration ?? 4);
     }
     if (reaction.consume === 'both' || reaction.consume === 'existing') delete target.elementAuras[existing!];
+    if (catalyst && allowSpread) {
+      const extra = sim
+        .unitsInRadius(target.pos, TUNING.nativeItems.catalystSpreadRadius, (o) => o.team !== source.team && o.uid !== target.uid && o.alive && o.kind !== 'npc' && !o.summary.untargetable)
+        .slice(0, Math.max(0, Math.round(TUNING.nativeItems.catalystSpreadTargets)));
+      for (const o of extra) applyElementAura(sim, source, o, element, baseAmount, true, false);
+    }
   }
 
+  const fieldBonus = catalyst ? TUNING.nativeItems.catalystFieldSec : 0;
   target.elementAuras[element] = {
     gauge: Math.min(2, (target.elementAuras[element]?.gauge ?? 0) + 1),
-    until: now + 4 + Math.max(0, source.stats.elementalGaugeSec),
+    until: now + 4 + Math.max(0, source.stats.elementalGaugeSec) + fieldBonus,
     sourceUid: source.uid
   };
   sim.events.emit({ t: 'element-apply', uid: target.uid, from: source.uid, element, gauge: target.elementAuras[element]!.gauge });

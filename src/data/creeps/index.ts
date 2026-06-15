@@ -230,7 +230,7 @@ export const HARPY_STORMCRAFTER: CreepDef = {
       targeting: 'unit-target',
       affects: 'enemy',
       castRange: 650,
-      manaCost: [80, 90, 100],
+      manaCost: [50, 60, 70],
       cooldown: [12, 11, 10],
       values: { damage: [85, 125, 165], bounces: [2, 3, 4], radius: [500, 500, 500], speed: [900, 900, 900] },
       effects: [{ kind: 'projectile', to: 'target', proj: { model: 'homing', speed: 'speed', bounces: { count: 'bounces', radius: 'radius' }, onHit: [{ kind: 'damage', dtype: 'magical', amount: 'damage', target: 'target' }] } }],
@@ -255,7 +255,7 @@ export const POLAR_FURBOLG: CreepDef = {
       name: 'War Club',
       targeting: 'no-target',
       castPoint: 0.35,
-      manaCost: [70, 80, 90],
+      manaCost: [55, 65, 75],
       cooldown: [13, 12, 11],
       values: { damage: [110, 155, 200], radius: [320, 320, 320] },
       effects: [
@@ -282,7 +282,7 @@ export const ICE_SHAMAN: CreepDef = {
       name: 'Frost Ward',
       targeting: 'ground-aoe',
       castRange: 650,
-      manaCost: [90, 95, 100],
+      manaCost: [55, 65, 75],
       cooldown: [15, 13, 11],
       values: { damage: [70, 110, 150], radius: [300, 320, 340], slow: [25, 30, 35] },
       effects: [
@@ -318,7 +318,7 @@ function creep(
         name: abilityName,
         targeting: 'point-target' as const,
         castRange: 450,
-        manaCost: [80, 90, 100],
+        manaCost: [55, 65, 75],
         cooldown: [18, 16, 14],
         values: { lifetime: [14, 18, 22] },
         effects: [{

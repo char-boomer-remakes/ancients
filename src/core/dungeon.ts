@@ -103,6 +103,17 @@ function starFor(tier: DifficultyTier, depth: number, rng: Rng): 1 | 2 | 3 {
   return 1;
 }
 
+/** Exported alias so the overworld can reuse pack rarity rolls (PROGRESSION_OVERHAUL §2.1). */
+export function rollPackRarity(card: SpawnCard, tier: DifficultyTier, depth: number, rng: Rng): MonsterRarity {
+  return upgradeRarity(card, tier, depth, rng);
+}
+
+/** Exported alias so the overworld can reuse pack affix selection (PROGRESSION_OVERHAUL §2.1). */
+export function pickPackAffixes(pool: AffixDef[], rarity: MonsterRarity, tier: DifficultyTier, rng: Rng, count?: number): string[] {
+  const ids = pickAffixes(pool, rarity, tier, rng);
+  return typeof count === 'number' ? ids.slice(0, Math.max(0, count)) : ids;
+}
+
 function upgradeRarity(card: SpawnCard, tier: DifficultyTier, depth: number, rng: Rng, profile = DEFAULT_MODIFIER_PROFILE): MonsterRarity {
   if (card.rarity) return card.rarity;
   const rareChance = (tier === 'hell' ? 0.08 : tier === 'nightmare' ? 0.04 : 0.015) + depth * 0.004 + profile.rareChanceBonus;

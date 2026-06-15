@@ -19,8 +19,9 @@ export const LUNAR_GYM: GymDef = {
     "The crowd came to watch the moon fall. Try not to disappoint them.",
     'Burst them down before the night even blinks.'
   ],
-  // §5.2 — "burst them down": no turtling, race the nukes.
-  format: { rules: [{ kind: 'cap-role', role: 'durable', max: 1 }] },
+  // §5.2 — "burst them down": no turtling, race the nukes. §3.2 — level-cap to the
+  // leader's tier + last-pick so the captain drafts against you.
+  format: { rules: [{ kind: 'cap-role', role: 'durable', max: 1 }, { kind: 'level-cap', max: 14 }], counterDraft: 'last-pick' },
   enemyTeam: [
     { heroId: 'luna', level: 14, items: ['yasha', 'dragon-lance'] },
     { heroId: 'mirana', level: 14, items: ['euls-scepter'] },
@@ -44,8 +45,8 @@ export const FROST_GYM: GymDef = {
     "I won this fight in the pick phase. You just haven't noticed yet.",
     'Patience freezes faster than any nova.'
   ],
-  // §5.2 — "won it in the pick phase": she answers your four.
-  format: { rules: [], counterDraft: 'last-pick' },
+  // §5.2 — "won it in the pick phase": she answers your four. §3.2 level-cap.
+  format: { rules: [{ kind: 'level-cap', max: 17 }], counterDraft: 'last-pick' },
   enemyTeam: [
     { heroId: 'crystal-maiden', level: 17, items: ['glimmer-cape', 'euls-scepter'] },
     { heroId: 'jakiro', level: 17, items: ['arcane-boots'] },
@@ -69,8 +70,8 @@ export const BURROW_GYM: GymDef = {
     'Position four wins the lanes you never even see.',
     'Blink in, bury you, gone before the replay loads.'
   ],
-  // §5.2 — "position four wins": value the map game.
-  format: { rules: [{ kind: 'require-role', role: 'support', min: 2 }] },
+  // §5.2 — "position four wins": value the map game. §3.2 level-cap + last-pick.
+  format: { rules: [{ kind: 'require-role', role: 'support', min: 2 }, { kind: 'level-cap', max: 20 }], counterDraft: 'last-pick' },
   enemyTeam: [
     { heroId: 'sand-king', level: 20, items: ['blink-dagger', 'arcane-boots'] },
     { heroId: 'nyx-assassin', level: 20, items: ['euls-scepter'] },
@@ -94,8 +95,8 @@ export const TIDE_GYM: GymDef = {
     'One clean initiation and the whole series is mine.',
     'Hold the river; the gold always follows the map.'
   ],
-  // §5.2 — "one clean initiation": no slippery cores, stand and fight.
-  format: { rules: [{ kind: 'ban-role', roles: ['escape'] }] },
+  // §5.2 — "one clean initiation": no slippery cores, stand and fight. §3.2 level-cap + last-pick.
+  format: { rules: [{ kind: 'ban-role', roles: ['escape'] }, { kind: 'level-cap', max: 22 }], counterDraft: 'last-pick' },
   enemyTeam: [
     { heroId: 'kunkka', level: 22, items: ['black-king-bar', 'battlefury'] },
     { heroId: 'tidehunter', level: 22, items: ['blink-dagger', 'vladmirs-offering'] },
@@ -119,8 +120,8 @@ export const ROT_GYM: GymDef = {
     "I don't need to win fast. I only need to win last.",
     'Every respawn you buy is gold I get to farm.'
   ],
-  // §5.2 — "I win last": no luxury sustain, grind it out (tier ≤ t2).
-  format: { rules: [{ kind: 'item-tier-cap', max: 2 }] },
+  // §5.2 — "I win last": no luxury sustain, grind it out (tier ≤ t2). §3.2 level-cap + last-pick.
+  format: { rules: [{ kind: 'item-tier-cap', max: 2 }, { kind: 'level-cap', max: 24 }], counterDraft: 'last-pick' },
   enemyTeam: [
     { heroId: 'pudge', level: 24, items: ['blink-dagger', 'vladmirs-offering'] },
     { heroId: 'lifestealer', level: 24, items: ['sange'] },
@@ -144,8 +145,8 @@ export const ARCANE_GYM: GymDef = {
     'Ten spells, one window, zero mistakes.',
     "Reset, recast, repeat — that's the whole show."
   ],
-  // §5.2 — "ten spells, one window": bring casters, trade spells.
-  format: { rules: [{ kind: 'cap-attribute', attribute: 'str', max: 1 }] },
+  // §5.2 — "ten spells, one window": bring casters, trade spells. §3.2 level-cap + last-pick.
+  format: { rules: [{ kind: 'cap-attribute', attribute: 'str', max: 1 }, { kind: 'level-cap', max: 26 }], counterDraft: 'last-pick' },
   enemyTeam: [
     { heroId: 'invoker', level: 26, items: ['kaya', 'euls-scepter'] },
     { heroId: 'silencer', level: 26, items: ['force-staff'] },
@@ -169,8 +170,8 @@ export const WILD_GYM: GymDef = {
     'Count my units. Now count yours.',
     "Auras stack; egos don't."
   ],
-  // §5.2 — "count my units": summoners cheap, hard carries expensive.
-  format: { rules: [{ kind: 'point-budget', total: 8, costByRole: { carry: 3 } }] },
+  // §5.2 — "count my units": summoners cheap, hard carries expensive. §3.2 level-cap + last-pick.
+  format: { rules: [{ kind: 'point-budget', total: 8, costByRole: { carry: 3 } }, { kind: 'level-cap', max: 27 }], counterDraft: 'last-pick' },
   enemyTeam: [
     { heroId: 'enchantress', level: 27, items: ['dragon-lance'] },
     { heroId: 'chen', level: 27, items: ['mekansm'] },
@@ -194,12 +195,14 @@ export const TITAN_GYM: GymDef = {
     'From the high ground, every fight is downhill.',
     'I commit first and apologize never.'
   ],
-  // §5.2 — "I commit first": bring an initiator, don't stack carries.
+  // §5.2 — "I commit first": bring an initiator, don't stack carries. §3.2 level-cap + last-pick.
   format: {
     rules: [
       { kind: 'require-role', role: 'initiator', min: 1 },
-      { kind: 'cap-role', role: 'carry', max: 2 }
-    ]
+      { kind: 'cap-role', role: 'carry', max: 2 },
+      { kind: 'level-cap', max: 29 }
+    ],
+    counterDraft: 'last-pick'
   },
   enemyTeam: [
     { heroId: 'magnus', level: 29, items: ['blink-dagger', 'black-king-bar'] },

@@ -1,5 +1,8 @@
 import type { DropSource, EffectNode, ItemDef, ItemRarity, ItemTier } from '../../core/types';
 import { GEM_DEFS, type GemGrade } from '../gems';
+import { NATIVE } from './native';
+
+export { NATIVE } from './native';
 
 // SWAP_COMBAT_OVERHAUL §7 — item tag-in lines, in the same EffectNode vocabulary
 // the hero boons use. Support gear hands power to the team on arrival; carry gear
@@ -732,7 +735,18 @@ export const ASSEMBLED: ItemDef[] = [
     id: 'refresher-shard', name: 'Refresher Shard', tier: 'consumable', cost: 0,
     charges: 1,
     lore: 'A smaller second chance, won from the pit.',
-    glyph: 'shard'
+    glyph: 'shard',
+    active: {
+      id: 'refresher-shard-active',
+      name: 'Refresh Shard',
+      targeting: 'no-target',
+      castPoint: 0,
+      cooldown: [1],
+      effects: [{ kind: 'exotic', id: 'refresh-cooldowns' }],
+      vfx: { archetype: 'global-mark', color: '#8ee8ff', scale: 0.9 },
+      anim: 'item-use',
+      sound: 'item'
+    }
   },
   {
     id: 'cheese', name: 'Cheese', tier: 'consumable', cost: 0,
@@ -756,7 +770,7 @@ export const ASSEMBLED: ItemDef[] = [
 export const EXTENDED_COMPONENTS: ItemDef[] = [
   { id: 'ring-of-protection', name: 'Ring of Protection', tier: 'component', cost: 175, passiveMods: { armor: 1 }, lore: 'A small brass circle that says no to the first chip of steel.', glyph: 'ring' },
   { id: 'ring-of-health', name: 'Ring of Health', tier: 'component', cost: 700, passiveMods: { hpRegen: 9 }, lore: 'Warm metal, steady pulse.', glyph: 'ring' },
-  { id: 'gem-of-true-sight', name: 'Gem of True Sight', tier: 'component', cost: 900, passiveMods: { visionPct: 15 }, lore: 'It sees what the map would rather keep secret.', glyph: 'eye' },
+  { id: 'gem-of-true-sight', name: 'Gem of True Sight', tier: 'component', cost: 900, aura: { radius: 900, affects: 'enemies', mods: { revealed: 1 } }, lore: 'It sees what the map would rather keep secret.', glyph: 'eye' },
   {
     id: 'helm-of-iron-will', name: 'Helm of Iron Will', tier: 'component', cost: 925,
     components: ['chainmail', 'ring-of-regen'], recipeCost: 200,
@@ -899,7 +913,6 @@ export const EXTENDED_ASSEMBLED: ItemDef[] = [
     components: ['boots-of-speed', 'ring-of-regen', 'ring-of-protection'], recipeCost: 250,
     passiveMods: { moveSpeed: 55, hpRegen: 14, armor: 1 },
     lore: 'Quiet feet, quick recovery.', glyph: 'boot',
-    damageLockoutSec: 3,
     appearance: { parts: ['boot-trail'], tint: '#9ff0b0' }
   },
   {
@@ -1617,6 +1630,6 @@ function normalizeLootMetadata(item: ItemDef): ItemDef {
   };
 }
 
-export const ALL_ITEMS: ItemDef[] = [...CONSUMABLES, ...COMPONENTS, ...GEM_ITEMS, ...EXTENDED_COMPONENTS, ...ASSEMBLED, ...EXTENDED_ASSEMBLED]
+export const ALL_ITEMS: ItemDef[] = [...CONSUMABLES, ...COMPONENTS, ...GEM_ITEMS, ...EXTENDED_COMPONENTS, ...ASSEMBLED, ...EXTENDED_ASSEMBLED, ...NATIVE]
   .map(normalizeItemActive)
   .map(normalizeLootMetadata);

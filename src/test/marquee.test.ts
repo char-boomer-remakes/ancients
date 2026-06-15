@@ -22,7 +22,7 @@ const MARQUEE_RAID_IDS = ['renegade-marshal', 'void-prelate', 'forsaken-queen', 
 
 const AGI_LANE = new Set(['eaglesong', 'butterfly', 'eye-of-skadi', 'abyssal-blade', 'bloodthorn', 'diffusal-blade', 'maelstrom']);
 const STR_LANE = new Set(['reaver', 'heart-of-tarrasque', 'satanic', 'radiance', 'assault-cuirass', 'black-king-bar']);
-const INT_LANE = new Set(['mystic-staff', 'scythe-of-vyse', 'refresher-orb', 'octarine-core', 'aghanims-scepter', 'aghanims-blessing']);
+const INT_LANE = new Set(['mystic-staff', 'scythe-of-vyse', 'refresher-orb', 'octarine-core', 'aghanims-scepter', 'aghanims-shard', 'aghanims-blessing']);
 
 const STR_INT_LANE = new Set([...STR_LANE, ...INT_LANE]);
 

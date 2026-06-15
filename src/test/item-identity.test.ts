@@ -8,6 +8,7 @@ import { makeItemState, itemReady, sortInventory, computeBuyPlan, executeBuy } f
 import { rollItemDrops } from '../core/phase3';
 import { affixDef, rollAffixesFor } from '../data/affixes';
 import { Rng } from '../core/rng';
+import { NATIVE } from '../data/items/index';
 import type { Unit } from '../core/unit';
 
 // ============================================================
@@ -64,6 +65,30 @@ describe('Blink Dagger', () => {
     sim.order(me.uid, { kind: 'item', invSlot: slot, point: { x: 4000, y: 1000 } }); // 3000 away, max 1200
     sim.run(0.2);
     expect(me.pos.x).toBeCloseTo(1000 + 1200 * 0.8, -1);
+  });
+});
+
+describe('Gem of True Sight', () => {
+  // The gem used to carry only `visionPct`, a stat the engine never reads — so the
+  // item literally did nothing. Its identity is *true sight*: a passive field that
+  // strips invisibility off nearby enemies. Prove that through the real reveal path
+  // (the same `revealed` mod Dust/Zeus use), so it can't quietly rot back to a no-op.
+  it('passively reveals invisible enemies in range', () => {
+    const { sim, me, foe } = lab();
+    applyStatus(sim, foe, foe, 'invis', 30, { fadeTime: 0 }, { defId: 'test-invis', level: 1, vfx: { archetype: 'stun-stars', color: '#ffffff' } });
+    sim.run(0.2);
+    foe.refresh(sim.time);
+    expect(foe.summary.invisible, 'foe actually faded to invisible').toBe(true);
+    expect(foe.isVisibleTo(me.team, sim.time), 'invisible foe is hidden before the gem').toBe(false);
+
+    give(sim, me, 'gem-of-true-sight');
+    me.markStatsDirty();
+    me.refresh(sim.time);
+    sim.run(0.8); // let the aura tick onto the foe
+    foe.refresh(sim.time);
+
+    expect(foe.summary.mods.revealed ?? 0, 'gem aura applied the revealed mod').toBeGreaterThan(0);
+    expect(foe.isVisibleTo(me.team, sim.time), 'gem true-sight makes the invisible foe visible').toBe(true);
   });
 });
 
@@ -503,5 +528,80 @@ describe('aura items', () => {
     sim.run(1.2); // aura pass
     expect(ally.summary.mods.lifestealPct).toBeGreaterThanOrEqual(15);
     expect(me.summary.mods.lifestealPct).toBeGreaterThanOrEqual(15);
+  });
+});
+
+describe('ANCIENTS-native item hooks', () => {
+  it('does not ship native items that are only prose or appearance', () => {
+    const inert = NATIVE
+      .filter((item) =>
+        !item.passiveMods &&
+        !item.aura &&
+        !item.triggers?.length &&
+        !item.tagBoon &&
+        !item.active &&
+        !item.attackVisual?.length &&
+        !item.elementOnHit
+      )
+      .map((item) => item.id);
+
+    expect(inert).toEqual([]);
+  });
+
+  it('aggregates native passive stat hooks into a real unit', () => {
+    const { sim, me } = lab();
+    const before = {
+      maxMana: me.stats.maxMana,
+      moveSpeed: me.stats.moveSpeed,
+      spellAmpPct: me.stats.spellAmpPct,
+      reactionAmpPct: me.stats.reactionAmpPct,
+      tagBoonAmpPct: me.stats.tagBoonAmpPct,
+      tagChainWindowBonusSec: me.stats.tagChainWindowBonusSec,
+      staminaBonus: me.stats.staminaBonus,
+      partyXpAmpPct: me.stats.partyXpAmpPct
+    };
+
+    for (const id of ['mentors-standard', 'catalyst-prism', 'tagweavers-gauntlet', 'skyfeather-anklet', 'concord-relic', 'twin-soul-vessel']) {
+      give(sim, me, id);
+    }
+    me.markStatsDirty();
+    me.refresh(sim.time);
+
+    expect(me.stats.partyXpAmpPct).toBeGreaterThan(before.partyXpAmpPct);
+    expect(me.stats.reactionAmpPct).toBeGreaterThan(before.reactionAmpPct);
+    expect(me.stats.tagBoonAmpPct).toBeGreaterThan(before.tagBoonAmpPct);
+    expect(me.stats.tagChainWindowBonusSec).toBeGreaterThan(before.tagChainWindowBonusSec);
+    expect(me.stats.staminaBonus).toBeGreaterThan(before.staminaBonus);
+    expect(me.stats.moveSpeed).toBeGreaterThan(before.moveSpeed);
+    expect(me.stats.maxMana).toBeGreaterThan(before.maxMana);
+    expect(me.stats.spellAmpPct).toBeGreaterThan(before.spellAmpPct);
+  });
+
+  it('dispatches native aura and on-kill trigger effects through the sim', () => {
+    const { sim, me, foe } = lab();
+    const ally = sim.spawnHero(REG.hero('sniper'), { team: 0, pos: { x: foe.pos.x + 40, y: foe.pos.y }, level: 10, ctrl: { kind: 'none' } });
+    ally.mana = 0;
+    const armorBefore = ally.stats.armor;
+
+    give(sim, me, 'beastbond-totem');
+    give(sim, me, 'soul-ledger');
+    sim.run(1.2);
+
+    expect(ally.stats.armor).toBeGreaterThanOrEqual(armorBefore + 2);
+    applyDamage(sim, me, foe, 1e9, 'physical');
+    expect(ally.mana).toBeGreaterThan(0);
+  });
+
+  it('routes Echo Battery as both a stat item and an executable tag-boon payload', () => {
+    const { sim, me } = lab();
+    give(sim, me, 'echo-battery');
+    me.markStatsDirty();
+    me.refresh(sim.time);
+
+    const def = REG.item('echo-battery');
+    expect(me.stats.tagBoonAmpPct).toBeGreaterThan(0);
+    expect(def.tagBoon?.fire).toBe('both');
+    expect(def.tagBoon?.effects?.length ?? 0).toBeGreaterThan(0);
+    expect(def.tagBoon?.onArchetype?.Soak?.length ?? 0).toBeGreaterThan(0);
   });
 });

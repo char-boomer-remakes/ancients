@@ -36,14 +36,15 @@ export class LiveRaid {
   done = false;
   result: RaidEncounterResult | null = null;
 
-  constructor(def: RaidDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number, opts?: { maxSec?: number; aegis?: boolean; festivalMode?: SeasonalModeKind }) {
+  constructor(def: RaidDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number, opts?: { maxSec?: number; aegis?: boolean; festivalMode?: SeasonalModeKind; worldLevel?: number }) {
     this.def = def;
     this.tier = tier;
     this.festivalMode = opts?.festivalMode;
     if (this.festivalMode === 'linear-crawl' || this.festivalMode === 'wave-defense' || this.festivalMode === 'roshan-candy') this.nextFestivalPressureAt = 4;
     else if (this.festivalMode === 'damage-race') this.nextFestivalPressureAt = 6;
     this.festivalCtx = { defId: `festival:${opts?.festivalMode ?? def.id}`, level: def.boss.level ?? 30, vfx: { archetype: 'summon-pop', color: '#ffd86a' } };
-    const rs = raidSetupFromDef(def, party, tier, seed);
+    // PROGRESSION_OVERHAUL §4.3: the World Level dial scales the live raid's HP/damage too.
+    const rs = raidSetupFromDef(def, party, tier, seed, opts?.worldLevel ?? 0);
     const limit = opts?.maxSec ?? rs.maxSec;
     this.sim = setupRaidSim({ seed: rs.seed, party: rs.party, boss: rs.boss, bossRank: def.bossRank ?? 'boss', maxSec: limit });
     this.boss = this.sim.unitsArr.find((u) => u.team === 1 && u.ctrl.kind === 'boss')!;

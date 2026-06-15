@@ -84,6 +84,7 @@ export interface StatMods {
   reactionAmpPct: number;
   elementalGaugeSec: number;
   staminaBonus: number;
+  partyXpAmpPct: number;          // bench/participant XP lerps toward active rate (PROGRESSION §5)
 }
 export type StatModMap = Partial<StatMods>;
 
@@ -1546,6 +1547,8 @@ export interface GymDef {
   dialogue: string[];          // in-character leader lines (§3.13), original
   /** Composition format (AUTOBATTLER_OVERHAUL §5): bans/caps/budgets + counter-draft. */
   format?: DraftFormat;
+  /** PROGRESSION_OVERHAUL §3.2: pool the leader counter-drafts its OWN five from (defaults to region theme). */
+  counterPool?: string[];
 }
 
 // ---------- Composition formats (AUTOBATTLER_OVERHAUL §5) ----------
@@ -1725,7 +1728,7 @@ export type SimEvent =
   | { t: 'summon'; uid: number; pos: Vec2 }
   | { t: 'revive'; uid: number; pos: Vec2 }   // Aegis / Reincarnation: stand once
   | { t: 'item-used'; uid: number; itemId: string }
-  | { t: 'loot-drop'; pos: Vec2; color: string; grade?: ItemGrade; signature?: boolean }
+  | { t: 'loot-drop'; pos: Vec2; color: string; grade?: ItemGrade; signature?: boolean; combo?: boolean }
   | { t: 'gold'; amount: number; reason: string; pos?: Vec2 }
   | { t: 'xp'; uid: number; amount: number }
   | { t: 'bark'; uid: number; line: string }
@@ -1845,6 +1848,30 @@ export interface KeyBindings {
   mouseMoveButton?: 'right' | 'left';
 }
 
+// ---------- Trainer meta board (PROGRESSION_OVERHAUL §4.2) ----------
+// A node grants access/economy/collection/convenience only — never raw power.
+// The effect key is a CLOSED vocabulary; no `StatMods` key is ever permitted
+// (enforced by data-lint), so the meta is a dial, not a stat stick.
+export type MetaEffectKey =
+  | 'worldLevelCap'      // raise the ascension-dial ceiling
+  | 'stashSize'          // more neutral/inventory stash room
+  | 'merchantRefresh'    // extra roaming-merchant refreshes
+  | 'catchSpeed'         // faster capture binds
+  | 'entourageSlot'      // more fielded creep slots
+  | 'findShardRate'      // higher echo-shard find rate
+  | 'refightCaptainCall' // bonus Captain Calls on a re-fight
+  | 'fastTravel';        // unlock fast travel between waypoints
+
+export interface MetaNodeDef {
+  id: string;
+  name: string;
+  description: string;
+  cost: number;                                 // Trainer XP / shards (systems-defined currency)
+  effect: Partial<Record<MetaEffectKey, number>>;
+  /** Optional Trainer-Level gate before the node can be purchased. */
+  requiresTrainerLevel?: number;
+}
+
 export interface GameSave {
   version: number;
   name: string;
@@ -1898,7 +1925,13 @@ export interface GameSave {
   regionVisits?: Record<string, number>;
   resin?: number;
   resinUpdatedAt?: number;
-  settings: { quickcast: boolean; resonance?: boolean; swapCharges?: boolean; minimap?: boolean; keyBindings?: KeyBindings; audio: AudioSettings; graphics?: GraphicsSettings; cutscene?: CutsceneSettings; interface?: InterfaceSettings };
+  // --- Trainer track + meta dial (PROGRESSION_OVERHAUL §4); all optional so v<10 loads clean.
+  trainerLevel?: number;          // default 1
+  trainerXp?: number;             // default 0
+  metaNodes?: string[];           // purchased MetaNodeDef ids; default []
+  worldLevelTier?: number;        // player-chosen ascension dial; default 0
+  collectionMilestones?: string[];// unlocked collection-milestone ids; default []
+  settings: { quickcast: boolean; resonance?: boolean; swapCharges?: boolean; minimap?: boolean; worldLevel?: boolean; keyBindings?: KeyBindings; audio: AudioSettings; graphics?: GraphicsSettings; cutscene?: CutsceneSettings; interface?: InterfaceSettings };
 }
 
 // ---------- Sim interface available to effect interpreters ----------

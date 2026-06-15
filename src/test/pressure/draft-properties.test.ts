@@ -7,7 +7,8 @@ import {
   buildLegalTeam,
   counterDraft,
   formatSatisfiable,
-  canDraftHero
+  canDraftHero,
+  formatLevelCap
 } from '../../core/draft';
 import { HERO_POOL, randomTeam, rng } from './_fuzz';
 import type { DraftFormat, MacroHeroSetup } from '../../core/types';
@@ -32,6 +33,11 @@ beforeAll(() => registerAllContent());
 const FORMATS: { id: string; format: DraftFormat }[] = ALL_GYMS
   .filter((g) => g.format && g.format.rules.length > 0)
   .map((g) => ({ id: g.id, format: g.format! }));
+
+/** A build level that respects the format's level cap (so built teams stay legal). */
+function buildLvl(format: DraftFormat): number {
+  return Math.min(28, formatLevelCap(format) ?? 28);
+}
 
 /** The hard constraints (everything except require-role, which is a goal). */
 function legalIgnoringGoals(format: DraftFormat, team: MacroHeroSetup[]): boolean {
@@ -92,7 +98,7 @@ describe('PRESSURE: buildLegalTeam only ever returns legal teams', () => {
   it('respects hard constraints for every format across 50 seeds', () => {
     for (const { id, format } of FORMATS) {
       for (let s = 0; s < 50; s++) {
-        const team = buildLegalTeam(format, HERO_POOL, 1234 + s, { level: 28 });
+        const team = buildLegalTeam(format, HERO_POOL, 1234 + s, { level: buildLvl(format) });
         expect(team.length, `${id} seed ${s}`).toBeLessThanOrEqual(5);
         expect(legalIgnoringGoals(format, team), `${id} seed ${s} built an illegal team`).toBe(true);
         // No duplicate heroes may be drafted.
@@ -110,8 +116,8 @@ describe('PRESSURE: counter-draft is legal-preserving and deterministic', () => 
     for (const { id, format } of FORMATS) {
       for (let s = 0; s < 25; s++) {
         const seed = 7000 + s;
-        const player = buildLegalTeam(format, HERO_POOL, seed * 3, { level: 28 });
-        const baseEnemy = buildLegalTeam(format, HERO_POOL, seed * 5 + 1, { level: 28 });
+        const player = buildLegalTeam(format, HERO_POOL, seed * 3, { level: buildLvl(format) });
+        const baseEnemy = buildLegalTeam(format, HERO_POOL, seed * 5 + 1, { level: buildLvl(format) });
         // Precondition: only assert preservation when the base enemy is itself legal.
         if (!isLegalDraft(format, baseEnemy)) continue;
 
@@ -142,8 +148,9 @@ describe('PRESSURE: canDraftHero agrees with validating the result', () => {
         // already legal; an already-broken team is out of its contract.
         if (!legalIgnoringGoals(format, team)) continue;
         const candidate = HERO_POOL[r.int(0, HERO_POOL.length - 1)];
-        if (canDraftHero(format, team, candidate, 28)) {
-          const next = [...team, { heroId: candidate, level: 28 }];
+        const lvl = buildLvl(format);
+        if (canDraftHero(format, team, candidate, lvl)) {
+          const next = [...team, { heroId: candidate, level: lvl }];
           expect(legalIgnoringGoals(format, next), `${id}: canDraftHero allowed ${candidate} but result is illegal`).toBe(true);
         }
       }

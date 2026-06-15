@@ -99,8 +99,8 @@ function isEmissiveMaterial(m: THREE.MeshStandardMaterial): boolean {
   return !!e && e.r + e.g + e.b > 0 && (m.emissiveIntensity ?? 0) > 0;
 }
 
-/** Collapse a set of static, never-animated meshes into far fewer draw calls —
- *  in the beauty *and* shadow passes — without changing what's on screen.
+/** Collapse a set of static, never-animated meshes into far fewer draw calls,
+ *  in the beauty *and* shadow passes, without changing what's on screen.
  *
  *  Non-emissive geometry is merged by material: each mesh's world transform is
  *  baked into a shared `BufferGeometry`, so the merged mesh sits at the world
@@ -1106,7 +1106,11 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
   // Animated shader water ring outside the playfield (GRAPHICS_SPEC §5.4):
   // summed sines ripple the surface and paint deeper troughs / foamy crests.
   const waterMat = new THREE.ShaderMaterial({
-    transparent: true,
+    // Opaque: at the old 0.94 alpha the translucency was imperceptible on a
+    // backdrop sea, but staying out of the transparent pass lets this large plane
+    // write depth and have its terrain-occluded fragments rejected by early-Z,
+    // skipping the two normal-map samples on every hidden pixel.
+    transparent: false,
     uniforms: {
       uTime: { value: 0 },
       uDeep: { value: new THREE.Color(0x123247) },
@@ -1153,11 +1157,15 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
           float spec = pow(clamp(n.z, 0.0, 1.0), 6.0);
           col += uFoam * spec * 0.35;
         }
-        gl_FragColor = vec4(col, 0.94);
+        gl_FragColor = vec4(col, 1.0);
       }
     `
   });
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(sizeW * 3, sizeW * 3, 90, 90), waterMat);
+  // 64 segments stays above the Nyquist limit for the highest-frequency ripple
+  // term (~11 unit wavelength), so the surface reads the same as the old 90x90
+  // grid while transforming about half the verts each frame. This is a peripheral
+  // backdrop ring, not where the player's attention or frame budget should go.
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(sizeW * 3, sizeW * 3, 64, 64), waterMat);
   water.rotateX(-Math.PI / 2);
   water.position.set(sizeW / 2, -1.2, sizeW / 2);
   group.add(water);
@@ -1301,6 +1309,7 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
   const dungeonPortals = buildDungeonPortals(region, heightAt, staticPropShadows);
   group.add(dungeonPortals);
   pushRegionContactObstacles(region, obstacles);
+  let lastWaterTime = -1;
 
   return {
     group,
@@ -1313,7 +1322,12 @@ export function buildTerrain(region: RegionDef, isLive: SceneLiveCheck = () => t
         if (mesh.isMesh) mesh.castShadow = enabled;
       });
     },
-    update: (time: number) => { waterMat.uniforms.uTime.value = time; }
+    update: (time: number) => {
+      const next = Math.floor(time * 30) / 30;
+      if (next === lastWaterTime) return;
+      lastWaterTime = next;
+      waterMat.uniforms.uTime.value = next;
+    }
   };
 }
 

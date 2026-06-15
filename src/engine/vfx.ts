@@ -306,6 +306,7 @@ export class VfxManager {
   private projectileSeen = new Set<number>();
   private zones = new Map<number, Transient>();
   private time = 0;
+  private readonly worldScratch = new THREE.Vector3();
 
   constructor(private heightAt: (x: number, y: number) => number, private transientCap: number = PERFORMANCE_BUDGET.transientVfxCap) {}
 
@@ -322,6 +323,10 @@ export class VfxManager {
 
   private w(x: number, y: number, lift = 0): THREE.Vector3 {
     return new THREE.Vector3(x / WORLD_SCALE, this.heightAt(x, y) + lift, y / WORLD_SCALE);
+  }
+
+  private wInto(out: THREE.Vector3, x: number, y: number, lift = 0): THREE.Vector3 {
+    return out.set(x / WORLD_SCALE, this.heightAt(x, y) + lift, y / WORLD_SCALE);
   }
 
   attackVisual(visual: AttackVisualSpec, from: Vec2, to: Vec2): void {
@@ -500,9 +505,13 @@ export class VfxManager {
       }
       case 'loot-drop': {
         const gradeScale = ev.grade === 'pristine' ? 1.55 : ev.grade === 'refined' ? 1.25 : 1.0;
-        const scale = ev.signature ? gradeScale * 1.2 : gradeScale;
+        // PROGRESSION_OVERHAUL §2.4: a combo kill brightens the beam (a gold, shard-flecked
+        // pop) so landing a reaction/tag chain visibly pays off, even below signature grade.
+        const combo = !!ev.combo;
+        const scale = (ev.signature ? gradeScale * 1.2 : gradeScale) * (combo ? 1.18 : 1);
         this.pillar(ev.pos.x, ev.pos.y, ev.color, scale);
-        this.burst(ev.pos.x, ev.pos.y, ev.color, 1.2 * scale, 0.7, ev.signature ? '#ffd86a' : '#ffffff', ev.signature ? 'shard' : 'soft');
+        const bright = ev.signature || combo;
+        this.burst(ev.pos.x, ev.pos.y, ev.color, (combo ? 1.45 : 1.2) * scale, 0.7, bright ? '#ffd86a' : '#ffffff', bright ? 'shard' : 'soft');
         this.impactDecal(ev.pos.x, ev.pos.y, ev.color, 0.8 * scale, 0.75);
         break;
       }
@@ -529,7 +538,7 @@ export class VfxManager {
       seen.add(p.pid);
       const entry = this.projectiles.get(p.pid);
       if (entry) {
-        const v = this.w(p.pos.x, p.pos.y, 1.2);
+        const v = this.wInto(this.worldScratch, p.pos.x, p.pos.y, 1.2);
         entry.obj.position.lerp(v, 0.6);
         entry.obj.rotation.y += 0.2;
         this.pushTrail(entry);
@@ -1502,7 +1511,7 @@ export class VfxManager {
       const fid = z.obj.userData.followUid as number | undefined;
       if (fid === undefined) continue;
       const p = unitPos(fid);
-      if (p) z.obj.position.copy(this.w(p.x, p.y, 0));
+      if (p) z.obj.position.copy(this.wInto(this.worldScratch, p.x, p.y, 0));
     }
   }
 }

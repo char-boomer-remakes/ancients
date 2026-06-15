@@ -247,13 +247,16 @@ const SKY_SHADER = {
 // Per-biome ambient weather (GRAPHICS_SPEC §5.6). count scales with the quality
 // tier's weatherDensity; fall/sway/colour give each region its own air.
 interface WeatherSpec { count: number; color: number; size: number; fall: number; sway: number; }
+// Counts are deliberately conservative: this is ambient air, not the show. The
+// particles are additive + depth-write-off (overdraw), so the budget they free
+// up belongs to the heroes and combat VFX in the centre of the frame.
 const BIOME_WEATHER: Record<string, WeatherSpec> = {
-  snow: { count: 420, color: 0xffffff, size: 0.16, fall: 1.6, sway: 0.7 },
-  desert: { count: 180, color: 0xe8d6a8, size: 0.1, fall: 0.5, sway: 1.1 },
-  wasteland: { count: 240, color: 0x8a7a6a, size: 0.12, fall: 1.0, sway: 0.6 },
-  forest: { count: 150, color: 0xbfe89a, size: 0.13, fall: 0.7, sway: 0.9 },
-  grass: { count: 120, color: 0xdfe8b0, size: 0.11, fall: 0.5, sway: 0.9 },
-  coast: { count: 140, color: 0xdfeefc, size: 0.11, fall: 0.45, sway: 1.0 }
+  snow: { count: 280, color: 0xffffff, size: 0.16, fall: 1.6, sway: 0.7 },
+  desert: { count: 120, color: 0xe8d6a8, size: 0.1, fall: 0.5, sway: 1.1 },
+  wasteland: { count: 160, color: 0x8a7a6a, size: 0.12, fall: 1.0, sway: 0.6 },
+  forest: { count: 100, color: 0xbfe89a, size: 0.13, fall: 0.7, sway: 0.9 },
+  grass: { count: 80, color: 0xdfe8b0, size: 0.11, fall: 0.5, sway: 0.9 },
+  coast: { count: 95, color: 0xdfeefc, size: 0.11, fall: 0.45, sway: 1.0 }
 };
 const WEATHER_BOX = { w: 90, h: 46, d: 90 };
 
@@ -414,6 +417,7 @@ export class GameScene {
   private groundItemViews = new Map<number, GroundItemView>();
   private groundItemGroup = new THREE.Group();
   private mapMarkers: MapMarker[] = [];
+  private mapMarkersHidden = false;
   private questGiverGroup = new THREE.Group();
   private questGivers = new Map<string, QuestGiverMarker>();
   private dungeonRoomGroup: THREE.Group | null = null;
@@ -454,6 +458,13 @@ export class GameScene {
   private time = 0;
   private frameParity = 0; // flips 0/1 each frame to drive reduced-LOD animation cadence
   private frameMsSamples: number[] = [];
+  private readonly unitOrderScratch: Unit[] = [];
+  private readonly unitSeenScratch = new Set<number>();
+  private readonly groundItemSeenScratch = new Set<number>();
+  private readonly questGiverSeenScratch = new Set<string>();
+  private readonly daySky = new THREE.Color();
+  private readonly dayFog = new THREE.Color();
+  private readonly daySun = new THREE.Color();
   private lastRenderCalls = 0;
   private lastRenderTriangles = 0;
   private qualityCeiling: QualityTier;
@@ -487,6 +498,7 @@ export class GameScene {
     this.renderer.toneMappingExposure = this.exposureBase;
 
     this.camera = new THREE.PerspectiveCamera(46, 1, 0.5, 700);
+    this.scene.background = new THREE.Color(DAY.sky);
     this.scene.fog = new THREE.Fog(DAY.fog.getHex(), 60, 300);
 
     // Image-based lighting: a neutral room env map gives PBR materials real
@@ -669,7 +681,9 @@ export class GameScene {
       vel[i * 3 + 2] = (Math.random() - 0.5) * spec.sway;
     }
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    // Positions are rewritten every frame in updateWeather, so flag the buffer
+    // DYNAMIC_DRAW to let the driver avoid re-allocating it on each upload.
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
     const mat = new THREE.PointsMaterial({
       color: spec.color,
       size: spec.size,
@@ -689,6 +703,8 @@ export class GameScene {
 
   private updateWeather(dt: number): void {
     if (!this.weather || !this.weatherVel || this.reducedMotion) return;
+    if (this.frameParity !== 0) return;
+    dt *= 2;
     this.weather.position.set(this.camera.position.x, this.camTarget.y, this.camera.position.z);
     const pos = this.weather.geometry.attributes.position as THREE.BufferAttribute;
     const arr = pos.array as Float32Array;
@@ -721,7 +737,10 @@ export class GameScene {
     const token = this.sceneToken;
 
     const species = AMBIENT_CRITTERS.map((c) => ({ url: c.url, height: c.worldSize.heightM, speed: c.speed }));
-    const perSpecies = 2;
+    // One wanderer per species is enough to make the land feel inhabited; each is
+    // a skinned rig with its own animation mixer, so this keeps the ambient herd
+    // off the hero/combat frame budget.
+    const perSpecies = 1;
     const tx = region.town.pos.x;
     const ty = region.town.pos.y;
     const homeFor = (): { x: number; y: number } => {
@@ -747,7 +766,10 @@ export class GameScene {
             o.userData.sharedAsset = true; // shared cached geometry; dispose pass skips it
             const m = o as THREE.Mesh;
             if (!m.isMesh) return;
-            m.castShadow = true;
+            // Decorative wanderers don't cast shadows: a skinned mesh re-skins in
+            // the shadow pass too, and these never enter combat framing where a
+            // contact shadow would matter.
+            m.castShadow = false;
             // Animated critter GLBs are skinned, so they cull against a stale bind-pose
             // bounding sphere and can pop out of view at certain angles — same class as the
             // hero rig fix. Disable per-mesh culling (only a couple of critters, cheap).
@@ -1117,7 +1139,15 @@ export class GameScene {
 
   // ---------- per-frame ----------
 
-  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView: CinematicView | null = null, groundItems: readonly GroundItemDrop[] = []): void {
+  update(
+    sim: Sim,
+    followUnit: Unit | null,
+    renderDt: number,
+    timeOfDay01: number,
+    cinematicView: CinematicView | null = null,
+    groundItems: readonly GroundItemDrop[] = [],
+    ambiencePaused = false
+  ): void {
     this.recordFrameMs(renderDt * 1000, renderDt);
     this.time += renderDt;
     this.frameParity ^= 1;
@@ -1139,10 +1169,15 @@ export class GameScene {
     this.updateDayNight(timeOfDay01);
     this.updateCamera(followUnit, renderDt, sim, cinematicView);
     this.updateMapMarkers();
-    if (!this.reducedMotion) this.terrain.update?.(this.time);
-    this.updateAmbientCritters(renderDt);
+    const passiveAmbience = !ambiencePaused;
+    const animateAmbience = passiveAmbience && !this.reducedMotion;
+    if (this.weather) this.weather.visible = passiveAmbience;
+    if (animateAmbience) {
+      this.terrain.update?.(this.time);
+      this.updateAmbientCritters(renderDt);
+    }
     this.skyDome.position.copy(this.camera.position);
-    this.updateWeather(renderDt);
+    if (animateAmbience) this.updateWeather(renderDt);
     this.renderer.info.reset();
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
@@ -1455,7 +1490,8 @@ export class GameScene {
   }
 
   private syncGroundItems(drops: readonly GroundItemDrop[]): void {
-    const seen = new Set<number>();
+    const seen = this.groundItemSeenScratch;
+    seen.clear();
     for (const drop of drops) {
       seen.add(drop.uid);
       let view = this.groundItemViews.get(drop.uid);
@@ -1680,7 +1716,8 @@ export class GameScene {
 
   /** Place/move the walking quest-giver NPCs from the Game's per-frame view-model. */
   syncQuestGivers(givers: readonly { id: string; name: string; x: number; y: number; hasClaimable: boolean; hasActive: boolean }[]): void {
-    const seen = new Set<string>();
+    const seen = this.questGiverSeenScratch;
+    seen.clear();
     for (const g of givers) {
       seen.add(g.id);
       let marker = this.questGivers.get(g.id);
@@ -1744,8 +1781,9 @@ export class GameScene {
       if (strong) this.addShake(0.3);
     }
     if (ev.t === 'loot-drop') {
-      this.accentGrade(ev.color, ev.signature || ev.grade === 'pristine' ? 0.45 : 0.28);
-      if (ev.signature || ev.grade === 'pristine') this.addShake(0.18);
+      const peak = ev.signature || ev.grade === 'pristine';
+      this.accentGrade(ev.color, peak ? 0.45 : ev.combo ? 0.36 : 0.28);
+      if (peak) this.addShake(0.18);
     }
     this.vfx.handleEvent(ev, (uid) => {
       const u = sim.unit(uid);
@@ -1791,7 +1829,8 @@ export class GameScene {
   }
 
   private syncUnits(sim: Sim, dt: number): void {
-    const seen = new Set<number>();
+    const seen = this.unitSeenScratch;
+    seen.clear();
     let fullAnimationBudget = this.quality.fullRigAnimationBudget;
     this.beginCrowdImpostors();
     // Spend the full-rig animation budget on the NEAREST units first. The budget
@@ -1799,7 +1838,12 @@ export class GameScene {
     // spawn order let far units claim the budget and starve nearby creeps into
     // impostors — the "creeps turn into cones" bug, made obvious by night fog.
     // Sorting by camera distance guarantees close units always get full models.
-    const ordered = sim.unitsArr.filter((u) => !(u.kind === 'npc' && !u.alive));
+    const ordered = this.unitOrderScratch;
+    ordered.length = 0;
+    for (const u of sim.unitsArr) {
+      if (u.kind === 'npc' && !u.alive) continue;
+      ordered.push(u);
+    }
     ordered.sort((a, b) => this.cameraDistanceSq(a) - this.cameraDistanceSq(b));
     for (const u of ordered) {
       seen.add(u.uid);
@@ -2489,7 +2533,7 @@ export class GameScene {
     }
     const sunT = isDay ? t01 / 0.5 : (t01 - 0.5) / 0.5;
     const elev = Math.sin(sunT * Math.PI); // 0..1..0
-    const az = sunT * Math.PI; // east → west
+    const az = sunT * Math.PI; // east to west
 
     // pick palette: blend near transitions
     const edge = 0.08;
@@ -2503,15 +2547,15 @@ export class GameScene {
       else if (sunT > 1 - edge) { a = NIGHT; b = DUSK; mix = (sunT - (1 - edge)) / edge; }
       else { a = NIGHT; b = NIGHT; mix = 0; }
     }
-    const sky = a.sky.clone().lerp(b.sky, mix);
-    const fog = a.fog.clone().lerp(b.fog, mix);
-    const sunC = a.sun.clone().lerp(b.sun, mix);
+    const sky = this.daySky.copy(a.sky).lerp(b.sky, mix);
+    const fog = this.dayFog.copy(a.fog).lerp(b.fog, mix);
+    const sunC = this.daySun.copy(a.sun).lerp(b.sun, mix);
     const hemiI = a.hemi + (b.hemi - a.hemi) * mix;
     // Keep noon at full key but lift low-sun mornings/evenings so dawn/dusk never
     // dim out to a near-black ground (the old 0.35 floor read too dark).
     const sunI = (a.sunI + (b.sunI - a.sunI) * mix) * (isDay ? 0.6 + elev * 0.4 : 1);
 
-    this.scene.background = sky;
+    (this.scene.background as THREE.Color).copy(sky);
     (this.scene.fog as THREE.Fog).color.copy(fog);
     this.hemi.intensity = hemiI;
     this.sun.color.copy(sunC);
@@ -2800,8 +2844,17 @@ export class GameScene {
 
   private updateMapMarkers(): void {
     const opacity = Math.max(0, Math.min(1, (this.modeBlend - 0.18) / 0.5));
+    // Fully faded (e.g. follow/combat cam): hide once and skip the per-marker
+    // sin()/scale work. Guard so we only touch the DOM-less meshes on transition.
+    if (opacity <= 0.02) {
+      if (this.mapMarkersHidden) return;
+      this.mapMarkersHidden = true;
+      for (const marker of this.mapMarkers) marker.mesh.visible = false;
+      return;
+    }
+    this.mapMarkersHidden = false;
     for (const marker of this.mapMarkers) {
-      marker.mesh.visible = opacity > 0.02;
+      marker.mesh.visible = true;
       marker.material.opacity = 0.18 + opacity * 0.58;
       const pulse = 1 + Math.sin(this.time * 3 + marker.mesh.position.x) * 0.04 * opacity;
       marker.mesh.scale.setScalar(pulse);

@@ -120,7 +120,7 @@ export const SNIPER: HeroDef = {
               disjointable: true,
               onHit: [
                 { kind: 'damage', dtype: 'magical', amount: 'damage', target: 'target' },
-                { kind: 'status', status: 'stun', duration: 0.3, target: 'target' }
+                { kind: 'status', status: 'stun', duration: 'ministun', target: 'target' }
               ]
             }
           }
@@ -128,7 +128,8 @@ export const SNIPER: HeroDef = {
       },
       values: {
         damage: [300, 400, 500],
-        castRangeVal: [2200, 2800, 3400]
+        castRangeVal: [2200, 2800, 3400],
+        ministun: [0.3, 0.3, 0.3]
       },
       vfx: { archetype: 'beam', color: '#ff5b5b', color2: '#ffd27f', scale: 1.2 },
       anim: 'ranged-shot',
@@ -194,7 +195,7 @@ export const SNIPER: HeroDef = {
       mods: { moveSpeed: 20 },
       abilityValueOverrides: [
         { abilityId: 'sniper-shrapnel', valueKey: 'dps', mode: 'add', amount: 18 },
-        { abilityId: 'sniper-shrapnel', valueKey: 'slow', mode: 'add', amount: 12 }
+        { abilityId: 'sniper-shrapnel', valueKey: 'slowMs', mode: 'add', amount: 12 }
       ]
     }
   },

@@ -1,7 +1,7 @@
 import { TUNING } from '../data/tuning';
 import { angleDelta, clamp, closestOnSeg, dist, dist2, fromAngle, norm, pointSegDist, sub, turnToward, v2 } from './math2d';
 import { cannotMove } from './status';
-import { collisionBodyPushOut, obstacleBlocksMovement } from './collision';
+import { collisionBodyBoundingRadius, collisionBodyPushOut, obstacleBlocksMovement } from './collision';
 import { directWalkable, findPath } from './pathfind';
 import type { Unit } from './unit';
 import type { Vec2 } from './types';
@@ -281,6 +281,71 @@ export function resolveCollisions(sim: Sim, u: Unit, ignoreUnits = false): Colli
   return result;
 }
 
+/**
+ * True when a forced displacement of `distance` along `dir` passes close
+ * enough to an authored movement blocker that a single jump could tunnel
+ * through it. In open space this is false, so the forced move stays a single
+ * exact step (bit-identical to the legacy path). Temporary ability walls are
+ * intentionally NOT swept here: the legacy per-tick resolve already stops
+ * forced moves at walls, and keeping them out of the sweep test means this is
+ * a pure no-op in the obstacle-free macro/raid auto-resolve arenas.
+ */
+function forcedPathNeedsSweep(sim: Sim, u: Unit, dir: Vec2, distance: number): boolean {
+  const to = v2(u.pos.x + dir.x * distance, u.pos.y + dir.y * distance);
+  for (const o of sim.obstacles) {
+    if (!obstacleBlocksMovement(o)) continue;
+    const reach = collisionBodyBoundingRadius(o.body) + u.radius + 2;
+    if (pointSegDist(o.pos, u.pos, to) <= reach) return true;
+  }
+  return false;
+}
+
+/**
+ * Push an idle unit out of any authored obstacle it is embedded in and clamp it
+ * to bounds. Used for units that never run the full movement resolver (genuinely
+ * idle/holding), so a spawn/teleport onto scenery doesn't leave them clipped.
+ * Obstacle-only (no unit-unit shoving, no ability walls), so it is a strict
+ * no-op in the obstacle-free macro/raid arenas.
+ */
+export function depenetrateStatic(sim: Sim, u: Unit): void {
+  for (let pass = 0; pass < 2; pass++) {
+    for (const o of sim.obstacles) {
+      if (!obstacleBlocksMovement(o)) continue;
+      const push = collisionBodyPushOut(o.pos, o.body, u.pos, u.radius, u.facing);
+      if (push) {
+        u.pos.x += push.normal.x * (push.penetration + 0.25);
+        u.pos.y += push.normal.y * (push.penetration + 0.25);
+      }
+    }
+  }
+  u.pos.x = clamp(u.pos.x, u.radius, sim.bounds.w - u.radius);
+  u.pos.y = clamp(u.pos.y, u.radius, sim.bounds.h - u.radius);
+}
+
+/**
+ * Apply one tick of forced displacement. When the path skirts a solid we
+ * sub-step (small enough that a unit-sized gap can't be skipped) and resolve
+ * after each sub-step, so high-speed knockbacks and lag-spike-sized steps stop
+ * at walls instead of tunnelling through them. Open-space moves take the exact
+ * single step.
+ */
+function forcedStep(sim: Sim, u: Unit, dir: Vec2, distance: number): void {
+  if (distance <= 0) return;
+  if (!forcedPathNeedsSweep(sim, u, dir, distance)) {
+    u.pos.x += dir.x * distance;
+    u.pos.y += dir.y * distance;
+    return;
+  }
+  const maxStep = Math.max(4, u.radius * 0.75);
+  const steps = Math.max(1, Math.ceil(distance / maxStep));
+  const stepLen = distance / steps;
+  for (let i = 0; i < steps; i++) {
+    u.pos.x += dir.x * stepLen;
+    u.pos.y += dir.y * stepLen;
+    if (resolveCollisions(sim, u, true).blocked) return;
+  }
+}
+
 /** Integrate knockbacks / pulls / forced pushes. Returns true while a forced move is active. */
 export function integrateForcedMoves(sim: Sim, u: Unit, dt: number): boolean {
   if (u.forced.length === 0) return false;
@@ -298,8 +363,7 @@ export function integrateForcedMoves(sim: Sim, u: Unit, dt: number): boolean {
       dir = norm(sub(to.pos, u.pos));
       f.dir = dir;
     }
-    u.pos.x += dir.x * f.speed * dt;
-    u.pos.y += dir.y * f.speed * dt;
+    forcedStep(sim, u, dir, f.speed * dt);
     any = true;
     return true;
   });

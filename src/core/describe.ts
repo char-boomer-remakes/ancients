@@ -62,7 +62,8 @@ export const STAT_LABELS: Partial<Record<keyof StatModMap, string>> = {
   tagChainWindowBonusSec: 'Tag chain window',
   reactionAmpPct: 'Reaction amp',
   elementalGaugeSec: 'Element gauge',
-  staminaBonus: 'Stamina'
+  staminaBonus: 'Stamina',
+  partyXpAmpPct: 'Party XP amp'
 };
 
 export function statLabel(key: keyof StatModMap): string {

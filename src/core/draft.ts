@@ -1,6 +1,7 @@
 import { REG } from './registry';
 import { Rng } from './rng';
-import type { Attribute, DraftFormat, DraftRule, ItemTier, MacroHeroSetup } from './types';
+import { TUNING } from '../data/tuning';
+import type { Attribute, DifficultyTier, DraftFormat, DraftRule, ItemTier, MacroHeroSetup } from './types';
 
 // ============================================================
 // Composition formats (AUTOBATTLER_OVERHAUL §5). Pure, deterministic.
@@ -238,6 +239,18 @@ export function canDraftHero(format: DraftFormat | undefined, team: MacroHeroSet
   return canAdd(format ?? { rules: [] }, team, { heroId, level });
 }
 
+/** The format's level cap (the `level-cap` rule max), if any. */
+export function formatLevelCap(format: DraftFormat | undefined): number | undefined {
+  const rule = format?.rules.find((r) => r.kind === 'level-cap') as Extract<DraftRule, { kind: 'level-cap' }> | undefined;
+  return rule?.max;
+}
+
+/** Clamp a desired draft level to the format's level cap (so drafted/swapped heroes stay legal). */
+function cappedLevel(format: DraftFormat | undefined, level: number): number {
+  const cap = formatLevelCap(format);
+  return cap === undefined ? level : Math.min(level, cap);
+}
+
 /** Is there *any* legal five drawable from this pool? (acceptance: each format satisfiable). */
 export function formatSatisfiable(format: DraftFormat | undefined, pool: string[]): boolean {
   const team = buildLegalTeam(format, pool, 1, { level: format?.rules.find((r) => r.kind === 'level-cap') ? (format.rules.find((r) => r.kind === 'level-cap') as { max: number }).max : 30 });
@@ -289,7 +302,7 @@ export function counterDraft(
   if (mode === 'none') return { enemy: baseEnemy, swappedOut: [], swappedIn: [], reason: '' };
 
   if (mode === 'mirror-shape') {
-    const enemyLevel = baseEnemy[0]?.level ?? 24;
+    const enemyLevel = cappedLevel(format, baseEnemy[0]?.level ?? 24);
     const fresh = buildLegalTeam(format, pool, seed, {
       level: enemyLevel,
       items: () => ['black-king-bar']
@@ -313,7 +326,7 @@ export function counterDraft(
   const enemy = baseEnemy.map((h) => ({ ...h }));
   const swappedOut: string[] = [];
   const swappedIn: string[] = [];
-  const enemyLevel = baseEnemy[0]?.level ?? 24;
+  const enemyLevel = cappedLevel(format, baseEnemy[0]?.level ?? 24);
 
   for (const want of wants.slice(0, 2)) {
     // swap out the enemy's least counter-relevant slot (deterministic: a non-durable body)
@@ -342,6 +355,65 @@ function pickSwapTarget(enemy: MacroHeroSetup[], rng: Rng): number {
     .filter((e) => !e.durable);
   const pool = candidates.length ? candidates : enemy.map((_, i) => ({ i, durable: false }));
   return pool[rng.int(0, pool.length - 1)].i;
+}
+
+// ---------- Asymmetric Captains Series (PROGRESSION_OVERHAUL §3) ----------
+// The leader bans the PLAYER's heroes one-directionally and out-adapts each round.
+// `pickEnemyBans` chooses which of the player's recruited heroes to ban, weighting
+// high-value + counter-relevant heroes and the player's last winning five, and never
+// banning the format below a satisfiable five. Pure + deterministic for a seed.
+
+const ROLE_BAN_VALUE: Record<string, number> = {
+  carry: 5, nuker: 4, initiator: 4, disabler: 3, durable: 3, pusher: 2, support: 2, escape: 2
+};
+
+/** Counter-relevance + role value of one of the player's heroes (higher = a juicier ban). */
+function banValue(heroId: string): number {
+  let v = 1;
+  for (const r of rolesOf(heroId)) v = Math.max(v, ROLE_BAN_VALUE[r] ?? 1);
+  if (ANTI_CARRY.includes(heroId) || ANTI_COMBO.includes(heroId)) v += 1; // most counter-relevant
+  return v;
+}
+
+/**
+ * The leader's one-directional ban picker (§3.1). Bans up to `count` of the player's
+ * recruited heroes, preferring high-value + counter-relevant heroes and weighting
+ * heroes from `lastPlayerFive` up (ban the MVP). Clamps so at least
+ * `minLegalRosterAfterBans` heroes remain and the format stays `formatSatisfiable`.
+ */
+export function pickEnemyBans(
+  format: DraftFormat | undefined,
+  playerRoster: string[],
+  alreadyBanned: string[],
+  count: number,
+  lastPlayerFive: string[],
+  seed: number
+): string[] {
+  const fmt = format ?? { rules: [] };
+  const bannedSet = new Set(alreadyBanned);
+  const lastSet = new Set(lastPlayerFive);
+  const rng = new Rng(seed);
+  const minLegal = TUNING.captainsSeries.minLegalRosterAfterBans;
+
+  const candidates = [...new Set(playerRoster)].filter((id) => REG.heroes.has(id) && !bannedSet.has(id));
+  const scored = candidates
+    .map((id) => ({ id, score: banValue(id) + (lastSet.has(id) ? 3 : 0), k: rng.next() }))
+    .sort((a, b) => b.score - a.score || b.k - a.k || (a.id < b.id ? -1 : 1));
+
+  const picks: string[] = [];
+  for (const cand of scored) {
+    if (picks.length >= count) break;
+    const legalPool = candidates.filter((id) => id !== cand.id && !picks.includes(id));
+    if (legalPool.length < minLegal) break;                 // never starve below the floor
+    if (!formatSatisfiable(fmt, legalPool)) continue;       // never brick the format
+    picks.push(cand.id);
+  }
+  return picks;
+}
+
+/** Player repick budget between rounds by difficulty tier (§3.1.4), thin tuning reader. */
+export function repicksAllowed(tier: DifficultyTier): number {
+  return TUNING.captainsSeries.repicksByDifficulty[tier] ?? 0;
 }
 
 // ---------- Elite Five pick/ban (§4.2): a small deterministic state machine ----------

@@ -144,6 +144,8 @@ export class Sim {
   zones: Zone[] = [];
   repeaters: Repeater[] = [];
   resonanceEnabled = false;
+  /** PROGRESSION_OVERHAUL §4.2: `catchSpeed` meta scales the capture channel (≤1 = faster binds). */
+  captureChannelMult = 1;
   /**
    * Player-facing overworld battle-scale multiplier (OPTIMIZATION 2.0 §F.2).
    * Scales the per-owner summon/illusion ceiling for THIS sim only. The overworld
@@ -259,8 +261,8 @@ export class Sim {
     return u;
   }
 
-  spawnCreep(def: CreepDef, opts: { team: Team; pos: Vec2; star?: 1 | 2 | 3; wild?: boolean; homePos?: Vec2; ownerUid?: number; regionId?: string; combatTier?: DifficultyTier }): Unit {
-    const u = makeCreepUnit(def, { team: opts.team, pos: opts.pos, star: opts.star, wild: opts.wild, regionId: opts.regionId, combatTier: opts.combatTier });
+  spawnCreep(def: CreepDef, opts: { team: Team; pos: Vec2; star?: 1 | 2 | 3; wild?: boolean; homePos?: Vec2; ownerUid?: number; regionId?: string; combatTier?: DifficultyTier; worldLevel?: number }): Unit {
+    const u = makeCreepUnit(def, { team: opts.team, pos: opts.pos, star: opts.star, wild: opts.wild, regionId: opts.regionId, combatTier: opts.combatTier, worldLevel: opts.worldLevel });
     u.aggroRadius = def.aggroRadius;
     if (opts.ownerUid !== undefined) {
       u.ownerUid = opts.ownerUid;

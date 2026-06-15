@@ -61,9 +61,10 @@ export function mergeCreeps(list: CreepInstanceSave[]): { list: CreepInstanceSav
 export function validateEntourage(
   selection: string[],
   storage: CreepInstanceSave[],
-  tierOf: (creepId: string) => CreepTier
+  tierOf: (creepId: string) => CreepTier,
+  maxFielded: number = TUNING.entourageMax
 ): { ok: boolean; reason?: string } {
-  if (selection.length > TUNING.entourageMax) return { ok: false, reason: `max ${TUNING.entourageMax} fielded` };
+  if (selection.length > maxFielded) return { ok: false, reason: `max ${maxFielded} fielded` };
   const seen = new Set<string>();
   let ancients = 0;
   for (const uid of selection) {

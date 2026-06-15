@@ -6,6 +6,7 @@ import { pickBossMechanic } from './boss-brain';
 import { autoPicksForLevel, buildHero } from './hero-setup';
 import { makeItemState } from './items';
 import { raidSetupFromDef } from './phase3';
+import { worldLevelScale } from './progression';
 import { applyElementAura } from './combat';
 import { slotToWorld, type Formation } from './board';
 import type { EffectCtx } from './effects';
@@ -78,6 +79,8 @@ export interface RaidEncounterSetup {
   seed: number;
   /** Party carries a single Aegis charge (one-use auto-revive). */
   aegis?: boolean;
+  /** Optional featured World Level term for endgame raid scaling. */
+  worldLevel?: number;
   maxSec?: number;
   /** Keep the full sim event history (tests/inspection); off in the live loop. */
   captureEvents?: boolean;
@@ -387,7 +390,7 @@ function partyCentroid(sim: Sim): Vec2 | null {
 
 export function runRaidEncounter(setup: RaidEncounterSetup): RaidEncounterResult {
   const { def } = setup;
-  const rs = raidSetupFromDef(def, setup.party, setup.tier, setup.seed);
+  const rs = raidSetupFromDef(def, setup.party, setup.tier, setup.seed, setup.worldLevel ?? 0);
   const maxSec = setup.maxSec ?? rs.maxSec;
   const sim = setupRaidSim({ seed: rs.seed, party: rs.party, boss: rs.boss, bossRank: def.bossRank ?? 'boss', maxSec });
   if (setup.captureEvents) sim.events.captureAll = true;
@@ -419,6 +422,8 @@ export interface DomainEncounterSetup {
   maxSec?: number;
   disorder?: DomainDisorderRule;
   clear: { kind: 'defeat' | 'time-limit' | 'reaction-count'; param?: number };
+  /** Featured World Level dial (§4.3): scales the domain boss HP/damage columns. */
+  worldLevel?: number;
 }
 
 export interface DomainEncounterResult extends MacroResult {
@@ -428,7 +433,14 @@ export interface DomainEncounterResult extends MacroResult {
 
 export function runDomainEncounter(setup: DomainEncounterSetup): DomainEncounterResult {
   const maxSec = setup.maxSec ?? TUNING.macroMaxSec;
-  const sim = setupRaidSim({ seed: setup.seed, party: setup.party, boss: setup.boss, maxSec });
+  // PROGRESSION_OVERHAUL §4.3: the featured World Level turns up the domain boss columns.
+  const wl = worldLevelScale(setup.worldLevel ?? 0);
+  const boss: RaidBossSetup = {
+    ...setup.boss,
+    hpScale: (setup.boss.hpScale ?? TUNING.raidBossHpScale) * wl.hp,
+    damageScale: (setup.boss.damageScale ?? TUNING.raidBossDamageScale) * wl.damage
+  };
+  const sim = setupRaidSim({ seed: setup.seed, party: setup.party, boss, maxSec });
   sim.resonanceEnabled = true;     // domains are element-themed; reactions always resolve here
   sim.events.captureAll = true;    // count reactions for reaction-count clears
 

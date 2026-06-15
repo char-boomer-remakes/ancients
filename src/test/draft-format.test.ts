@@ -8,11 +8,14 @@ import {
   counterDraft,
   formatSatisfiable,
   isLegalDraft,
+  pickEnemyBans,
+  repicksAllowed,
   runPickBan,
   validateDraft
 } from '../core/draft';
+import { TUNING } from '../data/tuning';
 import { defaultFormation, reachProfile } from '../core/board';
-import { runGymMatch, type GymMatchHero } from '../systems/macro-session';
+import { LiveGymFight, runGymMatch, type GymMatchHero } from '../systems/macro-session';
 import { Game, newGameSave } from '../systems/game';
 import type { DraftFormat, GambitRule, MacroHeroSetup } from '../core/types';
 
@@ -114,7 +117,7 @@ describe('AUTOBATTLER §5.2 — every gym format is satisfiable from the roster'
     for (const gym of ALL_GYMS) {
       const pool = ALL_IDS();
       expect(formatSatisfiable(gym.format, pool), `${gym.id} should be satisfiable`).toBe(true);
-      const built = buildLegalTeam(gym.format, pool, 99);
+      const built = buildLegalTeam(gym.format, pool, 99, { level: gymLevelCap(gym.format) });
       expect(built.length, gym.id).toBe(5);
       expect(isLegalDraft(gym.format, built), gym.id).toBe(true);
     }
@@ -178,6 +181,115 @@ describe('AUTOBATTLER §5.4 — counter-draft answers your shape', () => {
     expect(isLegalDraft(fmt, r1.enemy)).toBe(true);
     expect(r1.enemy.map((h) => h.heroId)).not.toEqual(r2.enemy.map((h) => h.heroId));
   });
+});
+
+describe('PROGRESSION §3 — the leader drafts against you (asymmetric Captains Series)', () => {
+  const FILLER = (): string[] => withoutRole('support').filter((id) => !REG.hero(id).roles.includes('carry'));
+
+  it('pickEnemyBans is deterministic for a seed', () => {
+    const roster = ALL_IDS().slice(0, 12);
+    const a = pickEnemyBans(undefined, roster, [], 3, roster.slice(0, 5), 4242);
+    const b = pickEnemyBans(undefined, roster, [], 3, roster.slice(0, 5), 4242);
+    expect(a).toEqual(b);
+    expect(a.length).toBe(3);
+  });
+
+  it('prefers high-value heroes (a low-value support is banned last)', () => {
+    const carries = withRole('carry').slice(0, 6);
+    const roster = ['crystal-maiden', ...carries];
+    const banned = pickEnemyBans(undefined, roster, [], 2, [], 7);
+    expect(banned.length).toBe(2);
+    // the lone support is the least valuable, so it is never banned before the carries
+    expect(banned.includes('crystal-maiden')).toBe(false);
+  });
+
+  it('weights the last winning five up (bans your MVP)', () => {
+    // Two equal-value carries; only one was in the last five → it gets banned first.
+    const roster = ['juggernaut', 'sven', ...FILLER().slice(0, 5)];
+    const banned = pickEnemyBans(undefined, roster, [], 1, ['sven'], 11);
+    expect(banned).toEqual(['sven']);
+  });
+
+  it('never bans below a formatSatisfiable five (the floor)', () => {
+    const fmt: DraftFormat = { rules: [{ kind: 'require-role', role: 'support', min: 2 }] };
+    const sup = withRole('support').slice(0, 2);
+    const carries = withRole('carry').slice(0, 5);
+    const roster = [...sup, ...carries];
+    const banned = pickEnemyBans(fmt, roster, [], 4, [], 99);
+    // a support is never banned (would drop below 2 → unsatisfiable)
+    for (const id of banned) expect(REG.hero(id).roles.includes('support')).toBe(false);
+    const remaining = roster.filter((id) => !banned.includes(id));
+    expect(remaining.length).toBeGreaterThanOrEqual(TUNING.captainsSeries.minLegalRosterAfterBans);
+    expect(formatSatisfiable(fmt, remaining)).toBe(true);
+  });
+
+  it('clamps to keep at least minLegalRosterAfterBans heroes', () => {
+    const roster = ALL_IDS().slice(0, 7);
+    const banned = pickEnemyBans(undefined, roster, [], 99, [], 3);
+    expect(roster.length - banned.length).toBe(TUNING.captainsSeries.minLegalRosterAfterBans);
+  });
+
+  it('repicksAllowed matches the tuning table per tier', () => {
+    expect(repicksAllowed('normal')).toBe(TUNING.captainsSeries.repicksByDifficulty.normal);
+    expect(repicksAllowed('nightmare')).toBe(TUNING.captainsSeries.repicksByDifficulty.nightmare);
+    expect(repicksAllowed('hell')).toBe(TUNING.captainsSeries.repicksByDifficulty.hell);
+    expect(repicksAllowed('hell')).toBe(0); // your draft is locked on hell
+  });
+
+  it('rising difficulty pre-bans more of the player roster', () => {
+    const gym = ALL_GYMS.find((g) => g.id === 'lunar-gym')!;
+    const roster = STRONG_POOL;
+    const five = roster.slice(0, 5).map((heroId) => ({ heroId, level: 14, items: STRONG_ITEMS, gambits: AGGRO }));
+    const normal = new LiveGymFight(gym, five, 5, { playerRoster: roster, tier: 'normal' });
+    const hell = new LiveGymFight(gym, five, 5, { playerRoster: roster, tier: 'hell' });
+    expect(hell.bannedHeroes.size).toBeGreaterThan(normal.bannedHeroes.size);
+    expect(normal.bannedHeroes.size).toBe(TUNING.captainsSeries.enemyPreBansByDifficulty.normal);
+    expect(hell.bannedHeroes.size).toBe(TUNING.captainsSeries.enemyPreBansByDifficulty.hell);
+  });
+
+  it('a deep roster completes a Bo3 under escalating bans and stays re-fightable', () => {
+    const gym = ALL_GYMS.find((g) => g.id === 'frost-gym')!;
+    const roster = STRONG_POOL;
+    const five = buildLegalTeam(gym.format, roster, 5, { level: 17, items: () => STRONG_ITEMS })
+      .map((h) => ({ heroId: h.heroId, level: 17, items: STRONG_ITEMS, gambits: AGGRO }));
+    const fight = new LiveGymFight(gym, five, 5, { playerRoster: roster, tier: 'hell' });
+    const result = fight.runHeadless();
+    expect(result).toBeTruthy();
+    // the leader actually banned the player's heroes over the series
+    expect(fight.bannedHeroes.size).toBeGreaterThanOrEqual(TUNING.captainsSeries.enemyPreBansByDifficulty.hell);
+    // a loss is never a wall: the remaining legal pool can still field a legal five
+    const remaining = roster.filter((id) => !fight.bannedHeroes.has(id));
+    expect(formatSatisfiable(gym.format, remaining)).toBe(true);
+  }, 60000);
+
+  it('a deep roster can win a banned series (depth is the answer)', () => {
+    const gym = ALL_GYMS.find((g) => g.id === 'lunar-gym')!;
+    const roster = STRONG_POOL;
+    let won = false;
+    for (let seed = 1; seed <= 16 && !won; seed++) {
+      const five = buildLegalTeam(gym.format, roster, seed, { level: 14, items: () => STRONG_ITEMS })
+        .map((h) => ({ heroId: h.heroId, level: 14, items: STRONG_ITEMS, gambits: AGGRO }));
+      const fight = new LiveGymFight(gym, five, seed * 13, { playerRoster: roster, tier: 'normal' });
+      if (fight.runHeadless().winner === 0) won = true;
+    }
+    expect(won, 'a deep roster beats the asymmetric series on normal').toBe(true);
+  }, 60000);
+
+  it('an Elite-style Bo5 needs three round wins and never exceeds five rounds (§3.1)', () => {
+    const gym = ALL_GYMS.find((g) => g.id === 'frost-gym')!;
+    const five = buildLegalTeam(gym.format, STRONG_POOL, 5, { level: 17, items: () => STRONG_ITEMS })
+      .map((h) => ({ heroId: h.heroId, level: 17, items: STRONG_ITEMS, gambits: AGGRO }));
+    const bestOf = TUNING.captainsSeries.series.eliteBestOf;
+    const clinch = Math.ceil(bestOf / 2);
+    const fight = new LiveGymFight(gym, five, 7, { autoPlayer: true, bestOf });
+    const result = fight.runHeadless();
+    expect(result.rounds.length).toBeLessThanOrEqual(bestOf);
+    expect(Math.max(result.playerWins, result.enemyWins)).toBeLessThanOrEqual(clinch);
+    // A series that ended before the full distance must have been clinched at `clinch` wins.
+    if (result.rounds.length < bestOf) expect(Math.max(result.playerWins, result.enemyWins)).toBe(clinch);
+    const lead = result.playerWins > result.enemyWins ? 0 : result.enemyWins > result.playerWins ? 1 : -1;
+    expect(result.winner).toBe(lead);
+  }, 60000);
 });
 
 describe('AUTOBATTLER §4.2 — the pick/ban engine yields two legal teams', () => {
@@ -327,18 +439,25 @@ const STRONG_POOL = [
   'lich', 'crystal-maiden', 'witch-doctor', 'jakiro', 'lina', 'zeus', 'skywrath-mage'
 ];
 
+/** A gym's level-cap (§3.2), used so a drafted five is legal AND fights at-level. */
+function gymLevelCap(fmt: DraftFormat | undefined): number {
+  const rule = fmt?.rules.find((r) => r.kind === 'level-cap') as { max: number } | undefined;
+  return rule?.max ?? 30;
+}
+
 describe('AUTOBATTLER §5/§10 — every gym is winnable with a format-legal drafted five', () => {
   it('drafts a legal five per format that wins the best-of-3 (no fixed best team beats all)', () => {
     for (const gym of ALL_GYMS) {
       let won = false;
       let checkedLegal = false;
+      const cap = gymLevelCap(gym.format);
       for (let seed = 1; seed <= 16 && !won; seed++) {
-        const heroes = buildLegalTeam(gym.format, STRONG_POOL, seed, { level: 30, items: () => STRONG_ITEMS });
+        const heroes = buildLegalTeam(gym.format, STRONG_POOL, seed, { level: cap, items: () => STRONG_ITEMS });
         if (heroes.length < 5) continue;
         // the fielded five (with its items) must be legal under the gym's format
         expect(isLegalDraft(gym.format, heroes), `${gym.id}: drafted five should be legal`).toBe(true);
         checkedLegal = true;
-        const team: GymMatchHero[] = heroes.map((h) => ({ heroId: h.heroId, level: h.level ?? 30, items: h.items, gambits: AGGRO }));
+        const team: GymMatchHero[] = heroes.map((h) => ({ heroId: h.heroId, level: h.level ?? cap, items: h.items, gambits: AGGRO }));
         const formation = defaultFormation(heroes.map((h) => REG.hero(h.heroId)));
         if (runGymMatch(gym, team, seed * 31, formation).winner === 0) won = true;
       }

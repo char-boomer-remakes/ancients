@@ -5,6 +5,7 @@ import { gradeFloor, ITEM_GRADES, rollGrade, type GradeFloorSource } from '../da
 import { isGemId, socketsForDrop } from '../data/gems';
 import { REG } from './registry';
 import { Rng, hashString } from './rng';
+import { worldLevelScale } from './progression';
 import type {
   BossDef,
   CreepTier,
@@ -405,15 +406,17 @@ export function draftTeams(def: DraftDef, recruited: string[], seed: number): { 
   return { player, enemy, bans };
 }
 
-export function raidSetupFromDef(def: RaidDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number): { seed: number; party: MacroHeroSetup[]; boss: MacroHeroSetup & { hpScale: number; damageScale: number; armorScale: number; aiDepth: number; enrageSec: number }; maxSec: number } {
+export function raidSetupFromDef(def: RaidDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number, worldLevel = 0): { seed: number; party: MacroHeroSetup[]; boss: MacroHeroSetup & { hpScale: number; damageScale: number; armorScale: number; aiDepth: number; enrageSec: number }; maxSec: number } {
   const scale = tierScale(tier);
+  // PROGRESSION_OVERHAUL §4.3: the featured World Level turns up the raid HP/damage columns.
+  const wl = worldLevelScale(worldLevel);
   return {
     seed,
     party,
     boss: {
       ...withBossBkbOverrides(def.boss, tier),
-      hpScale: (def.boss.hpScale ?? TUNING.raidBossHpScale) * scale.hp,
-      damageScale: (def.boss.damageScale ?? TUNING.raidBossDamageScale) * scale.damage,
+      hpScale: (def.boss.hpScale ?? TUNING.raidBossHpScale) * scale.hp * wl.hp,
+      damageScale: (def.boss.damageScale ?? TUNING.raidBossDamageScale) * scale.damage * wl.damage,
       armorScale: scale.armor,
       // AI-depth lever beside the stat scaling (AI_OVERHAUL §6)
       aiDepth: def.boss.aiDepth ?? TUNING.bossTierAiDepth[tier],
@@ -423,8 +426,10 @@ export function raidSetupFromDef(def: RaidDef, party: MacroHeroSetup[], tier: Di
   };
 }
 
-export function bossFightSetupFromDef(def: BossDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number): { seed: number; party: MacroHeroSetup[]; boss: MacroHeroSetup & { hpScale: number; damageScale: number; armorScale: number; aiDepth: number } } {
+export function bossFightSetupFromDef(def: BossDef, party: MacroHeroSetup[], tier: DifficultyTier, seed: number, worldLevel = 0): { seed: number; party: MacroHeroSetup[]; boss: MacroHeroSetup & { hpScale: number; damageScale: number; armorScale: number; aiDepth: number } } {
   const scale = tierScale(tier);
+  // PROGRESSION_OVERHAUL §4.3: the featured World Level turns up the boss HP/damage columns.
+  const wl = worldLevelScale(worldLevel);
   return {
     seed,
     party,
@@ -433,8 +438,8 @@ export function bossFightSetupFromDef(def: BossDef, party: MacroHeroSetup[], tie
       level: def.rank === 'boss' ? 28 : 24,
       items: ['black-king-bar', 'assault-cuirass'],
       itemOverrides: bossBkbItemOverrides(tier),
-      hpScale: TUNING.raidBossHpScale * TUNING.regionalBossHpScale * scale.hp,
-      damageScale: TUNING.raidBossDamageScale * scale.damage,
+      hpScale: TUNING.raidBossHpScale * TUNING.regionalBossHpScale * scale.hp * wl.hp,
+      damageScale: TUNING.raidBossDamageScale * scale.damage * wl.damage,
       armorScale: scale.armor,
       aiDepth: TUNING.bossTierAiDepth[tier]
     }

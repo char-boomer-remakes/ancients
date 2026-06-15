@@ -42,10 +42,13 @@ import type {
   Vec2
 } from './types';
 import { abilityMaxLevel, abilityVal, autoAbilityLevels, levelArr, normalizeAbilityLevels } from './values';
+import { worldLevelScale } from './progression';
 
 export interface CreepCombatScaleOpts {
   regionId?: string;
   combatTier?: DifficultyTier;
+  /** PROGRESSION_OVERHAUL §2: opt-in World Level term (0 = today's numbers). */
+  worldLevel?: number;
 }
 
 export interface AbilityState {
@@ -161,6 +164,7 @@ export class Unit {
   creepId?: string;
   star: 1 | 2 | 3 = 1;
   elite = false;             // rare gold-bordered camp variant (ITEM_REHAUL §10.3)
+  encounterWorldLevel?: number; // PROGRESSION_OVERHAUL §2: WL this unit spawned at (reward/grade bump)
   ownerUid?: number;         // summons / entourage
   lifetimeUntil?: number;    // summons
   offFieldUntil?: number;    // overworld Resonance swap persistence
@@ -645,9 +649,10 @@ function creepCombatScale(opts: CreepCombatScaleOpts = {}): { hp: number; damage
   const hpRegion = regionId ? TUNING.creepCombatScale.hpByRegion[regionId] ?? 1 : 1;
   const damageRegion = regionId ? TUNING.creepCombatScale.damageByRegion[regionId] ?? 1 : 1;
   const tierMult = TUNING.creepCombatScale.tier[tier] ?? 1;
+  const wl = worldLevelScale(opts.worldLevel ?? 0);
   return {
-    hp: hpRegion * tierMult,
-    damage: damageRegion * tierMult
+    hp: hpRegion * tierMult * wl.hp,
+    damage: damageRegion * tierMult * wl.damage
   };
 }
 

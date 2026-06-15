@@ -8,7 +8,7 @@ import { itemReady } from './items';
 import { cannotAttack, cannotCast, cannotMove, isDisabled } from './status';
 import { unitHitRadius, unitTargetRadius } from './collision';
 import type { Unit } from './unit';
-import { faceToward, followPath, integrateForcedMoves, steerToward } from './movement';
+import { depenetrateStatic, faceToward, followPath, integrateForcedMoves, resolveCollisions, steerToward } from './movement';
 import { levelArr } from './values';
 import { gestureForAbility, soundForAbility } from './gestures';
 import type { AbilityDef } from './types';
@@ -36,6 +36,11 @@ export function updateUnitActions(sim: Sim, u: Unit, dt: number): void {
 
   // forced movement overrides everything
   if (integrateForcedMoves(sim, u, dt)) return;
+
+  // Depenetrate from scenery every tick after forced movement. Spawn, teleport,
+  // disable, and geometry streaming paths can otherwise leave a unit embedded
+  // until it receives a new move order.
+  depenetrateStatic(sim, u);
 
   // toggles tick regardless of orders
   updateToggles(sim, u);
@@ -127,6 +132,13 @@ export function updateUnitActions(sim: Sim, u: Unit, dt: number): void {
     case 'stop':
     case 'hold': {
       autoAcquire(sim, u, dt, u.order.kind === 'hold');
+      // A genuinely idle unit never runs the movement resolver, so anything
+      // placed on top of it (a spawn/teleport onto an obstacle, or a wall
+      // dropped over it) would leave it embedded — the "clipping into the
+      // scenery" the player sees. Resolve it out of static collision; this is
+      // the obstacle/wall/bounds-only pass (no unit-unit shoving), a strict
+      // no-op unless the idle unit is actually overlapping something.
+      if (u.order.kind === 'stop' || u.order.kind === 'hold') resolveCollisions(sim, u, true);
       break;
     }
     case 'move': {
@@ -526,7 +538,11 @@ function handleCaptureOrder(sim: Sim, u: Unit, dt: number): void {
     return;
   }
   const cfg = TUNING.capture[target.tier];
-  if (target.hp / target.stats.maxHp > cfg.hpPct) {
+  // Taming Collar (PROGRESSION §5): higher start threshold + a shorter bind channel.
+  const collar = u.items.some((it) => it?.defId === 'taming-collar');
+  const hpPct = collar ? Math.min(0.95, cfg.hpPct + TUNING.nativeItems.tamingCollarThresholdBonus) : cfg.hpPct;
+  const channelSec = (collar ? cfg.channelSec * TUNING.nativeItems.tamingCollarChannelMult : cfg.channelSec) * sim.captureChannelMult;
+  if (target.hp / target.stats.maxHp > hpPct) {
     u.order = { kind: 'stop' };
     return;
   }
@@ -535,7 +551,7 @@ function handleCaptureOrder(sim: Sim, u: Unit, dt: number): void {
     return;
   }
   faceToward(u, target.pos, dt);
-  u.captureCh = { targetUid: target.uid, startedAt: sim.time, until: sim.time + cfg.channelSec };
+  u.captureCh = { targetUid: target.uid, startedAt: sim.time, until: sim.time + channelSec };
   // The totem binds its target for the channel: the creep cannot fight back,
   // but anything ELSE hitting the channeler still interrupts (DECISIONS).
   target.addStatus({
@@ -543,10 +559,10 @@ function handleCaptureOrder(sim: Sim, u: Unit, dt: number): void {
     tag: 'binding-totem',
     sourceUid: u.uid,
     sourceTeam: u.team,
-    until: sim.time + cfg.channelSec,
+    until: sim.time + channelSec,
     isDebuff: true
   });
   sim.interruptActions(target);
-  sim.events.emit({ t: 'capture-start', uid: u.uid, target: target.uid, duration: cfg.channelSec });
+  sim.events.emit({ t: 'capture-start', uid: u.uid, target: target.uid, duration: channelSec });
   u.order = { kind: 'stop' };
 }

@@ -195,7 +195,7 @@ export const PUDGE: HeroDef = {
     shard: {
       abilityValueOverrides: [
         { abilityId: 'pudge-meat-hook', valueKey: 'range', mode: 'add', amount: 250 },
-        { abilityId: 'pudge-rot', valueKey: 'slow', mode: 'add', amount: 8 }
+        { abilityId: 'pudge-rot', valueKey: 'slowMs', mode: 'add', amount: 8 }
       ]
     }
   },

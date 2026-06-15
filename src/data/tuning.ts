@@ -278,6 +278,28 @@ export const TUNING = {
     },
     tier: { normal: 1.0, nightmare: 1.5, hell: 2.1 }
   },
+  // --- World Level (PROGRESSION_OVERHAUL §2 + §9 balance pass): opt-in
+  // danger/texture dial for featured encounters. texturePerLevel is the PRIMARY
+  // term and must outpace the HP/damage terms (combat-scaling.test guards this) so
+  // a higher World Level demands the reaction combo rather than becoming a damage
+  // sponge. `texture` scales the elemental-shield HP that the reaction melts; the
+  // HP/damage terms are deliberately the smaller, secondary lever.
+  worldLevel: {
+    cap: 8,
+    trashCap: 1,                              // ordinary small/medium trash can be outgrown
+    hpPerLevel: 0.08,                         // secondary
+    damagePerLevel: 0.05,                     // secondary
+    texturePerLevel: 0.12,                    // PRIMARY — feeds the reaction-shield wall
+    rewardPerLevel: 0.06,
+    shieldBasePct: 0.30,                      // base elemental-shield HP as a fraction of maxHp
+    shieldTextureMult: 0.6                    // + texture * this fraction of maxHp (the WL wall)
+  },
+  overworldElite: {
+    // champion/rare chance on large/ancient camps, by world level (0..cap)
+    championChanceByWorldLevel: [0.04, 0.08, 0.12, 0.16, 0.20, 0.24, 0.28, 0.32, 0.36],
+    rareChanceByWorldLevel:     [0.00, 0.01, 0.02, 0.03, 0.05, 0.07, 0.09, 0.11, 0.13],
+    affixCountByWorldLevel:     [0, 1, 1, 1, 2, 2, 2, 3, 3]
+  },
   tierRewardMult: { normal: 1.0, nightmare: 1.65, hell: 2.45 },
   creepTierRewardMult: { small: 1.0, medium: 1.35, large: 1.85, ancient: 2.6 },
   creepStarBountyMult: [1.0, 1.75, 2.8],
@@ -421,12 +443,31 @@ export const TUNING = {
   },
   captureRange: 250,
 
+  // --- ANCIENTS-native gear (PROGRESSION_OVERHAUL §5) tuning for the
+  // systems-facing behaviors that ride alongside each item's stat hooks. ---
+  nativeItems: {
+    tagweaverBonusSteps: 1,          // Tagweaver's Gauntlet: +1 tag-chain step
+    catalystSpreadTargets: 1,        // Catalyst Prism: extra enemies a reaction's element jumps to
+    catalystFieldSec: 3,             // Catalyst Prism: residual element field added to the applied aura
+    catalystSpreadRadius: 320,
+    tamingCollarThresholdBonus: 0.12, // Taming Collar: +12% absolute capture HP threshold
+    tamingCollarChannelMult: 0.6,     // Taming Collar: bind channel runs at 60% duration
+    scholarGoldToXpPct: 0.25,         // Scholar's Sigil: 25% of gold income also banked as active-hero XP
+    soulLedgerFunnelPct: 0.5,         // Soul Ledger: bonus XP share funnelled to a bench recruit
+    skyfeatherClimbDrainMult: 0.55,   // Skyfeather Anklet: climbs/swims cost 55% stamina
+    skyfeatherGlideSpeedMult: 1.4,    // Skyfeather Anklet: glide drifts faster
+    beastbondStarBonus: 1,            // Beastbond Totem: entourage fights one effective star higher
+    dowserPingRadius: 1500            // Dowser's Compass: ping POIs within this range
+  },
+
   // --- creeps / entourage ---
   starStatMult: [1, 1.85, 3.2],     // 1/2/3 star
   starDamageMult: [1, 1.7, 2.8],
   entourageMax: 3,
   entourageAncientMax: 1,
   entourageFaintSec: 90,
+  armoryStashSoftCap: 120,           // PROGRESSION §4.2: base Armory stash room a `stashSize` node expands
+  metaCatchSpeedMultPerNode: 0.85,   // PROGRESSION §4.2: capture channel multiplier per `catchSpeed` node
   creepAggroRadius: 650,
   entourageGuardRadius: 900,
   entourageChaseRadius: 650,
@@ -474,6 +515,58 @@ export const TUNING = {
   macroMaxSec: 300,
   captainCallsPerFight: 3,
   captainCallSec: 5,
+
+  // --- asymmetric Captains Series (PROGRESSION_OVERHAUL §3): the leader bans your
+  // heroes one-directionally and out-adapts each round; depth is the only answer.
+  captainsSeries: {
+    enemyPreBansByDifficulty:    { normal: 1, nightmare: 2, hell: 3 },
+    betweenRoundBanByDifficulty: { normal: 1, nightmare: 1, hell: 2 },
+    repicksByDifficulty:         { normal: 2, nightmare: 1, hell: 0 },
+    minLegalRosterAfterBans: 5,
+    enemyReslotsOwnFive: true,
+    series: { gymBestOf: 3, eliteBestOf: 5 },
+    // Elite is strictly harder: +1 pre-ban over the gym tier, repicks forced to 0.
+    eliteHarderPreBan: 1
+  } as {
+    enemyPreBansByDifficulty: Record<'normal' | 'nightmare' | 'hell', number>;
+    betweenRoundBanByDifficulty: Record<'normal' | 'nightmare' | 'hell', number>;
+    repicksByDifficulty: Record<'normal' | 'nightmare' | 'hell', number>;
+    minLegalRosterAfterBans: number;
+    enemyReslotsOwnFive: boolean;
+    series: { gymBestOf: number; eliteBestOf: number };
+    eliteHarderPreBan: number;
+  },
+
+  // --- Trainer track (PROGRESSION_OVERHAUL §4.2): an account-breadth meta level fed by
+  // post-cap overflow + collection beats. `overflowToTrainerPct` of the post-cap
+  // gold-equivalent banks as Trainer XP instead of gold; the rest stays gold.
+  trainer: {
+    xpCurve: [0, 4000, 9000, 15000, 22000, 30000, 40000, 52000, 66000, 82000, 100000],
+    overflowToTrainerPct: 0.6,
+    // Collection beats (§4.4) pay flat Trainer XP — recruiting breadth, perfecting
+    // echoes, capture/merge, and finishing a region's exploration.
+    recruitXp: 1200,
+    echoPerfectXp: 2000,
+    surplusEchoXp: 600,
+    captureXp: 400,
+    regionClearXp: 1500
+  } as {
+    xpCurve: number[];
+    overflowToTrainerPct: number;
+    recruitXp: number;
+    echoPerfectXp: number;
+    surplusEchoXp: number;
+    captureXp: number;
+    regionClearXp: number;
+  },
+
+  // --- World Level ascension dial (§4.3): each player-chosen tier adds into the
+  // World Level input; gated by Trainer Level + badges, capped by the meta board.
+  worldLevelDial: {
+    badgesPerTier: 2,        // a tier unlocks every N badges...
+    trainerLevelPerTier: 2,  // ...and every N Trainer Levels (the stricter gate wins)
+    defaultCap: 3            // base ascension ceiling before meta `worldLevelCap` nodes
+  },
 
   // --- items ---
   activeItemSlots: 6,         // all 6 slots are key-bound (Z/X/C/V + item-5/item-6)

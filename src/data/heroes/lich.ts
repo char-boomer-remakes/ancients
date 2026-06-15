@@ -214,7 +214,7 @@ export const LICH: HeroDef = {
       abilityValueOverrides: [
         { abilityId: 'lich-chain-frost', valueKey: 'damage', mode: 'add', amount: 120 },
         { abilityId: 'lich-chain-frost', valueKey: 'bounces', mode: 'add', amount: 5 },
-        { abilityId: 'lich-chain-frost', valueKey: 'radius', mode: 'add', amount: 120 }
+        { abilityId: 'lich-chain-frost', valueKey: 'bounceRadius', mode: 'add', amount: 120 }
       ],
       cooldownAdds: [{ abilityId: 'lich-chain-frost', amount: -18 }]
     },

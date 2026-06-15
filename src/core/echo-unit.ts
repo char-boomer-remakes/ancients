@@ -1,6 +1,7 @@
 import { TUNING } from '../data/tuning';
 import { buildDefaultGambit } from './controllers';
 import { autoPicksForLevel, buildHero } from './hero-setup';
+import { worldLevelScale } from './progression';
 import { REG } from './registry';
 import type { Sim } from './sim';
 import type { Team, Vec2 } from './types';
@@ -21,6 +22,8 @@ export interface EchoOptions {
   echoFlag?: boolean;
   bountyMult?: number;
   nameSuffix?: string;
+  /** Featured World Level (§2.5): scales the echo's HP/damage after the survivability tax. */
+  worldLevel?: number;
 }
 
 /**
@@ -49,6 +52,18 @@ export function spawnHeroEchoUnit(sim: Sim, opts: EchoOptions): Unit {
   const tax = opts.hpTaxPct ?? TUNING.echoHpTaxPct;
   if (tax > 0) {
     u.externalMods.maxHp = (u.externalMods.maxHp ?? 0) - u.stats.maxHp * tax;
+    u.markStatsDirty();
+    u.refresh(sim.time);
+  }
+
+  // World Level texture (§2.5): a featured echo at WL>0 is tougher and hits harder,
+  // applied *after* the survivability tax so the tax fraction stays meaningful.
+  const wl = opts.worldLevel ?? 0;
+  if (wl > 0) {
+    const scale = worldLevelScale(wl);
+    u.externalMods.maxHp = (u.externalMods.maxHp ?? 0) + u.stats.maxHp * (scale.hp - 1);
+    u.externalMods.damagePct = (u.externalMods.damagePct ?? 0) + (scale.damage - 1) * 100;
+    u.externalMods.spellAmpPct = (u.externalMods.spellAmpPct ?? 0) + (scale.damage - 1) * 100;
     u.markStatsDirty();
     u.refresh(sim.time);
   }

@@ -34,6 +34,7 @@ const BOSS_ITEM_RARITY: Partial<Record<string, ItemRarity>> = {
   'eye-of-skadi': 'immortal',
   'refresher-orb': 'immortal',
   'aghanims-scepter': 'immortal',
+  'aghanims-shard': 'mythical',
   'abyssal-blade': 'immortal',
   bloodthorn: 'immortal',
   'lotus-orb': 'immortal',
@@ -72,7 +73,9 @@ function themedLoot(heroId: string, rank: BossDef['rank']): LootTable {
     assembledPool = ['heart-of-tarrasque', 'satanic', 'radiance', 'helm-of-the-overlord', 'assault-cuirass', 'black-king-bar'];
   } else if (INTELLIGENCE_BOSSES.has(heroId)) {
     guaranteed = ['mystic-staff'];
-    assembledPool = ['scythe-of-vyse', 'refresher-orb', 'octarine-core', 'lotus-orb', 'linkens-sphere', 'gleipnir', 'wind-waker', 'aghanims-scepter', 'aghanims-blessing'];
+    // The int lane is the Aghanim home (§4.1): both the Scepter and the Shard chase
+    // anchor here, so a caster boss is the reliable place to farm hero upgrades.
+    assembledPool = ['scythe-of-vyse', 'refresher-orb', 'octarine-core', 'lotus-orb', 'linkens-sphere', 'gleipnir', 'wind-waker', 'aghanims-scepter', 'aghanims-shard', 'aghanims-blessing'];
   }
   const dropPct = isMini
     ? {

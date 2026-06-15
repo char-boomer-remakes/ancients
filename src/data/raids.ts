@@ -47,6 +47,7 @@ const RAID_ITEM_RARITY: Partial<Record<string, ItemRarity>> = {
   'eye-of-skadi': 'immortal',
   'refresher-orb': 'immortal',
   'aghanims-scepter': 'immortal',
+  'aghanims-shard': 'mythical',
   'abyssal-blade': 'immortal',
   bloodthorn: 'immortal',
   radiance: 'immortal',
@@ -54,6 +55,9 @@ const RAID_ITEM_RARITY: Partial<Record<string, ItemRarity>> = {
   'octarine-core': 'immortal',
   'aghanims-blessing': 'immortal',
   'aegis-of-the-immortal': 'arcana',
+  // PROGRESSION_OVERHAUL §5.3 raid-chase relics (Unusual/arcana, raid-gated).
+  'concord-relic': 'arcana',
+  'twin-soul-vessel': 'arcana',
   'assault-cuirass': 'legendary',
   'black-king-bar': 'mythical',
   'diffusal-blade': 'mythical',
@@ -88,7 +92,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 55, summon: fallen, count: 3 }],
     zones: [{ atHpPct: 70, zone: { ...fireZone, radius: 260 } }],
     enrageSec: 120,
-    loot: raidLoot(['aegis-of-the-immortal'], ['divine-rapier', 'aghanims-scepter']),
+    loot: raidLoot(['aegis-of-the-immortal'], ['divine-rapier', 'aghanims-scepter', 'twin-soul-vessel']),
     signatureExotic: 'roshan-respawn',
     dialogue: ['You came for the prize the whole map is afraid to time.', 'Fall here and I simply rise again. Can you say the same?']
   },
@@ -116,7 +120,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 65, summon: fallen, count: 3 }, { atHpPct: 30, summon: fallen, count: 4 }],
     zones: [{ atHpPct: 90, zone: frostZone }, { atHpPct: 50, zone: { ...frostZone, radius: 480 } }],
     enrageSec: 135,
-    loot: raidLoot(['ultimate-orb'], ['eye-of-skadi']),
+    loot: raidLoot(['ultimate-orb'], ['eye-of-skadi', 'aghanims-shard', 'concord-relic']),
     signatureExotic: 'defile-growth',
     dialogue: ['Climb my glacier and freeze beside everyone who tried.', 'Every nova writes your name in the frost.']
   },
@@ -130,7 +134,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 85, summon: swarm, count: 4 }, { atHpPct: 55, summon: swarm, count: 5 }, { atHpPct: 25, summon: swarm, count: 6 }],
     zones: [{ atHpPct: 75, zone: { ...fireZone, radius: 300 } }, { atHpPct: 40, zone: { ...fireZone, radius: 420 } }],
     enrageSec: 135,
-    loot: raidLoot(['mystic-staff'], ['refresher-orb', 'octarine-core']),
+    loot: raidLoot(['mystic-staff'], ['refresher-orb', 'octarine-core', 'aghanims-shard']),
     signatureExotic: 'swarm-spread',
     dialogue: ['My children outnumber your cooldowns.', 'The crater is a web — and you already walked in.']
   },
@@ -214,7 +218,7 @@ export const ALL_RAIDS: RaidDef[] = [
     addWaves: [{ atHpPct: 60, summon: swarm, count: 4 }],
     zones: [{ atHpPct: 80, zone: fireZone }, { atHpPct: 45, zone: { ...fireZone, radius: 400 } }],
     enrageSec: 135,
-    loot: raidLoot(['mystic-staff'], ['scythe-of-vyse', 'refresher-orb', 'octarine-core', 'aghanims-scepter', 'aghanims-blessing']),
+    loot: raidLoot(['mystic-staff'], ['scythe-of-vyse', 'refresher-orb', 'octarine-core', 'aghanims-scepter', 'aghanims-shard', 'aghanims-blessing']),
     dialogue: ['Every hatred in this world borrows my voice.', 'Speak my name aloud and the hall goes dark.']
   },
   {

@@ -102,13 +102,17 @@ export function reactionFor(existing: ActiveElement, incoming: ActiveElement): R
   ) ?? null;
 }
 
-export function resonanceMods(heroIds: string[], heroById: (id: string) => HeroDef): { id: string; mods: StatModMap } {
+// `minShared` is normally 2 (two heroes of an element). Concord Relic (PROGRESSION §5)
+// drops it to 1 so a party resonates around its most-represented element without a pair.
+export function resonanceMods(heroIds: string[], heroById: (id: string) => HeroDef, minShared = 2): { id: string; mods: StatModMap } {
   const counts = new Map<ElementId, number>();
   for (const id of heroIds) {
     const element = elementForHero(heroById(id));
     counts.set(element, (counts.get(element) ?? 0) + 1);
   }
-  const shared = ACTIVE_ELEMENTS.find((e) => (counts.get(e) ?? 0) >= 2);
+  const threshold = Math.max(1, minShared);
+  const shared = ACTIVE_ELEMENTS.filter((e) => (counts.get(e) ?? 0) >= threshold)
+    .sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0))[0];
   switch (shared) {
     case 'pyro': return { id: 'pyro-resonance', mods: { damage: 14, statusResistPct: 8 } };
     case 'hydro': return { id: 'hydro-resonance', mods: { maxHp: 140, hpRegenPctMax: 0.35 } };

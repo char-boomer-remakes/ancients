@@ -4,7 +4,7 @@ import { REG } from '../core/registry';
 import { applyDamage } from '../core/combat';
 import { freshEchoProgress } from '../core/echo';
 import { rollLoot, scaledBounty } from '../core/phase3';
-import { overflowXpToGold } from '../core/progression';
+import { overflowSplit, overflowXpToGold } from '../core/progression';
 import { xpForLevel } from '../core/stats';
 import { GRADE_UP_COSTS, IMPRINT_COSTS, MASTERWORK_COSTS, REFORGE_COSTS, REROLL_AFFIX_COSTS } from '../data/forge';
 import { gemDef } from '../data/gems';
@@ -203,9 +203,13 @@ describe('reward-scaling-live (test 10)', () => {
     const bonusCap = evCap.lastHitByPlayer ? 1 + TUNING.lastHitBonusPct : 1;
     const killGold = Math.round(scaledCap.gold * bonusCap);
     const heroXp = Math.round(scaledCap.xp * bonusCap * TUNING.xpActivePct);
-    const overflowGold = overflowXpToGold(TUNING.levelCap, xpForLevel(TUNING.levelCap), heroXp);
-    expect(overflowGold).toBeGreaterThan(0);
-    expect(capped.gold - beforeCap).toBe(killGold + overflowGold);
+    // Post-cap overflow now SPLITS: part stays gold, part banks as Trainer XP (§4.2).
+    const split = overflowSplit(TUNING.levelCap, xpForLevel(TUNING.levelCap), heroXp);
+    expect(split.gold).toBeGreaterThan(0);
+    expect(split.trainerXp).toBeGreaterThan(0);
+    expect(split.gold + split.trainerXp).toBe(overflowXpToGold(TUNING.levelCap, xpForLevel(TUNING.levelCap), heroXp));
+    expect(capped.gold - beforeCap).toBe(killGold + split.gold);
+    expect(capped.trainerXp).toBeGreaterThanOrEqual(split.trainerXp);
   });
 });
 

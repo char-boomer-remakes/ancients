@@ -3,7 +3,8 @@ import { registerAllContent, ALL_HEROES, ALL_REGIONS, ALL_DUNGEONS, ALL_ROOM_TEM
 import { ALL_GYMS } from '../data/gyms/index';
 import { ALL_QUESTS, ALL_TRIALS } from '../data/quests/index';
 import { ALL_QUEST_DEFS } from '../data/quests/board';
-import { ALL_ITEMS } from '../data/items/index';
+import { ALL_ITEMS, NATIVE } from '../data/items/index';
+import { ALL_META_NODES, META_NODES_BY_ID } from '../data/meta-board';
 import { ALL_CREEPS } from '../data/creeps/index';
 import { ALL_NEUTRAL_ITEMS } from '../data/neutral-items';
 import { ALL_BOSSES } from '../data/bosses';
@@ -24,7 +25,7 @@ import { heroWorldSize, creepWorldSize, bossWorldSize, summonWorldSize, questGiv
 import { HERO_HEIGHT_M, footprintToRadius } from '../engine/scale';
 import { BUILT_WORLD_SIZES, CHEST_COLLISION, DRESSING_PROP_COLLISION, GROUND_LOOT_COLLISION, SHRINE_COLLISION, TOWN_BUILDING_COLLISION, TOWN_LANDMARK_COLLISION } from '../data/world/props';
 import { readFileSync, writeFileSync } from 'node:fs';
-import type { AbilityDef, AnimGesture, AttackVisualKind, DropSource, EffectNode, ItemAppearancePart, ItemWeaponVisualKind, SoundArchetype, SummonSpec, ValueRef, VfxArchetype } from '../core/types';
+import type { AbilityDef, AnimGesture, AttackVisualKind, DropSource, EffectNode, ItemAppearancePart, ItemWeaponVisualKind, MetaEffectKey, SoundArchetype, SummonSpec, ValueRef, VfxArchetype } from '../core/types';
 import { abilityMaxLevel } from '../core/values';
 import { canBuyMasteryNode, deriveMasteryTrees, masteryNodeIndex, masteryPointsForLevel } from '../core/mastery';
 import { gestureForAbility, soundForAbility } from '../core/gestures';
@@ -390,6 +391,36 @@ describe('data lint: tag boon power budget', () => {
   });
 });
 
+describe('data lint: meta board (PROGRESSION_OVERHAUL §4.2 / §6)', () => {
+  // The meta is a DIAL, never raw power: every effect key must live in the closed
+  // access/economy/collection/convenience vocabulary and never be a StatMods key.
+  const ALLOWED_META_KEYS: ReadonlySet<MetaEffectKey> = new Set<MetaEffectKey>([
+    'worldLevelCap', 'stashSize', 'merchantRefresh', 'catchSpeed',
+    'entourageSlot', 'findShardRate', 'refightCaptainCall', 'fastTravel'
+  ]);
+
+  it('every node effect key is in the closed vocabulary, never a StatMods key', () => {
+    for (const node of ALL_META_NODES) {
+      expect(Object.keys(node.effect).length, `${node.id} has an effect`).toBeGreaterThan(0);
+      for (const key of Object.keys(node.effect)) {
+        expect(ALLOWED_META_KEYS.has(key as MetaEffectKey), `${node.id}: ${key} not in meta vocabulary`).toBe(true);
+      }
+    }
+  });
+
+  it('nodes have unique ids, positive cost, and a resolving lookup', () => {
+    const ids = ALL_META_NODES.map((n) => n.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const n of ALL_META_NODES) {
+      expect(n.cost).toBeGreaterThan(0);
+      expect(n.name.length).toBeGreaterThan(0);
+      expect(n.description.length).toBeGreaterThan(0);
+      expect(META_NODES_BY_ID[n.id]).toBe(n);
+      if (n.requiresTrainerLevel !== undefined) expect(n.requiresTrainerLevel).toBeGreaterThanOrEqual(1);
+    }
+  });
+});
+
 describe('data lint: items', () => {
   it('has the Phase 2 item catalog of 30+ entries and resolving recipes', () => {
     const assembled = ALL_ITEMS.filter((i) => ['t1', 't2', 't3', 't4', 'special'].includes(i.tier) || (i.tier === 'basic' && i.components));
@@ -491,6 +522,68 @@ describe('data lint: items', () => {
   it('has Phase 5 item element hooks for attack-visual enablers', () => {
     expect(elementForItemHit(REG.item('maelstrom'))).toBe('electro');
     expect(elementForItemHit(REG.item('eye-of-skadi'))).toBe('cryo');
+  });
+
+  // PROGRESSION_OVERHAUL §5 — native items validate like any ItemDef (the generic
+  // loop above already covers refs/appearance) and obey the catalogue's framing:
+  // utility tier so the gym `item-tier-cap` keeps them out of macro, overworld
+  // sources only, and only `Mentor's Standard` spends the new `partyXpAmpPct` hook.
+  it('ships the full §5.3 native catalogue, registered and resolvable', () => {
+    const expected = [
+      'mentors-standard', 'soul-ledger', 'scholars-sigil', 'taming-collar', 'beastbond-totem',
+      'echo-battery', 'catalyst-prism', 'tagweavers-gauntlet', 'skyfeather-anklet', 'dowsers-compass',
+      'concord-relic', 'twin-soul-vessel'
+    ];
+    for (const id of expected) {
+      expect(NATIVE.some((i) => i.id === id), `${id} authored`).toBe(true);
+      expect(REG.items.has(id), `${id} registered`).toBe(true);
+    }
+  });
+
+  it('keeps native items out of macro: utility tier, overworld-only sources', () => {
+    const MACRO_DRAFTABLE: DropSource[] = []; // macro pulls Dota gear; native items must not list a draftable source
+    void MACRO_DRAFTABLE;
+    for (const item of NATIVE) {
+      expect(item.tier, `${item.id} is utility/special tier`).toBe('special');
+      expect((item.exclusiveTo ?? []).length, `${item.id} declares a source`).toBeGreaterThan(0);
+      // never sold in normal shops as a macro pickup; overworld/raid sources only
+      for (const src of item.exclusiveTo ?? []) {
+        expect(['shop', 'creep', 'echo', 'gamble', 'raid', 'boss', 'dungeon']).toContain(src);
+      }
+    }
+  });
+
+  it('only Mentor\'s Standard spends the new partyXpAmpPct StatMods hook (§8.6)', () => {
+    for (const item of NATIVE) {
+      const amp = item.passiveMods?.partyXpAmpPct ?? 0;
+      if (item.id === 'mentors-standard') expect(amp).toBeGreaterThan(0);
+      else expect(amp, `${item.id} must not carry partyXpAmpPct`).toBe(0);
+    }
+  });
+
+  it('raid-gated relics are arcana with a real raid home (reserved-source contract)', () => {
+    for (const id of ['concord-relic', 'twin-soul-vessel']) {
+      const item = REG.item(id);
+      expect(item.rarity).toBe('arcana');
+      expect(item.exclusiveTo).toContain('raid');
+      const homed = ALL_RAIDS.some((r) => [...r.loot.guaranteed, ...r.loot.assembledPool].includes(id));
+      expect(homed, `${id} has a raid drop home`).toBe(true);
+    }
+  });
+
+  it('native raid relics land in matching raid rarity buckets and outside marquee lane gates', () => {
+    const marqueeRaids = new Set(['renegade-marshal', 'void-prelate', 'forsaken-queen', 'sundered-betrayer', 'prime-evil', 'lord-of-hatred', 'last-eldwurm']);
+    for (const item of NATIVE.filter((i) => i.exclusiveTo?.includes('raid'))) {
+      const homes = ALL_RAIDS.filter((raid) => raid.loot.assembledPool.includes(item.id));
+      expect(homes.length, `${item.id} raid home count`).toBeGreaterThan(0);
+      for (const raid of homes) {
+        expect(marqueeRaids.has(raid.id), `${item.id} should not bypass marquee lane purity in ${raid.id}`).toBe(false);
+        const rarityHomes = Object.entries(raid.loot.assembledRarityPools ?? {})
+          .filter(([, ids]) => ids.includes(item.id))
+          .map(([rarity]) => rarity);
+        expect(rarityHomes, `${raid.id}: ${item.id} rarity bucket`).toEqual([item.rarity ?? 'common']);
+      }
+    }
   });
 
   // VFX_ASSETS §7 / §11: "488/488 authored" must mean genuinely distinct reads,

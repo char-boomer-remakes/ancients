@@ -38,6 +38,19 @@ const SQUAD: { heroId: string; items: string[] }[] = [
   { heroId: 'earthshaker', items: ['blink-dagger', 'black-king-bar', 'platemail', 'heart-of-tarrasque', 'crystalys'] }
 ];
 
+// The ship gate exercises the asymmetric gym ban loop, so "fully recruited"
+// needs a real bench. Otherwise late gyms can correctly ban the whole tiny pool.
+const BENCH: { heroId: string; items: string[] }[] = [
+  { heroId: 'axe', items: ['blink-dagger', 'black-king-bar', 'assault-cuirass', 'heart-of-tarrasque'] },
+  { heroId: 'pudge', items: ['blink-dagger', 'black-king-bar', 'heart-of-tarrasque', 'assault-cuirass'] },
+  { heroId: 'crystal-maiden', items: ['glimmer-cape', 'force-staff', 'mekansm', 'black-king-bar'] },
+  { heroId: 'luna', items: ['black-king-bar', 'butterfly', 'dragon-lance', 'daedalus'] },
+  { heroId: 'lina', items: ['black-king-bar', 'kaya', 'bloodthorn', 'force-staff'] },
+  { heroId: 'omniknight', items: ['mekansm', 'assault-cuirass', 'heart-of-tarrasque', 'black-king-bar'] },
+  { heroId: 'magnus', items: ['blink-dagger', 'black-king-bar', 'assault-cuirass', 'heart-of-tarrasque'] },
+  { heroId: 'windranger', items: ['black-king-bar', 'maelstrom', 'butterfly', 'daedalus'] }
+];
+
 function padItems(ids: string[]): (ItemSave | null)[] {
   const slots: (ItemSave | null)[] = ids.map((id) => ({ id }));
   while (slots.length < 6) slots.push(null);
@@ -48,7 +61,8 @@ function padItems(ids: string[]): (ItemSave | null)[] {
 function shipGateSave(): GameSave {
   const save = newGameSave('juggernaut');
   const template = save.roster[0];
-  save.roster = SQUAD.map((s) => ({
+  const recruited = [...SQUAD, ...BENCH];
+  save.roster = recruited.map((s) => ({
     ...structuredClone(template),
     heroId: s.heroId,
     level: 30,
@@ -57,7 +71,7 @@ function shipGateSave(): GameSave {
     items: padItems(s.items)
   }));
   save.party = SQUAD.map((s) => s.heroId);
-  save.recruited = SQUAD.map((s) => s.heroId);
+  save.recruited = recruited.map((s) => s.heroId);
   save.gold = 99999;
   return save;
 }

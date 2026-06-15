@@ -323,4 +323,50 @@ describe('save round-trip and migration', () => {
     const twice = migratePhase4Save(once);
     expect(twice).toEqual(once);
   });
+
+  it('a fresh save carries Trainer-track defaults (§4)', () => {
+    const save = newGameSave('juggernaut');
+    expect(save.trainerLevel).toBe(1);
+    expect(save.trainerXp).toBe(0);
+    expect(save.metaNodes).toEqual([]);
+    expect(save.worldLevelTier).toBe(0);
+    expect(save.collectionMilestones).toEqual([]);
+  });
+
+  it('backfills the Trainer track for a pre-v8 save and round-trips a populated one', () => {
+    // (a) pre-v8 save: strip the new fields, expect defaults on migration.
+    const current = newGameSave('lich');
+    const legacy = JSON.parse(JSON.stringify(current)) as Record<string, unknown>;
+    legacy.version = 7;
+    delete legacy.trainerLevel;
+    delete legacy.trainerXp;
+    delete legacy.metaNodes;
+    delete legacy.worldLevelTier;
+    delete legacy.collectionMilestones;
+
+    const migrated = Game.migrateSave(legacy);
+    expect(migrated).not.toBeNull();
+    expect(migrated!.version).toBe(SAVE_VERSION);
+    expect(migrated!.trainerLevel).toBe(1);
+    expect(migrated!.trainerXp).toBe(0);
+    expect(migrated!.metaNodes).toEqual([]);
+    expect(migrated!.worldLevelTier).toBe(0);
+    expect(migrated!.collectionMilestones).toEqual([]);
+    expect(Game.validateSave(migrated!)).toBe(true);
+
+    // (b) populated Trainer state survives a save/load round-trip.
+    const save = newGameSave('crystal-maiden');
+    save.trainerLevel = 4;
+    save.trainerXp = 18000;
+    save.metaNodes = ['ascendant-i', 'deep-stash'];
+    save.worldLevelTier = 2;
+    save.collectionMilestones = ['roster-5', 'region-explored:tranquil-vale'];
+    const reloaded = Game.migrateSave(JSON.parse(JSON.stringify(save)) as unknown);
+    expect(reloaded!.trainerLevel).toBe(4);
+    expect(reloaded!.trainerXp).toBe(18000);
+    expect(reloaded!.metaNodes).toEqual(['ascendant-i', 'deep-stash']);
+    expect(reloaded!.worldLevelTier).toBe(2);
+    expect(reloaded!.collectionMilestones).toEqual(['roster-5', 'region-explored:tranquil-vale']);
+    expect(Game.validateSave(reloaded!)).toBe(true);
+  });
 });

@@ -97,7 +97,6 @@ const STAT_WEIGHTS: Partial<Record<keyof StatModMap, number>> = {
   damageTakenReductionPct: -2,
   attackDamageTakenReductionPct: 2,
   castRange: 0.04,
-  visionPct: 0.5,
   swapCdReductionPct: 2,
   swapInDamagePct: 2,
   swapInHealPct: 2,
@@ -396,6 +395,10 @@ export class Hud {
   private pinnedQuestIds = new Set<string>();
   private lastQuestTrackerKey = '';
   private questTrackerFlashUntil = 0;
+  // Cached panel markup so idle frames skip the innerHTML reparse/reflow when
+  // nothing visible changed (renderParty already guards via DOM read-back).
+  private lastTopBarHtml = '';
+  private lastHeroPanelHtml = '';
   private killfeed: KillfeedEntry[] = [];
   private abilityCooldowns = new Map<string, number>();
   private abilityReadyUntil = new Map<string, number>();
@@ -1123,7 +1126,7 @@ export class Hud {
     const crest = g.region.name.split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase();
     const badges = [...g.badges].slice(0, 8).map((badge) => `<span class="badge-chip" title="${esc(badge.replace(/-/g, ' '))}">${esc(badge.split('-')[0]?.[0]?.toUpperCase() ?? 'B')}</span>`).join('');
     const showHelp = this.interfaceSettings().helpOverlay;
-    this.topBar.innerHTML = `
+    const html = `
       <span class="region-crest" title="${esc(g.region.name)}">${crest}</span>
       <span class="region">${g.region.name}</span>
       ${badges ? `<span class="badge-row">${badges}</span>` : ''}
@@ -1152,6 +1155,10 @@ export class Hud {
       <button class="top-btn" data-open="codex">Codex</button>
       ${showHelp ? `<button class="top-btn help-btn" data-open="help" title="Controls help (${esc(key('help'))})">?</button>` : ''}
     `;
+    if (html !== this.lastTopBarHtml) {
+      this.lastTopBarHtml = html;
+      this.topBar.innerHTML = html;
+    }
   }
 
   // Minimap POI categories (§8): shaped glyphs (never color-only) with a
@@ -1611,7 +1618,10 @@ export class Hud {
     const u = rec?.unit;
     if (!rec || !u) {
       this.heroPanel.classList.remove('skill-ready');
-      this.heroPanel.innerHTML = '';
+      if (this.lastHeroPanelHtml !== '') {
+        this.lastHeroPanelHtml = '';
+        this.heroPanel.innerHTML = '';
+      }
       return;
     }
     const def = REG.hero(rec.heroId);
@@ -1758,7 +1768,7 @@ export class Hud {
       : '';
 
     const heroTip = this.registerTip(`hero-active`, buildHeroCard(def, { level: u.level }), { accent: def.palette[2] ?? 'var(--brass)', extra: heroExtra });
-    this.heroPanel.innerHTML = `
+    const html = `
       <div class="hp-left">
         <button class="portrait-btn" id="character-open" title="Open character sheet">
           <img class="portrait" src="${heroPortrait(def.palette, def.name[0], 72, def.silhouette)}" alt=""${heroTip}>
@@ -1779,6 +1789,10 @@ export class Hud {
       <div class="ab-row">${abilitiesHtml}</div>
       <div class="item-grid">${itemsHtml}</div>
     `;
+    if (html !== this.lastHeroPanelHtml) {
+      this.lastHeroPanelHtml = html;
+      this.heroPanel.innerHTML = html;
+    }
   }
 
   private finishItemDrag(clientX: number, clientY: number): void {
@@ -2111,12 +2125,14 @@ export class Hud {
   }
 
   private screenFromWorld(simX: number, simY: number, height = 2.2): { x: number; y: number } | null {
+    const cam = this.game.scene.camera;
+    if (!cam) return null;
     this.vec.set(
       simX / WORLD_SCALE,
       this.game.scene.groundHeightAt(simX, simY) + height,
       simY / WORLD_SCALE
     );
-    this.vec.project(this.game.scene.camera);
+    this.vec.project(cam);
     if (this.vec.z > 1) return null;
     return {
       x: (this.vec.x * 0.5 + 0.5) * window.innerWidth,
@@ -2365,7 +2381,6 @@ export class Hud {
             row('Max mana', Math.round(s.maxMana).toString()),
             row('Mana regen', `+${fmtRegen(regen.mana)}/s`, `${fmtRegen(s.manaRegen)} flat + ${fmtRegen((s.maxMana * s.manaRegenPctMax) / 100)} max%`),
             row('Move speed', Math.round(s.moveSpeed).toString()),
-            row('Vision bonus', signed(u.summary.mods.visionPct ?? 0, '%')),
             row('Swap cooldown', signed(s.swapCdReductionPct, '%')),
             row('Stamina bonus', signed(s.staminaBonus))
           ].join(''))}
@@ -3808,9 +3823,19 @@ export class Hud {
          <button class="btn small tier-${t}" data-raid="${def.id}:${t}" ${ready ? '' : 'disabled'}>Auto ${cap(t)}</button>`
       ).join('');
       const clears = g.raidProgress[def.id]?.clears ?? 0;
+      const dry = g.raidProgress[def.id]?.dryStreak ?? 0;
+      // Name the chase (§4.1 legibility): the guaranteed drop plus the assembled
+      // anchors, with the Aghanim upgrades called out so the chase reads at a glance.
+      const anchorNames = [...def.loot.guaranteed, ...def.loot.assembledPool]
+        .map((id) => (id === 'aghanims-scepter' || id === 'aghanims-shard')
+          ? `<span class="gold">${REG.item(id).name}</span>`
+          : REG.item(id).name)
+        .join(', ');
+      const anchorLine = ready ? `<div class="rr-sub">anchors ${anchorNames} · dry ${dry}/${def.loot.pity ?? TUNING.raidBadLuckPity}</div>` : '';
       raidHtml += `<div class="svc-row">
         <div class="svc-main"><b>${def.name}</b> <em>${def.location}</em>
           <div class="rr-sub">${ready ? `cleared ×${clears}` : reason}</div>
+          ${anchorLine}
         </div>
         <div class="svc-actions">${tiers}</div>
       </div>`;
@@ -3870,9 +3895,40 @@ export class Hud {
       </div>`
     ).join('');
 
+    // Trainer track + ascension dial + meta board (PROGRESSION_OVERHAUL §4).
+    const dial = g.worldLevelDialView();
+    const dialHtml = `<div class="svc-row">
+      <div class="svc-main"><b>World Level Dial</b>
+        <div class="rr-sub">Tier ${dial.tier}/${dial.max} → World Level ${dial.worldLevel}. Turns up enemies, bosses, raids, and the loot grade floor together.${dial.enabled ? '' : ' <span class="bad">(disabled in settings)</span>'}</div>
+      </div>
+      <div class="svc-actions">
+        <button class="btn small" data-wl-dial="dec" ${dial.tier > 0 ? '' : 'disabled'}>−</button>
+        <button class="btn small accent" data-wl-dial="inc" ${dial.tier < dial.max ? '' : 'disabled'}>+</button>
+      </div>
+    </div>`;
+    const metaHtml = g.metaBoardView().map((n) => {
+      const state = n.owned ? 'owned' : n.locked ? `needs Trainer Lv ${n.requiresTrainerLevel}` : n.affordable ? 'ready' : 'not enough XP';
+      const label = n.owned ? 'Unlocked' : `Unlock (${n.cost} XP)`;
+      return `<div class="svc-row">
+        <div class="svc-main"><b>${esc(n.name)}</b> <em>${state}</em><div class="rr-sub">${esc(n.description)}</div></div>
+        <div class="svc-actions"><button class="btn small ${n.owned ? '' : 'accent'}" data-meta-buy="${n.id}" ${n.owned || n.locked || !n.affordable ? 'disabled' : ''}>${label}</button></div>
+      </div>`;
+    }).join('');
+    const trainerHtml = `
+      <section><h3>Trainer Board <span class="gold">Lv ${g.trainerLevel} · ${g.trainerXp} XP</span></h3>
+        ${dialHtml}
+        <div class="svc-sub">Meta Unlocks — access, economy, and convenience (never raw power)</div>
+        ${metaHtml}
+      </section>`;
+
+    const stashCap = g.stashSoftCap();
+    const stashUsed = armory.stash.length;
+    const stashTag = stashUsed >= stashCap
+      ? `<span class="lg-l">vault ${stashUsed}/${stashCap} — full</span>`
+      : `<span class="dim">vault ${stashUsed}/${stashCap}</span>`;
     const serviceSections: Record<ServicesTab, string> = {
       armory: `
-        <section><h3>Armory <span class="gold">${armory.essence} essence</span></h3>
+        <section><h3>Armory <span class="gold">${armory.essence} essence</span> ${stashTag}</h3>
           ${conflictHtml}
           <div class="svc-actions"><button class="btn small accent" data-arm-gear-field="1">Gear Fielded Loadouts</button></div>
           ${filterHtml}
@@ -3887,6 +3943,7 @@ export class Hud {
           <div class="svc-sub">Neutral slots</div>${slotHtml}
         </section>`,
       adventure: `
+        ${trainerHtml}
         <section><h3>Boss Reruns</h3>${bossHtml}</section>
         <section><h3>Raids${aegisTag}</h3>${raidHtml}</section>
         <section><h3>Conquest — Tower of the Ancients</h3>${eliteHtml}</section>
@@ -3939,6 +3996,11 @@ export class Hud {
     });
     this.modal.querySelector<HTMLElement>('[data-champion]')?.addEventListener('click', () => { g.runChampion(); rerender(); });
     this.modal.querySelectorAll<HTMLElement>('[data-festival]').forEach((el) => el.addEventListener('click', () => { g.runSeasonalEvent(el.dataset.festival!); rerender(); }));
+    this.modal.querySelectorAll<HTMLElement>('[data-wl-dial]').forEach((el) => el.addEventListener('click', () => {
+      g.setWorldLevelTier(g.worldLevelDialView().tier + (el.dataset.wlDial === 'inc' ? 1 : -1));
+      rerender();
+    }));
+    this.modal.querySelectorAll<HTMLElement>('[data-meta-buy]').forEach((el) => el.addEventListener('click', () => { g.buyMetaNode(el.dataset.metaBuy!); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-neq]').forEach((el) => el.addEventListener('click', () => { g.equipNeutral(g.activeIdx, el.dataset.neq!); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-nrr]').forEach((el) => el.addEventListener('click', () => { g.tinkerReroll(el.dataset.nrr!); rerender(); }));
     this.modal.querySelectorAll<HTMLElement>('[data-nen]').forEach((el) => el.addEventListener('click', () => { g.tinkerEnchant(el.dataset.nen!); rerender(); }));
@@ -4223,16 +4285,26 @@ export class Hud {
     const active = pc.activeUid !== null;
     const selected = fight.sim.unit(this.game.scene.selectedUid);
     const selectedName = selected && selected.team === 0 ? selected.name : 'select 1–5';
-    const key = `${fight.gym.id}|${fight.round}|${fight.playerWins}-${fight.enemyWins}|${pc.remaining}|${active}|${ec.remaining}|${this.game.scene.selectedUid}`;
+    const bans = this.game.gymBanReadout();
+    const banKey = bans ? `${bans.banned.length}:${bans.repicksUsed}/${bans.repickBudget}` : '';
+    const key = `${fight.gym.id}|${fight.round}|${fight.playerWins}-${fight.enemyWins}|${pc.remaining}|${active}|${ec.remaining}|${this.game.scene.selectedUid}|${banKey}`;
     if (key === this.lastLiveGymKey) return;
     this.lastLiveGymKey = key;
     const dots = (remaining: number, total: number) => '●'.repeat(Math.max(0, remaining)) + '○'.repeat(Math.max(0, total - remaining));
     const pcTotal = TUNING.captainCallsPerFight;
     const ecTotal = TUNING.captainCallsPerFight + (fight.gym.enemyBonusCaptainCalls ?? 0);
     const canCall = pc.remaining > 0 && !active;
+    const esc = (s: string) => s.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
+    const banHtml = bans && bans.bannedNames.length > 0
+      ? `<div class="lg-calls">Banned <span class="lg-dots foe">${bans.bannedNames.map(esc).join(', ')}</span></div>
+         <div class="lg-calls">Repicks ${Math.max(0, bans.repickBudget - bans.repicksUsed)}/${bans.repickBudget} left</div>`
+      : bans
+        ? `<div class="lg-calls">Repicks ${Math.max(0, bans.repickBudget - bans.repicksUsed)}/${bans.repickBudget} left</div>`
+        : '';
     this.liveGymBar.innerHTML = `
       <div class="lg-score"><b>${fight.gym.name}</b> · Round ${fight.round} · <span class="lg-w">${fight.playerWins}</span>–<span class="lg-l">${fight.enemyWins}</span></div>
       <div class="lg-calls">Selected <b>${selectedName}</b></div>
+      ${banHtml}
       <div class="lg-calls">You <span class="lg-dots">${dots(pc.remaining, pcTotal)}</span></div>
       <div class="lg-calls">Foe <span class="lg-dots foe">${dots(ec.remaining, ecTotal)}</span></div>
       <button class="btn accent" data-livegym="call" ${canCall ? '' : 'disabled'}>${active ? 'Call active…' : 'Captain Call (Space)'}</button>`;

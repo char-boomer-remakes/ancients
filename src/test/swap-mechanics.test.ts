@@ -5,7 +5,7 @@ import { REG } from '../core/registry';
 import { itemStateFromSave } from '../core/items';
 import { applyDamage } from '../core/combat';
 import { Game, newGameSave } from '../systems/game';
-import type { GameSave, SimEvent } from '../core/types';
+import type { ActiveElement, GameSave, SimEvent } from '../core/types';
 import type { Unit } from '../core/unit';
 
 // ============================================================
@@ -481,6 +481,47 @@ describe('swap × tag chain', () => {
 
   it('chainweaver-band extends the chain window', () => {
     expect(REG.item('chainweaver-band').passiveMods?.tagChainWindowBonusSec).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ------------------------------------------------------------
+// 5b. WORLD LEVEL COMBO DEMAND (PROGRESSION_OVERHAUL §2.4)
+// A shielded featured pack must be *solvable by the intended reaction*,
+// and a ≥2-step tag chain (or a live reaction) must reward the kill.
+// ------------------------------------------------------------
+describe('world level combo demand (§2.4)', () => {
+  it('an elemental shield is broken faster by its weakTo reaction element', () => {
+    const breakTicks = (element: ActiveElement | undefined): number => {
+      const game = Game.headless(bench('lina', 'crystal-maiden'));
+      game.settings.resonance = true;
+      game.sim.resonanceEnabled = true;
+      const a = game.activeUnit()!;
+      const enemy = game.sim.spawnCreep(REG.creep('kobold'), { team: 1, pos: { x: a.pos.x + 120, y: a.pos.y } });
+      enemy.ctrl = { kind: 'none' };
+      enemy.elementalShield = { element: 'cryo', hp: 600, maxHp: 600, weakTo: ['pyro'], weakMult: 3, vulnerableUntil: -1 };
+      let ticks = 0;
+      while (enemy.elementalShield.hp > 0 && ticks < 1000) {
+        applyDamage(game.sim, a, enemy, 50, 'magical', element ? { element } : {});
+        ticks += 1;
+      }
+      return ticks;
+    };
+    const weak = breakTicks('pyro');   // the intended reaction
+    const off = breakTicks('hydro');   // a non-weak element
+    expect(weak).toBeGreaterThan(0);
+    expect(weak).toBeLessThan(off); // the weakTo element shreds the shield ~3x faster
+  });
+
+  it('a ≥2-step tag chain reports the combo loot bonus as live', () => {
+    const game = Game.headless(bench('juggernaut', 'sniper', 'luna'));
+    engage(game);
+    const enemy = spawnDummy(game, 120);
+    expect(game.comboLootBonusLive(enemy), 'no bonus before any chain').toBe(false);
+    expect(game.trySwap(1)).toBe(true); // chain step 1
+    advance(game, TUNING.resonanceSwapFloorSec + 0.05);
+    game.activeUnit()!.lastEnemyDamageAt = game.sim.time;
+    expect(game.trySwap(2)).toBe(true); // chain step 2
+    expect(game.comboLootBonusLive(enemy), 'a 2-step chain rewards the kill').toBe(true);
   });
 });
 

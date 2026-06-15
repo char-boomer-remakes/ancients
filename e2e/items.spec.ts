@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot, state } from './helpers';
+import { boot, clearCinematics, expectNoPageErrors, state, watchPageErrors } from './helpers';
 
 // The starter spawns next to Dawnshade, so the town shop is open immediately.
 test.describe('items & loot', () => {
@@ -121,5 +121,72 @@ test.describe('items & loot', () => {
     expect(result.hiddenFilterStashed).toBe(true);
     expect(result.gambledId).toBeTruthy();
     expect(['sharp', 'refined', 'pristine']).toContain(result.gambledGrade);
+  });
+
+  test('native progression items apply their live unit stat hooks in-browser', async ({ page }) => {
+    const errors = watchPageErrors(page);
+    await boot(page, { hero: 'juggernaut', seed: 15 });
+    await clearCinematics(page);
+
+    const result = await page.evaluate(() => {
+      const g = (window as any).__game;
+      const mk = (defId: string) => ({ defId, charges: -1, cooldownUntil: 0 });
+      const u = g.activeUnit();
+      u.refresh(g.sim.time);
+      const before = {
+        maxMana: u.stats.maxMana,
+        moveSpeed: u.stats.moveSpeed,
+        reactionAmpPct: u.stats.reactionAmpPct,
+        spellAmpPct: u.stats.spellAmpPct,
+        tagBoonAmpPct: u.stats.tagBoonAmpPct,
+        tagChainWindowBonusSec: u.stats.tagChainWindowBonusSec,
+        staminaBonus: u.stats.staminaBonus,
+        partyXpAmpPct: u.stats.partyXpAmpPct
+      };
+
+      u.items = [
+        mk('mentors-standard'),
+        mk('catalyst-prism'),
+        mk('tagweavers-gauntlet'),
+        mk('skyfeather-anklet'),
+        mk('concord-relic'),
+        mk('twin-soul-vessel')
+      ];
+      u.markStatsDirty();
+      u.refresh(g.sim.time);
+
+      return {
+        before,
+        after: {
+          maxMana: u.stats.maxMana,
+          moveSpeed: u.stats.moveSpeed,
+          reactionAmpPct: u.stats.reactionAmpPct,
+          spellAmpPct: u.stats.spellAmpPct,
+          tagBoonAmpPct: u.stats.tagBoonAmpPct,
+          tagChainWindowBonusSec: u.stats.tagChainWindowBonusSec,
+          staminaBonus: u.stats.staminaBonus,
+          partyXpAmpPct: u.stats.partyXpAmpPct
+        },
+        equipped: u.items.map((it: any) => it?.defId ?? null)
+      };
+    });
+
+    expect(result.equipped).toEqual([
+      'mentors-standard',
+      'catalyst-prism',
+      'tagweavers-gauntlet',
+      'skyfeather-anklet',
+      'concord-relic',
+      'twin-soul-vessel'
+    ]);
+    expect(result.after.partyXpAmpPct).toBeGreaterThan(result.before.partyXpAmpPct);
+    expect(result.after.reactionAmpPct).toBeGreaterThan(result.before.reactionAmpPct);
+    expect(result.after.spellAmpPct).toBeGreaterThan(result.before.spellAmpPct);
+    expect(result.after.tagBoonAmpPct).toBeGreaterThan(result.before.tagBoonAmpPct);
+    expect(result.after.tagChainWindowBonusSec).toBeGreaterThan(result.before.tagChainWindowBonusSec);
+    expect(result.after.staminaBonus).toBeGreaterThan(result.before.staminaBonus);
+    expect(result.after.moveSpeed).toBeGreaterThan(result.before.moveSpeed);
+    expect(result.after.maxMana).toBeGreaterThan(result.before.maxMana);
+    expectNoPageErrors(errors);
   });
 });

@@ -18,7 +18,8 @@ import { autoPicksForLevel, buildHero } from '../core/hero-setup';
 import { spawnHeroEchoUnit } from '../core/echo-unit';
 import { TrialRunner, trialGateOpen, type TrialGateCtx, type TrialOutcome } from '../core/trials';
 import { freshEchoProgress, normalizeEchoProgress, recordOwnedHeroEchoKill } from '../core/echo';
-import { computeKillReward, overflowXpToGold, recruitLevelCap } from '../core/progression';
+import { computeKillReward, overflowSplit, recruitLevelCap, trainerLevelForXp, metaValue, worldLevel, worldLevelDialCap, worldLevelForEncounter, worldLevelScale, worldLevelShieldFraction, type WorldLevelSource } from '../core/progression';
+import { ALL_META_NODES, META_NODES_BY_ID } from '../data/meta-board';
 import {
   bossFightSetupFromDef,
   bossLootSeed,
@@ -45,7 +46,8 @@ import { Rng } from '../core/rng';
 import { defaultAudioSettings, defaultCutsceneSettings, defaultGraphicsSettings, defaultInterfaceSettings, defaultPhase4SaveFields } from '../core/phase4';
 import { defaultPhase5SaveFields } from '../core/phase5';
 import { higherDungeonTier, migratePhase6Save } from '../core/phase6';
-import { dungeonDailySeed, dungeonWeeklySeed } from '../core/dungeon';
+import { dungeonDailySeed, dungeonWeeklySeed, pickPackAffixes } from '../core/dungeon';
+import { DUNGEON_AFFIXES } from '../data/dungeon-affixes';
 import { type QualityTier } from '../engine/performance';
 import { mergeCreeps, newCreepInstanceId, validateEntourage } from '../core/capture';
 import { computeBuyPlan, executeBuy, itemReady, itemSaveOf, itemStateFromSave, sellValue, sortInventory } from '../core/items';
@@ -56,13 +58,13 @@ import { levelFromXp, xpForLevel } from '../core/stats';
 import { abilityMaxLevel, abilityRankRequiredHeroLevel, autoAbilityLevels, canLearnAbilityRank, normalizeAbilityLevels } from '../core/values';
 import { MASTERY_NODE_COUNT, MASTERY_TIERS_PER_BRANCH, canBuyMasteryNode, deriveMasteryTrees, masteryNodeIndex, masteryNodeUnlocked, masteryPointsForLevel, masterySpent, normalizeMasteryRanks } from '../core/mastery';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
-import { circleBody, nearestPointOutsideCollisionBody, obstacleBlocksMovement } from '../core/collision';
+import { circleBody, collisionBodyPushOut, nearestPointOutsideCollisionBody, obstacleBlocksMovement } from '../core/collision';
 import { defaultFormation } from '../core/board';
 import { chooseDraft, counterDraft, runPickBan, validateDraft, type CounterDraftResult, type DraftValidation } from '../core/draft';
 import { isDisabled, summarize } from '../core/status';
-import type { ActiveElement, ArmoryLoadouts, BossDef, CollisionObstacleInput, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DishDef, DomainDef, DraftFormat, DraftTeam, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, EchoSpawnDef, EffectNode, GambitRule, GameSave, Formation, GraphicsSettings, GymDef, GroundItemDrop, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, NeutralItemDef, NeutralStashEntry, Order, QuestDef, QuestGiverDef, QuestKind, QuestProgress, QuestReward, QuestSave, QuestStatus, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, StatusParams, TagArchetype, ValueRef, Vec2, ZoneSpec } from '../core/types';
+import type { ActiveElement, ArmoryLoadouts, AuraSpec, BossDef, CollisionObstacleInput, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DishDef, DomainDef, DraftFormat, DraftTeam, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, EchoSpawnDef, EffectNode, GambitRule, GameSave, Formation, GraphicsSettings, GymDef, GroundItemDrop, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, MetaEffectKey, MetaNodeDef, NeutralItemDef, NeutralStashEntry, Order, QuestDef, QuestGiverDef, QuestKind, QuestProgress, QuestReward, QuestSave, QuestStatus, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, StatusParams, TagArchetype, ValueRef, Vec2, ZoneSpec } from '../core/types';
 import { advance as questAdvance, chosenBranch as questChosenBranch, claim as questClaim, normalizeQuestSave, questGiverPos, refreshAvailability, type QuestContext, type QuestEvent } from '../core/quests';
-import { migratePhase7Save } from '../core/phase7';
+import { migratePhase8Save } from '../core/phase8';
 import { GROUND_LOOT_COLLISION } from '../data/world/props';
 import { ProceduralAudio, type CinematicMixMode } from '../engine/audio';
 import { CinematicDirector, type CinematicView, type CutsceneContext } from '../engine/cinematic';
@@ -85,6 +87,25 @@ const OUTWORLD_CLAIMANT_RAIDS = new Set([
   'forsaken-queen'
 ]);
 const CINEMATIC_STINGERS: ReadonlySet<StingerId> = new Set(['capture', 'merge', 'levelup', 'badge', 'raid-clear']);
+
+/**
+ * PROGRESSION_OVERHAUL §2.1: per-region elemental shield flavor for World-Level
+ * featured overworld elites. Each shield names the reaction that cleanly breaks it
+ * (weakTo), so a swap-react combo is the intended answer instead of a damage check.
+ */
+const REGION_ELEMENTAL_SHIELDS: Record<string, { element: ActiveElement; weakTo: ActiveElement[] }> = {
+  'tranquil-vale': { element: 'dendro', weakTo: ['pyro'] },
+  'nightsilver-woods': { element: 'cryo', weakTo: ['pyro'] },
+  icewrack: { element: 'cryo', weakTo: ['pyro', 'hydro'] },
+  'devarshi-desert': { element: 'pyro', weakTo: ['hydro', 'cryo'] },
+  shadeshore: { element: 'hydro', weakTo: ['electro', 'cryo'] },
+  'vile-reaches': { element: 'electro', weakTo: ['cryo', 'pyro'] },
+  quoidge: { element: 'geo', weakTo: ['pyro', 'hydro'] },
+  'hidden-wood': { element: 'dendro', weakTo: ['pyro'] },
+  'mount-joerlak': { element: 'cryo', weakTo: ['pyro', 'electro'] },
+  'mad-moon-crater': { element: 'pyro', weakTo: ['hydro', 'cryo'] }
+};
+const DEFAULT_REGION_SHIELD = { element: 'pyro' as ActiveElement, weakTo: ['hydro', 'cryo'] as ActiveElement[] };
 
 /** Top-tier power that only drops from bosses/raids/dungeons — never vended by any shop or gold sink (§6). */
 export const GATED_TOP_TIER: ReadonlySet<string> = new Set([
@@ -214,7 +235,7 @@ function bindIfNeeded(item: ItemSave): ItemSave {
 // camps, capture/entourage, shop, shrine, day clock, save/load.
 // ------------------------------------------------------------------
 
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 10;
 const SLOT_KEYS = ['ancients.save.1', 'ancients.save.2', 'ancients.save.3'];
 const AUTO_KEY = 'ancients.save.auto';
 
@@ -519,6 +540,13 @@ function neutralPassiveMods(neutral: ItemSave | string | null | undefined): Reco
   return mods;
 }
 
+function neutralAuraSpecs(neutral: ItemSave | string | null | undefined): AuraSpec[] {
+  if (!neutral) return [];
+  const item = typeof neutral === 'string' ? { id: neutral } : neutral;
+  const aura = REG.neutralItem(item.id).aura;
+  return aura ? [aura] : [];
+}
+
 function neutralGradeFloor(difficulty: DifficultyTier): ItemGrade {
   if (difficulty === 'hell') return 'standard';
   if (difficulty === 'nightmare') return 'worn';
@@ -610,12 +638,17 @@ export function newGameSave(starterHeroId: string): GameSave {
     explorationPct: { [region.id]: 0 },
     regionVisits: { [region.id]: 1 },
     discovered: ['tv-waypoint-dawnshade'],
-    settings: { quickcast: true, resonance: true, swapCharges: false, minimap: true, keyBindings: normalizeKeyBindings(undefined), audio: defaultAudioSettings(), graphics: defaultGraphicsSettings(), cutscene: defaultCutsceneSettings(), interface: defaultInterfaceSettings() }
+    trainerLevel: 1,
+    trainerXp: 0,
+    metaNodes: [],
+    worldLevelTier: 0,
+    collectionMilestones: [],
+    settings: { quickcast: true, resonance: true, swapCharges: false, minimap: true, worldLevel: true, keyBindings: normalizeKeyBindings(undefined), audio: defaultAudioSettings(), graphics: defaultGraphicsSettings(), cutscene: defaultCutsceneSettings(), interface: defaultInterfaceSettings() }
   };
 }
 
 function migrateTagGaugeSave(s: GameSave | { version: number; [k: string]: unknown }): GameSave {
-  const base = migratePhase7Save(s as GameSave);
+  const base = migratePhase8Save(s as GameSave);
   return {
     ...base,
     version: SAVE_VERSION,
@@ -655,7 +688,7 @@ export interface SceneLike {
   groundHeightAt?(simX: number, simY: number): number;
   centerOn?(point: Vec2): void;
   pushEvent(ev: SimEvent, sim: Sim): void;
-  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView?: CinematicView | null, groundItems?: readonly GroundItemDrop[]): void;
+  update(sim: Sim, followUnit: Unit | null, renderDt: number, timeOfDay01: number, cinematicView?: CinematicView | null, groundItems?: readonly GroundItemDrop[], ambiencePaused?: boolean): void;
   pick?(clientX: number, clientY: number, sim: Sim, groundItems?: readonly GroundItemDrop[]): { uid?: number; itemUid?: number; ground?: Vec2 };
   resetUnitViews?(): void;
   setDungeonRoom?(template: RoomTemplate | null, room?: DungeonRoom | null): void;
@@ -888,6 +921,7 @@ export class Game {
   difficulty: GameSave['difficulty'] = {};
   inventoryStash: ItemSave[] = [];
   groundItemDrops: GroundItemDrop[] = [];
+  private readonly visibleGroundItemScratch: GroundItemDrop[] = [];
   private nextGroundItemUid = 1;
   raidProgress: GameSave['raidProgress'] = {};
   dungeonProgress: GameSave['dungeonProgress'] = {};
@@ -913,6 +947,12 @@ export class Game {
   regionVisits: Record<string, number> = {};
   resin = TUNING.resin.max;
   resinUpdatedAt = 0;
+  // Trainer track + meta dial (PROGRESSION_OVERHAUL §4)
+  trainerLevel = 1;
+  trainerXp = 0;
+  metaNodes = new Set<string>();
+  worldLevelTier = 0;
+  collectionMilestones = new Set<string>();
   sprintHeld = false;
   private sprintModUid = -1;
   private weatherNextAt = 0;
@@ -956,6 +996,7 @@ export class Game {
   /** Active live gym fight (§3.5): when set, update() steps + renders it instead of the overworld. */
   liveGym: LiveGymFight | null = null;
   private liveGymId: string | null = null;
+  private liveGymBanCount = 0;
   /** Per-gym committed drafts (AUTOBATTLER_OVERHAUL §4). Empty => the walking party. */
   gymDrafts = new Map<string, DraftTeam>();
   /** The most recent counter-draft swap (§5.4/§6.5), for the reveal beat. Cleared on a no-op. */
@@ -986,6 +1027,8 @@ export class Game {
   /** events the HUD wants this frame (damage floaters, gold, barks) */
   frameEvents: SimEvent[] = [];
   private queuedPresentationEvents: SimEvent[] = [];
+  private readonly questGiverViewScratch: QuestGiverView[] = [];
+  private readonly questGiverFlagScratch = new Map<string, { hasClaimable: boolean; hasActive: boolean }>();
   private lastBlockedMoveFeedbackAt = -999;
   paused = false;
 
@@ -1073,6 +1116,13 @@ export class Game {
     this.resin = Math.max(0, Math.min(TUNING.resin.max, save.resin ?? TUNING.resin.max));
     this.resinUpdatedAt = save.resinUpdatedAt ?? save.playtimeSec;
     this.regenResinToPlaytime();
+    // Trainer track + meta dial (PROGRESSION_OVERHAUL §4)
+    this.trainerXp = Math.max(0, save.trainerXp ?? 0);
+    this.trainerLevel = Math.max(1, save.trainerLevel ?? trainerLevelForXp(this.trainerXp));
+    this.metaNodes = new Set((save.metaNodes ?? []).filter((id) => META_NODES_BY_ID[id]));
+    this.worldLevelTier = Math.max(0, save.worldLevelTier ?? 0);
+    this.collectionMilestones = new Set(save.collectionMilestones ?? []);
+    this.applyMetaSimEffects();
     this.codexUnlocks.add('region:' + this.region.id); // standing in a region is the encounter (§3.14)
 
     const partyIds = new Set(save.party);
@@ -1140,6 +1190,7 @@ export class Game {
       resonance: save.settings.resonance ?? false,
       swapCharges: save.settings.swapCharges ?? false,
       minimap: save.settings.minimap ?? true,
+      worldLevel: save.settings.worldLevel ?? true,
       keyBindings: normalizeKeyBindings(save.settings.keyBindings),
       audio: { ...defaultAudioSettings(), ...save.settings.audio },
       graphics: { ...defaultGraphicsSettings(), ...save.settings.graphics },
@@ -1166,7 +1217,7 @@ export class Game {
     this.advanceQuests({ kind: 'reach-region', amount: 1, regionId: this.region.id, targetId: this.region.id });
   }
 
-  settings: GameSave['settings'] = { quickcast: true, resonance: true, swapCharges: false, minimap: true, keyBindings: normalizeKeyBindings(undefined), audio: defaultAudioSettings(), graphics: defaultGraphicsSettings(), cutscene: defaultCutsceneSettings(), interface: defaultInterfaceSettings() };
+  settings: GameSave['settings'] = { quickcast: true, resonance: true, swapCharges: false, minimap: true, worldLevel: true, keyBindings: normalizeKeyBindings(undefined), audio: defaultAudioSettings(), graphics: defaultGraphicsSettings(), cutscene: defaultCutsceneSettings(), interface: defaultInterfaceSettings() };
 
   // §2.3 charge-meter (opt-in): a live 2-charge swap resource, accrued lazily from sim time.
   swapCharges = TUNING.swapChargeMax;
@@ -1181,6 +1232,16 @@ export class Game {
   staminaMax(): number {
     const bonus = Math.max(0, this.activeUnit()?.stats.staminaBonus ?? 0);
     return TUNING.traversal.staminaMax + bonus;
+  }
+
+  /** Skyfeather Anklet (PROGRESSION §5): the active hero carries the anklet. */
+  private skyfeatherAnklet(): boolean {
+    return !!this.activeUnit()?.items.some((it) => it?.defId === 'skyfeather-anklet');
+  }
+
+  /** Climb/swim stamina drain multiplier — cheaper traversal with the Skyfeather Anklet. */
+  private skyfeatherDrainMult(): number {
+    return this.skyfeatherAnklet() ? TUNING.nativeItems.skyfeatherClimbDrainMult : 1;
   }
 
   /** Sim currently receiving player input: overworld by default, live sub-sim during live fights. */
@@ -1308,6 +1369,17 @@ export class Game {
    * "ult ready → seize" Captain's Call prompt. Pure read over the active sim — it never
    * changes a combat result, so the determinism tests stay green.
    */
+  /**
+   * Draft-ban preview for the live gym/Elite overlay (§3.4 / §8): which of the player's
+   * recruited heroes the leader has banned this series, plus the repick budget. Null when
+   * no live gym (or no ban loop) is running.
+   */
+  gymBanReadout(): { banned: string[]; bannedNames: string[]; repickBudget: number; repicksUsed: number; round: number; bestOf: number } | null {
+    if (!this.liveGym || !this.liveGym.banLoopActive) return null;
+    const r = this.liveGym.banReadout();
+    return { ...r, bannedNames: r.banned.map((id) => REG.hero(id).name) };
+  }
+
   combatReadout(): CombatReadout {
     const sim = this.inputSim();
     const now = sim.time;
@@ -1487,9 +1559,10 @@ export class Game {
 
   private clampDropPos(pos: Vec2): Vec2 {
     const sim = this.inputSim();
+    const margin = 48;
     return {
-      x: Math.max(0, Math.min(sim.bounds.w, pos.x)),
-      y: Math.max(0, Math.min(sim.bounds.h, pos.y))
+      x: Math.max(margin, Math.min(sim.bounds.w - margin, pos.x)),
+      y: Math.max(margin, Math.min(sim.bounds.h - margin, pos.y))
     };
   }
 
@@ -1503,10 +1576,15 @@ export class Game {
 
   visibleGroundItemDrops(): readonly GroundItemDrop[] {
     const context: GroundItemDrop['context'] = this.liveDungeon ? 'dungeon' : 'overworld';
-    return this.groundItemDrops.filter((drop) => (drop.context ?? 'overworld') === context);
+    const out = this.visibleGroundItemScratch;
+    out.length = 0;
+    for (const drop of this.groundItemDrops) {
+      if ((drop.context ?? 'overworld') === context) out.push(drop);
+    }
+    return out;
   }
 
-  spawnGroundItems(items: ItemSave[], pos: Vec2, opts: { source?: GroundItemDrop['source']; context?: GroundItemDrop['context']; visual?: boolean } = {}): GroundItemDrop[] {
+  spawnGroundItems(items: ItemSave[], pos: Vec2, opts: { source?: GroundItemDrop['source']; context?: GroundItemDrop['context']; visual?: boolean; combo?: boolean } = {}): GroundItemDrop[] {
     const context = opts.context ?? (this.liveDungeon ? 'dungeon' : 'overworld');
     const drops = items.map((item, i): GroundItemDrop => ({
       uid: this.nextGroundItemUid++,
@@ -1524,7 +1602,8 @@ export class Game {
         pos: { ...drops[0].pos },
         color: this.dropAccent(drops.map((drop) => drop.item)) ?? rarityColor(this.itemRarity(drops[0].item.id)),
         grade: drops[0].item.grade,
-        signature: drops.some((drop) => hasSignatureAffix(drop.item))
+        signature: drops.some((drop) => hasSignatureAffix(drop.item)),
+        combo: opts.combo
       });
     }
     return drops.map(cloneGroundItemDrop);
@@ -1885,6 +1964,15 @@ export class Game {
     for (const p of region.elementPuzzles ?? []) if (this.solvedPuzzles.has(p.id)) done++;
     const pct = Math.round((done / total) * 100);
     this.explorationPct[regionId] = pct;
+    // Fully exploring a region is a one-time collection beat (§4.4).
+    if (pct >= 100) {
+      const id = `region-explored:${regionId}`;
+      if (!this.collectionMilestones.has(id)) {
+        this.collectionMilestones.add(id);
+        this.awardTrainerXp(TUNING.trainer.regionClearXp);
+        this.msg(`${region.name} fully explored — the Trainer learns the land.`, 'good');
+      }
+    }
     return pct;
   }
 
@@ -2443,7 +2531,21 @@ export class Game {
   }
 
   private awardGold(amount: number, reason: string, pos?: Vec2, routeNow = false): void {
-    const rounded = Math.round(amount);
+    let rounded = Math.round(amount);
+    if (rounded <= 0) return;
+    // Scholar's Sigil (PROGRESSION §5): convert a slice of incoming gold into active-hero
+    // XP — the inverse of the post-cap XP→gold conversion. Overflow gold is exempt so the
+    // two conversions can't feed back into each other.
+    if (reason !== 'overflow') {
+      const rec = this.party[this.activeIdx];
+      if (rec && rec.unit?.items.some((it) => it?.defId === 'scholars-sigil')) {
+        const toXp = Math.round(rounded * TUNING.nativeItems.scholarGoldToXpPct);
+        if (toXp > 0) {
+          rounded -= toXp;
+          this.applyRosterXp(rec, toXp, this.recruitLevelCap());
+        }
+      }
+    }
     if (rounded <= 0) return;
     this.gold += rounded;
     this.emitPresentationEvent(
@@ -2512,7 +2614,10 @@ export class Game {
 
   private refreshResonanceMods(force = false): void {
     const enabled = this.settings.resonance ?? false;
-    const res = enabled ? resonanceMods(this.party.map((p) => p.heroId), (id) => REG.hero(id)).mods : {};
+    // Concord Relic (PROGRESSION §5): a carrier lets the party resonate around its
+    // most-represented element without needing two heroes who share it.
+    const concord = this.party.some((p) => (p.items ?? []).some((it) => it?.id === 'concord-relic'));
+    const res = enabled ? resonanceMods(this.party.map((p) => p.heroId), (id) => REG.hero(id), concord ? 1 : 2).mods : {};
     for (const rec of this.party) {
       const u = rec.unit;
       if (!u) {
@@ -2610,6 +2715,26 @@ export class Game {
     const u = this.activeUnit();
     if (!u) return null;
     return (this.region.chests ?? []).find((c) => !this.openedChests.has(c.id) && dist(u.pos, c.pos) <= TUNING.exploration.chestInteractRadius) ?? null;
+  }
+
+  /** Dowser's Compass (PROGRESSION §5): when the active hero carries it, ping nearby
+   * unopened chests, uncollected echo shards, and element sources. Pure read used by the
+   * overworld HUD; returns [] without the compass equipped. */
+  dowserPings(): { kind: 'chest' | 'shard' | 'element-source'; pos: Vec2; element?: string }[] {
+    const u = this.activeUnit();
+    if (!u || !u.items.some((it) => it?.defId === 'dowsers-compass')) return [];
+    const r = TUNING.nativeItems.dowserPingRadius;
+    const out: { kind: 'chest' | 'shard' | 'element-source'; pos: Vec2; element?: string }[] = [];
+    for (const c of this.region.chests ?? []) {
+      if (!this.openedChests.has(c.id) && dist(u.pos, c.pos) <= r) out.push({ kind: 'chest', pos: { ...c.pos } });
+    }
+    for (const s of this.region.shards ?? []) {
+      if (!this.collectedShards.has(s.id) && dist(u.pos, s.pos) <= r) out.push({ kind: 'shard', pos: { ...s.pos } });
+    }
+    for (const src of this.region.elementSources ?? []) {
+      if (dist(u.pos, src.pos) <= r) out.push({ kind: 'element-source', pos: { ...src.pos }, element: src.element });
+    }
+    return out;
   }
 
   private chestGateOpen(chest: NonNullable<RegionDef['chests']>[number]): boolean {
@@ -2731,6 +2856,11 @@ export class Game {
   }
 
   fastTravelToWaypoint(waypointId: string): boolean {
+    // PROGRESSION_OVERHAUL §4.2: fast travel is a meta-board convenience unlock (Wayfinder).
+    if (this.metaBonus('fastTravel') <= 0) {
+      this.msg('Fast travel is locked — unlock Wayfinder on the Trainer board', 'bad');
+      return false;
+    }
     const waypoint = (this.region.waypoints ?? []).find((w) => w.id === waypointId);
     if (!waypoint) {
       this.msg('Unknown waystone', 'bad');
@@ -2897,7 +3027,13 @@ export class Game {
     const { team, formation } = this.gymTeamFor(gymId);
     const seed = this.region.seed + Math.round(this.playtime);
     const gym = this.gymForFight(gymId, team, seed);
-    const result = runGymMatch(gym, team, seed, formation);
+    // PROGRESSION_OVERHAUL §3: auto-resolve runs the same asymmetric ban loop as the
+    // live path — the leader bans the player's recruited roster and escalates each round.
+    const result = runGymMatch(gym, team, seed, formation, {
+      playerRoster: this.draftPool(),
+      tier: this.difficulty[gymId]?.tier ?? 'normal',
+      playerBonusCaptainCalls: this.metaBonus('refightCaptainCall')
+    });
     return this.applyGymResult(gymId, result);
   }
 
@@ -2908,8 +3044,21 @@ export class Game {
     const { team, formation } = this.gymTeamFor(gymId);
     const seed = this.region.seed + Math.round(this.playtime);
     const gym = this.gymForFight(gymId, team, seed);
-    this.liveGym = new LiveGymFight(gym, team, seed, { formationA: formation });
+    // PROGRESSION_OVERHAUL §3: the leader drafts against the player's recruited roster,
+    // banning one-directionally and escalating each round at the gym's difficulty tier.
+    this.liveGym = new LiveGymFight(gym, team, seed, {
+      formationA: formation,
+      playerRoster: this.draftPool(),
+      tier: this.difficulty[gymId]?.tier ?? 'normal',
+      playerBonusCaptainCalls: this.metaBonus('refightCaptainCall')
+    });
     this.liveGymId = gymId;
+    this.liveGymBanCount = 0;
+    const preBans = this.liveGym.banReadout().banned;
+    if (preBans.length > 0) {
+      this.liveGymBanCount = preBans.length;
+      this.msg(`${gym.leader} bans your ${preBans.map((id) => REG.hero(id).name).join(', ')} from the series.`, 'bad');
+    }
     this.story.beginEncounter();
     this.queuedOrders = [];
     this.scene.resetUnitViews(); // gym sim uids must not alias overworld views
@@ -2945,10 +3094,16 @@ export class Game {
       this.routeEventAudio(ev, fight.sim);
     }
     this.observeStory(this.frameEvents, { sim: fight.sim });
+    // §3.4 / §8 legibility: surface each escalated ban as the leader tightens the series.
+    if (fight.banLoopActive && fight.bannedHeroes.size > this.liveGymBanCount) {
+      const newly = [...fight.bannedHeroes].slice(this.liveGymBanCount);
+      this.liveGymBanCount = fight.bannedHeroes.size;
+      this.msg(`${REG.gym(this.liveGymId!).leader} escalates: bans ${newly.map((id) => REG.hero(id).name).join(', ')}.`, 'bad');
+    }
     const cinematicView = this.cinematicPresentationView();
     this.audio.update?.({ biome: this.region.biome, dayTime: 0.5, inCombat: true, dt });
     this.scene.syncQuestGivers?.([]);
-    this.scene.update(fight.sim, fight.cameraFollow(), dt, 0.5, cinematicView, []);
+    this.scene.update(fight.sim, fight.cameraFollow(), dt, 0.5, cinematicView, [], true);
     if (fight.done && fight.result) {
       const id = this.liveGymId!;
       const result = fight.result;
@@ -2997,9 +3152,11 @@ export class Game {
     return gym ? this.badges.has(gym.badgeId) : this.badges.size > 0;
   }
 
-  private regionalGradeFloorBump(regionId = this.region.id): number {
+  private regionalGradeFloorBump(regionId = this.region.id, encounterWl = 0): number {
     void regionId;
-    return 0;
+    // PROGRESSION_OVERHAUL §2.3: a higher featured-encounter World Level lifts the
+    // loot grade floor so opting into danger pays better. 0 when WL is off/unfeatured.
+    return encounterWl * TUNING.worldLevel.rewardPerLevel;
   }
 
   private regionalMasteryCount(regionId = this.region.id): number {
@@ -3046,11 +3203,13 @@ export class Game {
       this.msg(`${REG.hero(boss.heroId).name} (${tier}) is locked`, 'bad');
       return { won: false };
     }
+    const bossWl = this.featuredWorldLevel('boss');
     const result = runRaidBattle(bossFightSetupFromDef(
       boss,
       this.gymPlayerTeam(),
       tier,
-      this.region.seed + Math.round(this.playtime) + bossId.length
+      this.region.seed + Math.round(this.playtime) + bossId.length,
+      bossWl
     ));
     if (result.winner !== 0) {
       this.msg(`${REG.hero(boss.heroId).name} (${tier}) survived — regroup and retry`, 'bad');
@@ -3058,7 +3217,7 @@ export class Game {
     }
     const dryStreak = this.difficulty[bossId]?.dryClears ?? 0;
     const loot = rollLoot(boss.loot, tier, dryStreak, bossLootSeed(boss, tier, dryStreak), this.lootBandForRegion(boss.region), 'boss', {
-      gradeFloorBump: this.regionalGradeFloorBump(boss.region),
+      gradeFloorBump: this.regionalGradeFloorBump(boss.region, bossWl),
       gradeFloorMin: this.regionalGradeFloorMin(boss.region, 'boss'),
       regionId: boss.region,
       endgameUnlocked: this.endgameAffixUnlocked(tier)
@@ -3150,7 +3309,8 @@ export class Game {
       party: this.gymPlayerTeam(),
       tier,
       seed: stableContentSeed(`${raidId}:${tier}`, clears) + Math.round(this.playtime),
-      aegis
+      aegis,
+      worldLevel: this.featuredWorldLevel('raid')
     });
     if (aegis && result.aegisConsumed) {
       this.consumeAegisFlag();
@@ -3218,6 +3378,7 @@ export class Game {
       seed: stableContentSeed(`domain:${domainId}`, clears) + Math.round(this.playtime),
       party: this.gymPlayerTeam(),
       boss: def.encounter,
+      worldLevel: this.featuredWorldLevel('raid'),
       disorder: { mods: def.disorder.mods, tick: def.disorder.tick },
       clear: def.clear
     });
@@ -3233,7 +3394,7 @@ export class Game {
     }
     const dryStreak = this.domainDryStreak[domainId] ?? 0;
     const loot = rollLoot(def.loot, 'normal', dryStreak, stableContentSeed(`domain:${domainId}:loot`, clears), this.currentLootBand(), 'raid', {
-      gradeFloorBump: this.regionalGradeFloorBump(),
+      gradeFloorBump: this.regionalGradeFloorBump(this.region.id, this.featuredWorldLevel('raid')),
       gradeFloorMin: this.regionalGradeFloorMin(this.region.id, 'raid'),
       regionId: this.region.id,
       endgameUnlocked: this.endgameAffixUnlocked('normal')
@@ -3278,7 +3439,7 @@ export class Game {
     this.liveRaidTier = tier;
     this.liveRaidClears = prog?.clears ?? 0;
     this.liveRaidAegis = this.aegisReady();
-    this.liveRaid = new LiveRaid(def, this.gymPlayerTeam(), tier, stableContentSeed(`${raidId}:${tier}`, this.liveRaidClears) + Math.round(this.playtime), { aegis: this.liveRaidAegis, maxSec: opts.maxSec, festivalMode: opts.festivalMode });
+    this.liveRaid = new LiveRaid(def, this.gymPlayerTeam(), tier, stableContentSeed(`${raidId}:${tier}`, this.liveRaidClears) + Math.round(this.playtime), { aegis: this.liveRaidAegis, maxSec: opts.maxSec, festivalMode: opts.festivalMode, worldLevel: this.featuredWorldLevel('raid') });
     this.story.beginEncounter();
     this.playRaidIntroSetpieces(raidId, def.name);
     this.queuedOrders = [];
@@ -3311,7 +3472,7 @@ export class Game {
     const cinematicView = this.cinematicPresentationView();
     this.audio.update?.({ biome: this.region.biome, dayTime: 0.5, inCombat: true, dt });
     this.scene.syncQuestGivers?.([]);
-    this.scene.update(raid.sim, raid.cameraFollow(), dt, 0.5, cinematicView, []);
+    this.scene.update(raid.sim, raid.cameraFollow(), dt, 0.5, cinematicView, [], true);
     if (raid.done && raid.result) {
       const id = this.liveRaidId!;
       const tier = this.liveRaidTier;
@@ -3472,7 +3633,7 @@ export class Game {
     const cinematicView = this.cinematicPresentationView();
     this.audio.update?.({ biome: this.region.biome, dayTime: 0.5, inCombat: true, dt });
     this.scene.syncQuestGivers?.([]);
-    this.scene.update(dungeon.sim, dungeon.cameraFollow(), dt, 0.5, cinematicView, this.visibleGroundItemDrops());
+    this.scene.update(dungeon.sim, dungeon.cameraFollow(), dt, 0.5, cinematicView, this.visibleGroundItemDrops(), true);
     if (dungeon.done && dungeon.result) {
       const id = this.liveDungeonId!;
       const tier = this.liveDungeonTier;
@@ -3657,7 +3818,7 @@ export class Game {
     }
     const dryStreak = this.raidProgress[raidId]?.dryStreak ?? 0;
     const loot = rollLoot(def.loot, tier, dryStreak, stableContentSeed(`${raidId}:loot:${tier}`, clears), this.currentLootBand(), 'raid', {
-      gradeFloorBump: this.regionalGradeFloorBump(),
+      gradeFloorBump: this.regionalGradeFloorBump(this.region.id, this.featuredWorldLevel('raid')),
       gradeFloorMin: this.regionalGradeFloorMin(this.region.id, 'raid'),
       regionId: this.region.id,
       endgameUnlocked: this.endgameAffixUnlocked(tier)
@@ -3858,15 +4019,50 @@ export class Game {
     return this.resolveEliteMatch(idx, seed, player, enemy);
   }
 
+  /** A synthetic gym wrapper so an Elite member can drive a stepped Captains Series (§3.1). */
+  private eliteSeriesGym(idx: number, enemy: MacroHeroSetup[]): GymDef {
+    const member = ELITE_DRAFT.members[idx];
+    return {
+      id: `elite-${idx}`,
+      name: member.name,
+      badgeId: '',
+      regionId: this.region.id,
+      leader: member.name,
+      leaderTitle: member.title,
+      theme: 'elite',
+      bestOf: 3,
+      enemyTeam: enemy,
+      enemyBonusCaptainCalls: 1,
+      dialogue: member.dialogue,
+      counterPool: [...new Set(member.pool)]
+    };
+  }
+
   private resolveEliteMatch(idx: number, seed: number, player: MacroHeroSetup[], enemy: MacroHeroSetup[]): { won: boolean; winner: 0 | 1 | -1; defeated: number; member: string } {
-    const result = runMacroBattle({ seed, teamA: player, teamB: enemy, formationA: defaultBoardFor(player), formationB: defaultBoardFor(enemy) });
+    // Elite Bo5 (§3.1): each member is a best-of-5 captains series, not a single game,
+    // so the gauntlet tests the whole roster's depth. The committed fives play it out;
+    // `eliteFive.defeated` advances only on a *series* win (a round loss is recoverable).
+    // Elite Bo5 (§3.1) runs the full asymmetric Captains Series: the member bans the
+    // player's recruited roster, escalates each round, takes +`eliteHarderPreBan` pre-bans,
+    // and locks the repick budget to 0 — strictly harder than a gym of the same tier.
+    const tier = this.difficulty['elite']?.tier ?? 'normal';
+    const series = new LiveGymFight(this.eliteSeriesGym(idx, enemy), player as GymMatchHero[], seed, {
+      autoPlayer: true,
+      bestOf: TUNING.captainsSeries.series.eliteBestOf,
+      playerRoster: this.draftPool(),
+      tier,
+      extraPreBans: TUNING.captainsSeries.eliteHarderPreBan,
+      repickBudgetOverride: 0,
+      playerBonusCaptainCalls: this.metaBonus('refightCaptainCall')
+    });
+    const result = series.runHeadless();
     const member = ELITE_DRAFT.members[idx];
     const won = result.winner === 0;
     if (won) {
       this.eliteFive.defeated = idx + 1;
-      this.msg(`${member.name} falls — Elite Five ${this.eliteFive.defeated}/5.`, 'good');
+      this.msg(`${member.name} falls — Elite Five ${this.eliteFive.defeated}/5 (${result.playerWins}–${result.enemyWins}).`, 'good');
     } else {
-      this.msg(`${member.name} outdrafts you. Re-challenge them when ready.`, 'bad');
+      this.msg(`${member.name} outdrafts you ${result.enemyWins}–${result.playerWins}. Re-challenge them when ready.`, 'bad');
     }
     this.autosave('elite');
     return { won, winner: result.winner, defeated: this.eliteFive.defeated, member: member.name };
@@ -4303,19 +4499,34 @@ export class Game {
   /** Per-frame placement + state for the givers in the current region, so the
    *  renderer can draw a moving NPC marker and pulse it when it has a reward. */
   questGiverViews(): QuestGiverView[] {
-    const board = this.questBoard();
-    const out: QuestGiverView[] = [];
+    this.refreshQuests();
+    const flags = this.questGiverFlagScratch;
+    flags.clear();
+    for (const def of REG.questDefs.values()) {
+      if (!def.giver) continue;
+      const save = this.questSaveFor(def);
+      if (save.status === 'locked' || save.status === 'claimed') continue;
+      let flag = flags.get(def.giver);
+      if (!flag) {
+        flag = { hasClaimable: false, hasActive: false };
+        flags.set(def.giver, flag);
+      }
+      if (save.status === 'complete') flag.hasClaimable = true;
+      else if (save.status === 'active') flag.hasActive = true;
+    }
+    const out = this.questGiverViewScratch;
+    out.length = 0;
     for (const g of REG.questGivers.values()) {
       if (g.regionId !== this.region.id) continue;
-      const posted = board.filter((q) => q.giver === g.board);
+      const flag = flags.get(g.board);
       const p = questGiverPos(g, this.playtime);
       out.push({
         id: g.id,
         name: g.name,
         x: p.x,
         y: p.y,
-        hasClaimable: posted.some((q) => q.claimable),
-        hasActive: posted.some((q) => q.status === 'active')
+        hasClaimable: flag?.hasClaimable ?? false,
+        hasActive: flag?.hasActive ?? false
       });
     }
     for (const service of this.townServicePoints()) {
@@ -4530,22 +4741,22 @@ export class Game {
     this.msg(`Neutral drop: ${drop.name} (${copy.grade ?? 'standard'}, → stash)`, 'good');
   }
 
-  private rollItemDropsForCreep(creepId: string | undefined, tier: CreepTier, salt: number, difficulty: DifficultyTier = 'normal', pos?: Vec2): void {
+  private rollItemDropsForCreep(creepId: string | undefined, tier: CreepTier, salt: number, difficulty: DifficultyTier = 'normal', pos?: Vec2, gradeFloorBump = 0, combo = false): void {
     const table = (creepId ? REG.creep(creepId).drops : undefined) ?? DEFAULT_CREEP_DROP_TABLES[tier];
     const seed = stableContentSeed(`${this.region.id}:creep-drops:${tier}:${difficulty}`, Math.round(this.sim.time * 1000) + salt);
     const roll = rollItemDrops(table, difficulty, {}, new Rng(seed), this.currentLootBand(), {
-      gradeFloorBump: this.regionalGradeFloorBump(),
+      gradeFloorBump: this.regionalGradeFloorBump() + gradeFloorBump,
       gradeFloorMin: this.regionalGradeFloorMin(this.region.id),
       regionId: this.region.id,
       endgameUnlocked: this.endgameAffixUnlocked(difficulty)
     });
     if (roll.items.length === 0) return;
-    this.spawnGroundItems(roll.items, pos ?? this.activeUnit()?.pos ?? this.region.town.pos, { source: 'creep' });
+    this.spawnGroundItems(roll.items, pos ?? this.activeUnit()?.pos ?? this.region.town.pos, { source: 'creep', combo });
     const names = roll.items.map((it) => REG.item(it.id).name).join(', ');
     this.msg(`Creep drop: ${names} (on the ground)`, 'good', this.dropAccent(roll.items));
   }
 
-  private rollEliteCreepDrop(tier: CreepTier, salt: number, pos?: Vec2): void {
+  private rollEliteCreepDrop(tier: CreepTier, salt: number, pos?: Vec2, gradeFloorBump = 0, combo = false): void {
     const difficulty = creepCombatTier(this.region.id);
     const minRank = tier === 'small' ? RARITY_RANK.uncommon : tier === 'medium' ? RARITY_RANK.rare : RARITY_RANK.mythical;
     const candidates = [...REG.items.values()]
@@ -4557,7 +4768,7 @@ export class Game {
     const id = this.rollMarketItem(candidates, `elite-creep:${tier}:${salt}`);
     if (!id) return;
     const floorMin = this.regionalGradeFloorMin(this.region.id, 'elite');
-    const item = instantiateDroppedItem(id, difficulty, new Rng(stableContentSeed(`elite-creep-copy:${id}`, salt)), undefined, 'elite', this.regionalGradeFloorBump(), this.endgameAffixUnlocked(difficulty), floorMin, this.region.id);
+    const item = instantiateDroppedItem(id, difficulty, new Rng(stableContentSeed(`elite-creep-copy:${id}`, salt)), undefined, 'elite', this.regionalGradeFloorBump() + gradeFloorBump, this.endgameAffixUnlocked(difficulty), floorMin, this.region.id);
     const items = [item];
     const secondChance = tier === 'large'
       ? { normal: 0.4, nightmare: 0.55, hell: 0.7 }[difficulty]
@@ -4567,9 +4778,9 @@ export class Game {
     const secondRng = new Rng(stableContentSeed(`elite-creep-second:${tier}:${salt}`, this.inventoryStash.length));
     if (secondChance > 0 && secondRng.chance(secondChance)) {
       const secondId = this.rollMarketItem(candidates.filter((candidate) => candidate !== id), `elite-creep-second:${tier}:${salt}`) ?? id;
-      items.push(instantiateDroppedItem(secondId, difficulty, new Rng(stableContentSeed(`elite-creep-second-copy:${secondId}`, salt)), undefined, 'elite', this.regionalGradeFloorBump(), this.endgameAffixUnlocked(difficulty), floorMin, this.region.id));
+      items.push(instantiateDroppedItem(secondId, difficulty, new Rng(stableContentSeed(`elite-creep-second-copy:${secondId}`, salt)), undefined, 'elite', this.regionalGradeFloorBump() + gradeFloorBump, this.endgameAffixUnlocked(difficulty), floorMin, this.region.id));
     }
-    const drops = this.spawnGroundItems(items, pos ?? this.activeUnit()?.pos ?? this.region.town.pos, { source: 'creep' }).map((drop) => drop.item);
+    const drops = this.spawnGroundItems(items, pos ?? this.activeUnit()?.pos ?? this.region.town.pos, { source: 'creep', combo }).map((drop) => drop.item);
     if (drops.length > 0) this.msg(`Elite drop: ${REG.item(id).name} (on the ground)`, 'good', this.dropAccent(drops));
   }
 
@@ -4716,6 +4927,9 @@ export class Game {
     for (const [k, v] of Object.entries(rec.neutralMods)) {
       u.externalMods[k] = (u.externalMods[k] ?? 0) + v;
     }
+    const setEffects = setBonusEffects(rec.items);
+    u.setAuras = [...setEffects.auras, ...neutralAuraSpecs(rec.neutralSlot)];
+    u.setTriggers = setEffects.triggers;
     u.markStatsDirty();
     u.refresh(this.sim.time);
   }
@@ -4988,7 +5202,8 @@ export class Game {
 
   private roamingMerchantStock(): ItemDef[] {
     const visitCount = Math.max(1, this.regionVisits[this.region.id] ?? 1);
-    const refreshIndex = Math.floor((visitCount - 1) / Math.max(1, TUNING.merchantRefreshPerVisits));
+    // PROGRESSION_OVERHAUL §4.2: `merchantRefresh` meta nodes advance the restock rotation.
+    const refreshIndex = Math.floor((visitCount - 1) / Math.max(1, TUNING.merchantRefreshPerVisits)) + this.metaBonus('merchantRefresh');
     const seeded = [...REG.items.values()]
       .filter((item) => isMainItemTier(item.tier))
       .filter((item) => itemAllowedFromSource(item.id, 'shop'))
@@ -6217,19 +6432,230 @@ export class Game {
     }
   }
 
+  /**
+   * PROGRESSION_OVERHAUL §2.4: a kill counts as "combo-rewarded" when a ≥2-step
+   * tag chain is live or the victim is carrying ≥2 element auras (a reaction set-up).
+   * Pure read of state already tracked on the Game/unit — drives a grade-floor nudge.
+   */
+  comboLootBonusLive(victim?: Unit): boolean {
+    const chainLive = this.tagChainCount >= 2 && this.sim.time <= this.tagChainExpiresAt;
+    if (chainLive) return true;
+    if (!victim) return false;
+    let liveAuras = 0;
+    for (const aura of Object.values(victim.elementAuras)) {
+      if (aura && aura.until >= this.sim.time) liveAuras += 1;
+    }
+    return liveAuras >= 2;
+  }
+
+  /** Highest level over the current party (PROGRESSION_OVERHAUL §2.1, World Level input). */
+  private maxFieldedLevel(): number {
+    let max = 0;
+    for (const rec of this.party) {
+      const lvl = rec.unit?.level ?? rec.level ?? 0;
+      if (lvl > max) max = lvl;
+    }
+    return max;
+  }
+
+  /** Purchased meta-board node defs (PROGRESSION_OVERHAUL §4.2). */
+  purchasedMetaNodes(): MetaNodeDef[] {
+    return [...this.metaNodes].map((id) => META_NODES_BY_ID[id]).filter((n): n is MetaNodeDef => !!n);
+  }
+
+  /** The highest ascension tier the player may dial right now (§4.3). */
+  worldLevelDialMax(): number {
+    const metaCap = metaValue(this.purchasedMetaNodes(), 'worldLevelCap');
+    return worldLevelDialCap(this.badges.size, this.trainerLevel, metaCap);
+  }
+
+  /** The ascension dial, clamped to what's currently unlocked. */
+  private effectiveWorldLevelTier(): number {
+    return Math.max(0, Math.min(this.worldLevelTier, this.worldLevelDialMax()));
+  }
+
+  /** Sum a meta-board effect across the player's purchased nodes (PROGRESSION §4.2). 0 = not bought. */
+  metaBonus(key: MetaEffectKey): number {
+    return metaValue(this.purchasedMetaNodes(), key);
+  }
+
+  /** Push meta dials that the sim reads directly (e.g. `catchSpeed`) onto the overworld sim. */
+  private applyMetaSimEffects(): void {
+    const catchNodes = this.metaBonus('catchSpeed');
+    this.sim.captureChannelMult = catchNodes > 0
+      ? Math.max(0.3, Math.pow(TUNING.metaCatchSpeedMultPerNode, catchNodes))
+      : 1;
+  }
+
+  /** Fielded-creep slots, base plus any `entourageSlot` meta nodes (§4.2). */
+  entourageMax(): number {
+    return TUNING.entourageMax + this.metaBonus('entourageSlot');
+  }
+
+  /** Armory stash soft capacity, base plus any `stashSize` meta nodes (§4.2, display/warning only). */
+  stashSoftCap(): number {
+    return TUNING.armoryStashSoftCap + this.metaBonus('stashSize');
+  }
+
+  /**
+   * The featured-encounter World Level for a boss/raid/domain (§4.3). This is the player's
+   * OPT-IN ascension dial — not the passive level/badge term that textures the overworld — so
+   * default play runs bosses/raids at their authored tier, and dialing the heat up scales the
+   * boss/raid HP/damage columns AND the loot grade floor together (one "turn up the heat, get
+   * better raid loot" knob). Returns 0 when the player opted out via `settings.worldLevel`.
+   */
+  private featuredWorldLevel(source: WorldLevelSource): number {
+    if (this.settings.worldLevel === false) return 0;
+    return worldLevelForEncounter(this.effectiveWorldLevelTier(), { source });
+  }
+
+  /** Player sets the ascension dial (§4.3), clamped to what badges + Trainer Level + meta unlock. */
+  setWorldLevelTier(tier: number): boolean {
+    const max = this.worldLevelDialMax();
+    const next = Math.max(0, Math.min(Math.floor(tier), max));
+    if (next === this.worldLevelTier) return false;
+    this.worldLevelTier = next;
+    this.msg(`World Level dial set to tier ${next}${next === max && max > 0 ? ' (max unlocked)' : ''}.`, 'info');
+    this.autosave('world-level');
+    return true;
+  }
+
+  /** View-model for the ascension dial UI (§4.3). */
+  worldLevelDialView(): { tier: number; max: number; worldLevel: number; enabled: boolean } {
+    return {
+      tier: this.worldLevelTier,
+      max: this.worldLevelDialMax(),
+      worldLevel: this.overworldBaseWorldLevel(),
+      enabled: this.settings.worldLevel !== false
+    };
+  }
+
+  /** View-model for the Trainer meta board UI: owned/affordable/locked per node (§4.2). */
+  metaBoardView(): { id: string; name: string; description: string; cost: number; owned: boolean; affordable: boolean; locked: boolean; requiresTrainerLevel?: number }[] {
+    return ALL_META_NODES.map((n) => ({
+      id: n.id,
+      name: n.name,
+      description: n.description,
+      cost: n.cost,
+      owned: this.metaNodes.has(n.id),
+      affordable: this.trainerXp >= n.cost,
+      locked: !!n.requiresTrainerLevel && this.trainerLevel < n.requiresTrainerLevel,
+      requiresTrainerLevel: n.requiresTrainerLevel
+    }));
+  }
+
+  /**
+   * Purchase a meta-board node, spending Trainer XP (§4.2). Trainer LEVEL is a high-water
+   * mark that never drops, so spending the balance never un-levels the account or re-locks
+   * a `requiresTrainerLevel` node already earned.
+   */
+  buyMetaNode(id: string): boolean {
+    const node = META_NODES_BY_ID[id];
+    if (!node) { this.msg('Unknown meta node', 'bad'); return false; }
+    if (this.metaNodes.has(id)) { this.msg(`${node.name} already unlocked`, 'info'); return false; }
+    if (node.requiresTrainerLevel && this.trainerLevel < node.requiresTrainerLevel) {
+      this.msg(`${node.name} needs Trainer Level ${node.requiresTrainerLevel}`, 'bad');
+      return false;
+    }
+    if (this.trainerXp < node.cost) {
+      this.msg(`Need ${node.cost} Trainer XP for ${node.name} (have ${this.trainerXp})`, 'bad');
+      return false;
+    }
+    this.trainerXp -= node.cost;
+    this.metaNodes.add(id);
+    this.applyMetaSimEffects();
+    this.msg(`Unlocked ${node.name} — ${node.description}`, 'good');
+    this.autosave('meta');
+    return true;
+  }
+
+  /** Roster-breadth milestones (§4.4): crossing a collection threshold pays a one-time Trainer XP bonus. */
+  private creditCollectionMilestones(): void {
+    const count = this.recruited.size;
+    for (const threshold of [5, 10, 15, 20, 30]) {
+      const id = `roster-${threshold}`;
+      if (count >= threshold && !this.collectionMilestones.has(id)) {
+        this.collectionMilestones.add(id);
+        this.awardTrainerXp(TUNING.trainer.recruitXp * 2);
+        this.msg(`Collection milestone: ${threshold} heroes recruited.`, 'good');
+      }
+    }
+  }
+
+  /** Bank Trainer XP from a collection beat / overflow and recompute the Trainer Level (§4.2/§4.4). */
+  awardTrainerXp(xp: number): void {
+    if (!(xp > 0)) return;
+    this.trainerXp += Math.round(xp);
+    const lvl = trainerLevelForXp(this.trainerXp);
+    if (lvl > this.trainerLevel) {
+      this.trainerLevel = lvl;
+      this.msg(`Trainer Level ${this.trainerLevel} — the account grows broader.`, 'good');
+    }
+  }
+
+  /** Base overworld World Level (0 when the player opted out via settings.worldLevel). */
+  private overworldBaseWorldLevel(): number {
+    if (this.settings.worldLevel === false) return 0;
+    return worldLevel(this.maxFieldedLevel(), this.badges.size, this.effectiveWorldLevelTier());
+  }
+
+  /**
+   * Roll a featured-pack rarity from the World-Level tables (§2.6). Only large/ancient
+   * camps can become champions/rares; ordinary trash stays 'normal' so it can be outgrown.
+   */
+  private rollOverworldPackRarity(tier: CreepTier, wl: number, rng: Rng): 'normal' | 'champion' | 'rare' {
+    if (tier !== 'large' && tier !== 'ancient') return 'normal';
+    const idx = Math.min(wl, TUNING.overworldElite.rareChanceByWorldLevel.length - 1);
+    if (rng.chance(TUNING.overworldElite.rareChanceByWorldLevel[idx])) return 'rare';
+    const cIdx = Math.min(wl, TUNING.overworldElite.championChanceByWorldLevel.length - 1);
+    if (rng.chance(TUNING.overworldElite.championChanceByWorldLevel[cIdx])) return 'champion';
+    return 'normal';
+  }
+
+  /** Texture a featured overworld elite: region elemental shield + 1–N affixes (§2.1, §2.4). */
+  private textureOverworldElite(u: Unit, wl: number, rng: Rng): void {
+    const shield = REGION_ELEMENTAL_SHIELDS[this.region.id] ?? DEFAULT_REGION_SHIELD;
+    // PROGRESSION_OVERHAUL §2 + §9: the shield is the PRIMARY texture lever — its
+    // HP grows with the World Level `texture` term so a higher WL demands the
+    // reaction combo (the shield melts to its weakness element) instead of just
+    // adding raw HP. This is what makes texturePerLevel dominate the HP term.
+    const shieldFrac = worldLevelShieldFraction(wl);
+    const shieldHp = Math.round(u.stats.maxHp * shieldFrac);
+    u.elementalShield = {
+      element: shield.element,
+      hp: shieldHp,
+      maxHp: shieldHp,
+      weakTo: [...shield.weakTo],
+      weakMult: 3,
+      vulnerableUntil: -1
+    };
+    const affixIdx = Math.min(wl, TUNING.overworldElite.affixCountByWorldLevel.length - 1);
+    const affixCount = TUNING.overworldElite.affixCountByWorldLevel[affixIdx];
+    if (affixCount <= 0) return;
+    const tier = creepCombatTier(this.region.id);
+    const ids = pickPackAffixes(DUNGEON_AFFIXES, 'champion', tier, rng, affixCount);
+    for (const id of ids) {
+      const affix = DUNGEON_AFFIXES.find((a) => a.id === id);
+      if (!affix || affix.apply.length === 0) continue;
+      execEffects(this.sim, u, { defId: `overworld-affix:${id}`, level: u.level, vfx: { archetype: 'ground-aoe', color: '#ffd27f', color2: '#ffe9c2' } }, affix.apply, { target: u, point: u.pos });
+    }
+  }
+
   private spawnCampCreeps(campId: string): number[] {
     const camp = this.region.camps.find((c) => c.id === campId)!;
     const def = REG.creep(camp.creepId);
     const uids: number[] = [];
+    const baseWl = this.overworldBaseWorldLevel();
+    const rng = new Rng(stableContentSeed(`${this.region.id}:overworld-pack:${camp.id}:${this.playtime}`, 0));
+    // Pack rarity is decided once for the camp (the lead creep carries the elite texture).
+    const packRarity = this.rollOverworldPackRarity(def.tier, baseWl, rng);
+    const encounterWl = worldLevelForEncounter(baseWl, { source: 'overworld-camp', creepTier: def.tier, packRarity });
+    const elite = packRarity !== 'normal';
     for (let i = 0; i < camp.count; i++) {
       const a = (i / camp.count) * Math.PI * 2;
       const r = camp.radius * 0.55;
       const pos = { x: camp.pos.x + Math.cos(a) * r, y: camp.pos.y + Math.sin(a) * r };
-      const eliteSeed = stableContentSeed(`${this.region.id}:elite-creep:${camp.id}:${this.playtime}`, i);
-      // Elites are a rare variant of large/ancient camps only (§10.3); the spawn
-      // chance lives in tuning, not a magic number.
-      const eliteChance = (TUNING.eliteSpawnChance as Partial<Record<CreepTier, number>>)[def.tier] ?? 0;
-      const elite = i === 0 && eliteChance > 0 && Math.abs(eliteSeed % 10000) / 10000 < eliteChance;
+      const isLead = i === 0;
       const u = this.sim.spawnCreep(def, {
         team: 1,
         pos,
@@ -6237,10 +6663,15 @@ export class Game {
         homePos: { ...camp.pos },
         regionId: this.region.id,
         combatTier: creepCombatTier(this.region.id),
-        star: elite ? 2 : 1
+        worldLevel: encounterWl,
+        star: elite && isLead ? (packRarity === 'rare' ? 3 : 2) : 1
       });
-      u.elite = elite;
-      if (elite) this.eliteCreepUids.add(u.uid);
+      u.encounterWorldLevel = encounterWl;
+      if (elite && isLead) {
+        u.elite = true;
+        this.eliteCreepUids.add(u.uid);
+        this.textureOverworldElite(u, encounterWl, rng);
+      }
       uids.push(u.uid);
     }
     return uids;
@@ -6270,17 +6701,25 @@ export class Game {
   private spawnHeroEcho(spawnId: string): number {
     const spawn = this.region.echoSpawns?.find((e) => e.id === spawnId);
     if (!spawn) return -1;
+    // Echo floor (§2.5): keep the echo relevant to a leveled lead — never below
+    // its authored level, never more than four under the active hero.
+    const active = this.party[this.activeIdx];
+    const leadLevel = active?.unit?.level ?? active?.level ?? 0;
+    const level = Math.max(spawn.level, leadLevel - 4);
+    const encounterWl = worldLevelForEncounter(this.overworldBaseWorldLevel(), { source: 'echo' });
     // Echo fidelity (§3.3): full kit, gambit controller, ×0.6 HP, no items, echo flag.
     const u = spawnHeroEchoUnit(this.sim, {
       heroId: spawn.heroId,
       team: 1,
       pos: spawn.pos,
-      level: spawn.level,
+      level,
       gambit: true,
       leashRadius: TUNING.echoLeashRadius,
       echoFlag: true,
-      bountyMult: 1.4
+      bountyMult: 1.4,
+      worldLevel: encounterWl
     });
+    u.encounterWorldLevel = encounterWl;
     this.echoHeroes.set(u.uid, spawnId);
     return u.uid;
   }
@@ -6319,7 +6758,11 @@ export class Game {
 
   private spawnHeroFromRecord(rec: RosterEntry, pos: Vec2): Unit {
     rec.masteryRanks = normalizeRosterMasteryRanks(rec.heroId, rec.level, rec.abilityLevels, rec.masteryRanks, rec.talentPicks, rec.attributePoints);
-    const build = buildHero(REG.hero(rec.heroId), rec.talentPicks, rec.facetIdx, rec.echo, rec.augments, rec.masteryRanks);
+    // Twin-Soul Vessel (PROGRESSION §5): the carrier holds both the Aghanim Scepter
+    // and Shard payloads at once, even when neither is otherwise unlocked.
+    const carriesVessel = (rec.items ?? []).some((it) => it?.id === 'twin-soul-vessel');
+    const augments = carriesVessel ? { ...rec.augments, scepter: true, shard: true } : rec.augments;
+    const build = buildHero(REG.hero(rec.heroId), rec.talentPicks, rec.facetIdx, rec.echo, augments, rec.masteryRanks);
     rec.abilityLevels = normalizeAbilityLevels(build.def, rec.abilityLevels, rec.level);
     rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
     rec.masteryRanks = normalizeRosterMasteryRanks(rec.heroId, rec.level, rec.abilityLevels, rec.masteryRanks, rec.talentPicks, rec.attributePoints);
@@ -6358,10 +6801,7 @@ export class Game {
     });
     u.items = sortInventory(u.items);
     const setEffects = setBonusEffects(rec.items);
-    for (const [k, v] of Object.entries(setEffects.mods)) {
-      u.externalMods[k] = (u.externalMods[k] ?? 0) + v;
-    }
-    u.setAuras = setEffects.auras;
+    u.setAuras = [...setEffects.auras, ...neutralAuraSpecs(rec.neutralSlot)];
     u.setTriggers = setEffects.triggers;
     if (rec.fleshStacks) {
       for (const k in rec.fleshStacks) u.triggerStacks.set(k, rec.fleshStacks[k]);
@@ -6430,7 +6870,9 @@ export class Game {
   private advanceTagChain(u: Unit): { count: number; ampPct: number; expiresAt: number } {
     const now = this.sim.time;
     const live = now <= this.tagChainExpiresAt;
-    const maxSteps = Math.max(1, Math.round(TUNING.tagChainMaxSteps));
+    // Tagweaver's Gauntlet (PROGRESSION §5): the carrier's swap-rotations carry one extra step.
+    const bonusSteps = u.items.some((it) => it?.defId === 'tagweavers-gauntlet') ? TUNING.nativeItems.tagweaverBonusSteps : 0;
+    const maxSteps = Math.max(1, Math.round(TUNING.tagChainMaxSteps) + bonusSteps);
     const count = live ? Math.min(maxSteps, this.tagChainCount + 1) : 1;
     const ampPct = Math.max(0, count - 1) * TUNING.tagChainAmpPerStepPct;
     const expiresAt = now + this.tagChainWindow(u);
@@ -6793,22 +7235,53 @@ export class Game {
   }
 
   private nearestWalkablePoint(sim: Sim, u: Unit, point: Vec2): Vec2 {
-    const out = { ...point };
-    for (let pass = 0; pass < 3; pass++) {
-      let moved = false;
+    const padding = u.radius + 10;
+    const clampPoint = (p: Vec2): Vec2 => ({
+      x: Math.max(u.radius, Math.min(sim.bounds.w - u.radius, p.x)),
+      y: Math.max(u.radius, Math.min(sim.bounds.h - u.radius, p.y))
+    });
+    const isClear = (p: Vec2): boolean => {
+      if (p.x < u.radius || p.y < u.radius || p.x > sim.bounds.w - u.radius || p.y > sim.bounds.h - u.radius) return false;
       for (const obstacle of sim.obstacles) {
         if (!obstacleBlocksMovement(obstacle)) continue;
-        const next = nearestPointOutsideCollisionBody(obstacle.pos, obstacle.body, out, u.radius + 10, u.facing);
-        if (next.x === out.x && next.y === out.y) continue;
-        out.x = next.x;
-        out.y = next.y;
-        moved = true;
+        if (collisionBodyPushOut(obstacle.pos, obstacle.body, p, padding, u.facing)) return false;
       }
-      if (!moved) break;
+      return true;
+    };
+    const relax = (start: Vec2): Vec2 => {
+      const out = clampPoint(start);
+      for (let pass = 0; pass < 8; pass++) {
+        const before = { ...out };
+        for (const obstacle of sim.obstacles) {
+          if (!obstacleBlocksMovement(obstacle)) continue;
+          const next = nearestPointOutsideCollisionBody(obstacle.pos, obstacle.body, out, padding, u.facing);
+          out.x = next.x;
+          out.y = next.y;
+        }
+        const bounded = clampPoint(out);
+        out.x = bounded.x;
+        out.y = bounded.y;
+        if (Math.abs(out.x - before.x) < 0.001 && Math.abs(out.y - before.y) < 0.001) break;
+      }
+      return out;
+    };
+
+    const direct = relax(point);
+    if (isClear(direct)) return direct;
+
+    // If the nearest obstacle edge lies outside the map, projection can cycle
+    // between "outside blocker" and "inside bounds". Search nearby legal points
+    // so boundary-adjacent buildings/fences remain clickable around their rim.
+    const origin = clampPoint(point);
+    const step = Math.max(48, padding);
+    for (let r = step; r <= 960; r += step) {
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * Math.PI * 2;
+        const candidate = relax({ x: origin.x + Math.cos(a) * r, y: origin.y + Math.sin(a) * r });
+        if (isClear(candidate)) return candidate;
+      }
     }
-    out.x = Math.max(u.radius, Math.min(sim.bounds.w - u.radius, out.x));
-    out.y = Math.max(u.radius, Math.min(sim.bounds.h - u.radius, out.y));
-    return out;
+    return direct;
   }
 
   private advanceQueuedOrder(): void {
@@ -6918,8 +7391,11 @@ export class Game {
   captureEligible(target: Unit): { ok: boolean; reason?: string } {
     if (!target.alive || !target.capturable || !target.tier) return { ok: false, reason: 'not capturable' };
     const cfg = TUNING.capture[target.tier];
-    if (target.hp / target.stats.maxHp > cfg.hpPct) {
-      return { ok: false, reason: `weaken below ${Math.round(cfg.hpPct * 100)}% HP` };
+    // Taming Collar (PROGRESSION §5): the carrier can start a bind from a higher HP.
+    const collar = !!this.controlledUnit()?.items.some((it) => it?.defId === 'taming-collar');
+    const hpPct = collar ? Math.min(0.95, cfg.hpPct + TUNING.nativeItems.tamingCollarThresholdBonus) : cfg.hpPct;
+    if (target.hp / target.stats.maxHp > hpPct) {
+      return { ok: false, reason: `weaken below ${Math.round(hpPct * 100)}% HP` };
     }
     return { ok: true };
   }
@@ -7177,9 +7653,15 @@ export class Game {
         }
       }
     }
+    const newlyRecruited = !this.recruited.has(heroId);
     this.recruited.add(heroId);
     this.codexUnlock('hero:' + heroId); // recruiting is the encounter (§3.14)
     this.advanceQuests({ kind: 'recruit-heroes', amount: 1 });
+    // Collection feeds the meta (§4.4): each new recruit pays Trainer XP.
+    if (newlyRecruited) {
+      this.awardTrainerXp(TUNING.trainer.recruitXp);
+      this.creditCollectionMilestones();
+    }
     if (this.party.length < 5) {
       this.party.push({
         heroId,
@@ -7266,7 +7748,7 @@ export class Game {
     if (!inst) return false;
     if (this.fielded.includes(instanceUid)) return false;
     const next = [...this.fielded, instanceUid];
-    const check = validateEntourage(next, this.caught, (id) => REG.creep(id).tier);
+    const check = validateEntourage(next, this.caught, (id) => REG.creep(id).tier, this.entourageMax());
     if (!check.ok) {
       if (!silent) this.msg(`Cannot field: ${check.reason}`, 'bad');
       return false;
@@ -7276,12 +7758,25 @@ export class Game {
     const pos = owner
       ? { x: owner.pos.x + 80 + Math.random() * 60, y: owner.pos.y + 80 + Math.random() * 60 }
       : { ...this.region.shrine.pos };
+    // Beastbond Totem (PROGRESSION §5): the carrier's entourage fights one effective star
+    // higher and inherits the owner's aura-item mods at full value (no radius gating).
+    const totem = !!owner?.items.some((it) => it?.defId === 'beastbond-totem');
+    const star = (totem ? Math.min(3, inst.star + TUNING.nativeItems.beastbondStarBonus) : inst.star) as 1 | 2 | 3;
     const u = this.sim.spawnCreep(def, {
       team: 0,
       pos,
-      star: inst.star,
+      star,
       ownerUid: owner?.uid
     });
+    if (totem && owner) {
+      for (const it of owner.items) {
+        const auraMods = it ? REG.items.get(it.defId)?.aura?.mods : undefined;
+        if (!auraMods) continue;
+        for (const [k, v] of Object.entries(auraMods)) u.externalMods[k] = (u.externalMods[k] ?? 0) + (v as number);
+      }
+      u.markStatsDirty();
+      u.refresh(this.sim.time);
+    }
     u.visual = { silhouette: def.silhouette, palette: def.palette };
     this.fielded = next;
     this.fieldedUnits.set(instanceUid, u.uid);
@@ -7501,6 +7996,7 @@ export class Game {
       const line = `${def.name}'s facets are now swappable.`;
       echoLines.push(line);
       this.msg(line, 'good');
+      this.awardTrainerXp(TUNING.trainer.echoPerfectXp); // echo-perfect collection beat (§4.4)
     }
     if (result.unlockedTier !== null) {
       const tier = def.talents[result.unlockedTier];
@@ -7509,11 +8005,13 @@ export class Game {
       const line = `${def.name}'s echo unlocks ${branchName}.`;
       echoLines.push(line);
       this.msg(line, 'good');
+      this.awardTrainerXp(TUNING.trainer.echoPerfectXp); // echo-perfect collection beat (§4.4)
     } else {
-      const line = `${def.name}'s echo yields surplus attunement gold.`;
+      // Surplus echoes (beyond the four to perfect) bank Trainer XP, not dead gold (§4.4).
+      const line = `${def.name}'s echo banks surplus attunement into Trainer XP.`;
       echoLines.push(line);
       this.msg(line, 'info');
-      this.awardGold(Math.round(def.bounty.gold * 1.5), 'echo', this.activeUnit()?.pos ?? this.region.town.pos);
+      this.awardTrainerXp(TUNING.trainer.surplusEchoXp);
     }
     if (result.firstFacetUnlock) {
       this.playCutscene('echo-milestone-stinger', { hero: def.name, echoLine: echoLines[0] ?? `${def.name}'s echo deepens.` });
@@ -7532,7 +8030,8 @@ export class Game {
     const quest = REG.quests.get(questId);
     const needed = quest?.findShardsNeeded ?? TUNING.findShardsNeeded;
     const qp = this.questProgress[questId] ?? defaultQuestProgress();
-    qp.attunement += 1;
+    // PROGRESSION_OVERHAUL §4.2: `findShardRate` meta nodes attune faster per echo kill.
+    qp.attunement += 1 + this.metaBonus('findShardRate');
     // Find gating (§3.1): the trial marker reveals only when shards hit the threshold.
     if (qp.attunement >= needed && qp.stage === 'unfound') {
       qp.stage = 'found';
@@ -7653,6 +8152,11 @@ export class Game {
       regionVisits: { ...this.regionVisits },
       resin: this.resin,
       resinUpdatedAt: this.resinUpdatedAt,
+      trainerLevel: this.trainerLevel,
+      trainerXp: this.trainerXp,
+      metaNodes: [...this.metaNodes],
+      worldLevelTier: this.worldLevelTier,
+      collectionMilestones: [...this.collectionMilestones],
       settings: { ...this.settings, keyBindings: normalizeKeyBindings(this.settings.keyBindings), audio: { ...this.settings.audio }, graphics: { ...defaultGraphicsSettings(), ...this.settings.graphics }, cutscene: { ...defaultCutsceneSettings(), ...this.settings.cutscene }, interface: { ...defaultInterfaceSettings(), ...this.settings.interface } }
     };
   }
@@ -7723,10 +8227,10 @@ export class Game {
   static migrateSave(s: unknown): GameSave | null {
     if (!s || typeof s !== 'object') return null;
     const v = s as Partial<GameSave>;
-    if (v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === 6 || v.version === 7 || v.version === 8 || v.version === SAVE_VERSION) {
+    if (v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === 6 || v.version === 7 || v.version === 8 || v.version === 9 || v.version === SAVE_VERSION) {
       // v2/v3 -> v3 shape, v4 audio/codex fields, v5 exploration, v6 Armory,
-      // v7 board quests, v8 tag-gauge persistence, then v9 per-gym drafts
-      // (optional gymDrafts; absent => the walking party, identical to v8).
+      // v7 board quests, v8 tag-gauge persistence, v9 per-gym drafts, v10 Trainer
+      // track + meta dial (optional fields; absent => defaults, plays as before).
       const migrated = migrateTagGaugeSave(migratePhase3Save(v as unknown as { version: number; [k: string]: unknown }));
       return Game.validateSave(migrated) ? migrated : null;
     }
@@ -7972,11 +8476,47 @@ export class Game {
 
   // ---------- kill rewards ----------
 
+  /** Bank XP onto a roster entry, handling both the live-unit and benched cases,
+   * level normalization, the recruit ceiling, and the level-up presentation. */
+  private applyRosterXp(rec: RosterEntry, xp: number, cap: number): void {
+    if (xp <= 0) return;
+    if (rec.unit) {
+      // recruit ceiling (§3.4): XP banks past the cap, the level stays clamped
+      const gained = rec.unit.addXp(xp, cap);
+      if (gained > 0) {
+        rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.unit.level);
+        rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.unit.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
+        rec.masteryRanks = normalizeRosterMasteryRanks(rec.heroId, rec.unit.level, rec.abilityLevels, rec.masteryRanks, rec.talentPicks, rec.attributePoints);
+        rec.unit.refresh(this.sim.time);
+        // level-up heals the gained stats portion
+        rec.unit.hp = Math.min(rec.unit.stats.maxHp, rec.unit.hp + gained * 80);
+        this.playPresentationEventNow({ t: 'levelup', uid: rec.unit.uid, level: rec.unit.level });
+        this.msg(`${REG.hero(rec.heroId).name} reached level ${rec.unit.level}! Skill point available.`, 'good');
+      }
+      rec.level = rec.unit.level;
+      rec.xp = rec.unit.xp;
+    } else {
+      rec.xp = Math.min(rec.xp + xp, xpForLevel(TUNING.levelCap));
+      const newLevel = Math.min(levelFromXp(rec.xp), cap);
+      if (newLevel > rec.level) {
+        rec.level = newLevel;
+        rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.level);
+        rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
+        rec.masteryRanks = normalizeRosterMasteryRanks(rec.heroId, rec.level, rec.abilityLevels, rec.masteryRanks, rec.talentPicks, rec.attributePoints);
+        this.msg(`${REG.hero(rec.heroId).name} reached level ${newLevel}! Skill point available.`, 'good');
+      }
+    }
+  }
+
   private handleKillCredit(ev: Extract<SimEvent, { t: 'kill-credit' }>): void {
     const killer = this.sim.unit(ev.killerUid);
     if (!killer || killer.team !== 0) return; // only player-team kills pay
     const victim = this.sim.unit(ev.victimUid);
-    const bounty = scaledBounty(ev.bounty, this.region.id, 'normal', victim?.tier, victim?.star ?? 1);
+    const encounterWl = victim?.encounterWorldLevel ?? 0;
+    const baseBounty = scaledBounty(ev.bounty, this.region.id, 'normal', victim?.tier, victim?.star ?? 1);
+    // §2.3: a higher featured-encounter World Level pays more gold + xp.
+    const wlRewardMult = 1 + encounterWl * TUNING.worldLevel.rewardPerLevel;
+    const bounty = { xp: baseBounty.xp * wlRewardMult, gold: Math.round(baseBounty.gold * wlRewardMult) };
     const states = this.party.map((rec, i) => ({
       heroId: rec.heroId,
       isActive: i === this.activeIdx,
@@ -7984,38 +8524,31 @@ export class Game {
         i === this.activeIdx ||
         this.sim.time - rec.lastCombatAt <= TUNING.participantWindowSec
     }));
-    const reward = computeKillReward(bounty, states, ev.lastHitByPlayer);
+    // Party XP amp (PROGRESSION §5): the active hero's aggregated `partyXpAmpPct`
+    // lifts the bench/participant XP share toward the active rate.
+    const partyXpAmpPct = this.activeUnit()?.stats.partyXpAmpPct ?? 0;
+    const reward = computeKillReward(bounty, states, ev.lastHitByPlayer, partyXpAmpPct);
     this.awardGold(reward.gold, ev.lastHitByPlayer ? 'lasthit' : 'kill', victim?.pos, true);
     const cap = this.recruitLevelCap();
     for (const r of reward.perHeroXp) {
       const rec = this.party.find((p) => p.heroId === r.heroId)!;
-      const overflowGold = overflowXpToGold(rec.level, rec.unit ? rec.unit.xp : rec.xp, r.xp);
-      this.awardGold(overflowGold, 'overflow', victim?.pos, true);
-      if (rec.unit) {
-        // recruit ceiling (§3.4): XP banks past the cap, the level stays clamped
-        const gained = rec.unit.addXp(r.xp, cap);
-        if (gained > 0) {
-          rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.unit.level);
-          rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.unit.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
-          rec.masteryRanks = normalizeRosterMasteryRanks(rec.heroId, rec.unit.level, rec.abilityLevels, rec.masteryRanks, rec.talentPicks, rec.attributePoints);
-          rec.unit.refresh(this.sim.time);
-          // level-up heals the gained stats portion
-          rec.unit.hp = Math.min(rec.unit.stats.maxHp, rec.unit.hp + gained * 80);
-          this.playPresentationEventNow({ t: 'levelup', uid: rec.unit.uid, level: rec.unit.level });
-          this.msg(`${REG.hero(rec.heroId).name} reached level ${rec.unit.level}! Skill point available.`, 'good');
-        }
-        rec.level = rec.unit.level;
-        rec.xp = rec.unit.xp;
-      } else {
-        rec.xp = Math.min(rec.xp + r.xp, xpForLevel(TUNING.levelCap));
-        const newLevel = Math.min(levelFromXp(rec.xp), cap);
-        if (newLevel > rec.level) {
-          rec.level = newLevel;
-          rec.abilityLevels = normalizeAbilityLevels(REG.hero(rec.heroId), rec.abilityLevels, rec.level);
-          rec.attributePoints = normalizeAttributePoints(rec.heroId, rec.level, rec.abilityLevels, rec.talentPicks, rec.attributePoints);
-          rec.masteryRanks = normalizeRosterMasteryRanks(rec.heroId, rec.level, rec.abilityLevels, rec.masteryRanks, rec.talentPicks, rec.attributePoints);
-          this.msg(`${REG.hero(rec.heroId).name} reached level ${newLevel}! Skill point available.`, 'good');
-        }
+      // Post-cap overflow splits into a gold share + banked Trainer XP (§4.2).
+      const split = overflowSplit(rec.level, rec.unit ? rec.unit.xp : rec.xp, r.xp);
+      this.awardGold(split.gold, 'overflow', victim?.pos, true);
+      this.awardTrainerXp(split.trainerXp);
+      this.applyRosterXp(rec, r.xp, cap);
+    }
+
+    // Soul Ledger (PROGRESSION §5): the carrier funnels a bonus XP share to one bench
+    // recruit (the lowest-level recruited bench hero), accelerating roster breadth.
+    if (this.activeUnit()?.items.some((it) => it?.defId === 'soul-ledger')) {
+      const activeShare = reward.perHeroXp.find((r) => r.heroId === this.party[this.activeIdx]?.heroId)?.xp ?? 0;
+      const funnel = activeShare * TUNING.nativeItems.soulLedgerFunnelPct;
+      if (funnel > 0) {
+        const bench = this.party
+          .filter((p, i) => i !== this.activeIdx && this.recruited.has(p.heroId))
+          .sort((a, b) => a.level - b.level)[0];
+        if (bench) this.applyRosterXp(bench, funnel, cap);
       }
     }
 
@@ -8023,8 +8556,12 @@ export class Game {
     // Overworld kills roll their loot at the region's combat tier so the nightmare/hell
     // drop columns are live in deep regions, matching the creep-combat scaling (GAMEPLAY_2.0 §0.2).
     if (victim && victim.kind === 'creep' && victim.tier) {
-      this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid, creepCombatTier(this.region.id), victim.pos);
-      if (this.eliteCreepUids.delete(ev.victimUid)) this.rollEliteCreepDrop(victim.tier, ev.victimUid, victim.pos);
+      // §2.3/§2.4: World Level lifts the grade floor; killing while a ≥2-step tag
+      // chain or a live reaction is up nudges it one grade higher and brightens the beam.
+      const comboLive = this.comboLootBonusLive(victim);
+      const gradeBump = encounterWl * TUNING.worldLevel.rewardPerLevel + (comboLive ? 1 : 0);
+      this.rollItemDropsForCreep(victim.creepId, victim.tier, ev.victimUid, creepCombatTier(this.region.id), victim.pos, gradeBump, comboLive);
+      if (this.eliteCreepUids.delete(ev.victimUid)) this.rollEliteCreepDrop(victim.tier, ev.victimUid, victim.pos, gradeBump, comboLive);
       this.rollNeutralFor(victim.tier, ev.victimUid);
       this.advanceQuests({ kind: 'kill-creeps', amount: 1, tier: victim.tier, regionId: this.region.id });
     }
@@ -8057,6 +8594,7 @@ export class Game {
     const def = REG.creep(ev.creepId);
     this.codexUnlock('creep:' + ev.creepId); // capturing is the encounter (§3.14)
     this.advanceQuests({ kind: 'capture-creeps', amount: 1, tier: def.tier, regionId });
+    this.awardTrainerXp(TUNING.trainer.captureXp); // collection beat (§4.4)
     this.msg(`Captured ${def.name}!`, 'good');
     const { list, merges } = mergeCreeps(this.caught);
     this.caught = list;
@@ -8296,8 +8834,9 @@ export class Game {
       return false;
     }
     u.order = { kind: 'stop' };
-    this.traversal = { kind: 'glide', t: 0, dur: TUNING.traversal.glideDescentSec, fromTier: this.heroTier, toTier: Math.max(0, this.heroTier - 1) };
-    u.setCastGesture('dash', { now: this.sim.time, lockUntil: this.sim.time + TUNING.traversal.glideDescentSec });
+    const glideDur = TUNING.traversal.glideDescentSec / (this.skyfeatherAnklet() ? TUNING.nativeItems.skyfeatherGlideSpeedMult : 1);
+    this.traversal = { kind: 'glide', t: 0, dur: glideDur, fromTier: this.heroTier, toTier: Math.max(0, this.heroTier - 1) };
+    u.setCastGesture('dash', { now: this.sim.time, lockUntil: this.sim.time + glideDur });
     return true;
   }
 
@@ -8307,7 +8846,7 @@ export class Game {
     if (this.traversal) {
       const tr = this.traversal;
       if (tr.kind === 'climb') {
-        this.stamina = Math.max(0, this.stamina - TUNING.traversal.climbDrainPerSec * dt);
+        this.stamina = Math.max(0, this.stamina - TUNING.traversal.climbDrainPerSec * this.skyfeatherDrainMult() * dt);
         this.staminaRegenReadyAt = this.sim.time + TUNING.traversal.regenDelaySec;
         if (this.stamina <= 0) {
           // ran dry mid-climb: slide back to where we started
@@ -8334,7 +8873,7 @@ export class Game {
     const zone = this.waterZoneAt(u.pos);
     if (zone) {
       this.setSwimMod(u, true);
-      this.stamina = Math.max(0, this.stamina - TUNING.traversal.swimDrainPerSec * dt);
+      this.stamina = Math.max(0, this.stamina - TUNING.traversal.swimDrainPerSec * this.skyfeatherDrainMult() * dt);
       this.staminaRegenReadyAt = this.sim.time + TUNING.traversal.regenDelaySec;
       if (zone.deep && this.stamina <= 0 && this.lastSafePos) {
         u.pos = { ...this.lastSafePos };
@@ -8548,8 +9087,9 @@ export class Game {
     }
 
     // drain + route events
-    this.frameEvents = [...this.sim.events.drain(), ...this.queuedPresentationEvents];
-    this.queuedPresentationEvents = [];
+    this.frameEvents = this.sim.events.drain();
+    if (this.queuedPresentationEvents.length) this.frameEvents.push(...this.queuedPresentationEvents);
+    this.queuedPresentationEvents.length = 0;
     this.audio.setListener?.(this.activeUnit()?.pos ?? null);
     for (const ev of this.frameEvents) {
       this.scene.pushEvent(ev, this.sim);
@@ -8647,6 +9187,6 @@ export class Game {
     const cinematicView = this.cinematicPresentationView();
     this.audio.update?.({ biome: this.region.biome, dayTime: this.dayTime, inCombat: this.inCombat(), dt });
     this.scene.syncQuestGivers?.(this.questGiverViews());
-    this.scene.update(this.sim, this.activeUnit(), dt, this.dayTime, cinematicView, this.visibleGroundItemDrops());
+    this.scene.update(this.sim, this.activeUnit(), dt, this.dayTime, cinematicView, this.visibleGroundItemDrops(), this.inCombat());
   }
 }

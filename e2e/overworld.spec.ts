@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { boot, clearCinematics, state, watchPageErrors, expectNoPageErrors } from './helpers';
+import { worldLevelShieldFraction } from '../src/core/progression';
 
 // Real-world overworld scenarios. The recent collision-hitbox work (props now
 // carry movement/projectile bodies) and the loot rehaul (drops land on the
@@ -169,6 +170,50 @@ test.describe('overworld — collision & navigation', () => {
     expect(result.pos.y).toBeGreaterThanOrEqual(0);
     expect(result.pos.x).toBeLessThanOrEqual(result.bounds.w);
     expect(result.pos.y).toBeLessThanOrEqual(result.bounds.h);
+    expectNoPageErrors(errors);
+  });
+});
+
+test.describe('overworld — World-Level elite texture', () => {
+  test('the live elite texture path scales shield HP from the World-Level texture term', async ({ page }) => {
+    const errors = watchPageErrors(page);
+    await boot(page, { hero: 'juggernaut', seed: 68 });
+    await clearCinematics(page);
+
+    const result = await page.evaluate(() => {
+      const g = (window as any).__game;
+      const t = (window as any).__test;
+      const fakeRng = {
+        next: () => 0.99,
+        chance: () => false,
+        range: (min: number) => min,
+        int: (min: number) => min,
+        pick: <T>(arr: T[]) => arr[0]
+      };
+
+      const texture = (wl: number) => {
+        t.clearHostiles();
+        t.spawnWildCreepNearActive({ count: 1 });
+        const hero = g.activeUnit();
+        const creep = g.sim.unitsArr.find((u: any) => u.alive && u.team !== hero.team);
+        if (!creep) throw new Error('failed to spawn live creep for texture test');
+        g.textureOverworldElite(creep, wl, fakeRng);
+        return {
+          maxHp: creep.stats.maxHp,
+          shieldHp: creep.elementalShield?.maxHp ?? 0,
+          weakMult: creep.elementalShield?.weakMult ?? 0,
+          weaknessCount: creep.elementalShield?.weakTo?.length ?? 0
+        };
+      };
+
+      return { wl0: texture(0), wl8: texture(8) };
+    });
+
+    expect(result.wl0.shieldHp).toBe(Math.round(result.wl0.maxHp * worldLevelShieldFraction(0)));
+    expect(result.wl8.shieldHp).toBe(Math.round(result.wl8.maxHp * worldLevelShieldFraction(8)));
+    expect(result.wl8.shieldHp / result.wl8.maxHp).toBeGreaterThan(result.wl0.shieldHp / result.wl0.maxHp);
+    expect(result.wl8.weakMult).toBeGreaterThan(1);
+    expect(result.wl8.weaknessCount).toBeGreaterThan(0);
     expectNoPageErrors(errors);
   });
 });

@@ -24,7 +24,9 @@ core (`src/core/`) stays untouched in its resolution layer (no `three`, no DOM,
 deterministic for a seed); everything is additive and reversible; the macro hero
 ceiling (level 30 / 15 ability pts / 14 mastery pts / 6 items) is left intact.
 
-Status: **draft**. Numbers are starting points, tunable in `tuning.ts`.
+Status: **shipped** (P0–P5, all slices green; see `DECISIONS.md` 2026-06-14 rows).
+Tuning lives in `tuning.ts`; the §9 balance pass inverted the World-Level curve so
+`texturePerLevel` dominates the HP term and feeds the reaction-shield wall.
 
 Live baselines this spec builds on: `SAVE_VERSION === 7` (`systems/game.ts`); creep
 scaling is `creepCombatScale()` in `core/unit.ts:613`; the migration chain is
@@ -485,7 +487,10 @@ and loot-source cards. A slice is done when the player can see why the system ma
 6. **Original items (§5)** ship with the slice whose loop they serve (XP/collection
    with P4, swap/exploration with P0, raid relics with P3); each is a data `ItemDef`
    plus, only for `Mentor's Standard`, the one `StatMods` field. None blocks its slice.
-7. **P5 — Balance pass** in `tuning.ts`. Deferrable.
+7. **P5 — Balance pass** in `tuning.ts`. **Shipped**: World-Level curve inverted so
+   `texturePerLevel` (0.12) dominates `hpPerLevel` (0.08) ≥ `damagePerLevel` (0.05),
+   and `texture` made load-bearing by scaling the elemental-shield wall; guarded by a
+   real "texture dominates" invariant in `combat-scaling.test.ts`.
 
 After P0 the overworld is fun without flattening early trash; after P1 the autobattler
 is a puzzle; P3–P4 make raids the execution check, the chase, and collection the spine.

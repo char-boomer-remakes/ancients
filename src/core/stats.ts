@@ -34,6 +34,7 @@ export interface DerivedStats {
   reactionAmpPct: number;
   elementalGaugeSec: number;
   staminaBonus: number;
+  partyXpAmpPct: number;
 }
 
 export interface StatInputs {
@@ -113,7 +114,8 @@ export function deriveStats(inp: StatInputs): DerivedStats {
     tagChainWindowBonusSec: M(mods, 'tagChainWindowBonusSec'),
     reactionAmpPct: M(mods, 'reactionAmpPct'),
     elementalGaugeSec: M(mods, 'elementalGaugeSec'),
-    staminaBonus: M(mods, 'staminaBonus')
+    staminaBonus: M(mods, 'staminaBonus'),
+    partyXpAmpPct: M(mods, 'partyXpAmpPct')
   };
 }
 
