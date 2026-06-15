@@ -55,9 +55,15 @@ describe('save round-trip and migration', () => {
       hudOpacity: 1,
       minimapSize: 160,
       minimapOpacity: 1,
+      minimapLegend: true,
       helpOverlay: true,
+      partyPanel: true,
       questTracker: true,
-      questTrackerMax: 3
+      questTrackerMax: 3,
+      toasts: true,
+      killfeed: true,
+      floatingHints: true,
+      combatReadout: true
     });
     expect(Game.validateSave(save)).toBe(true);
   });
@@ -173,7 +179,22 @@ describe('save round-trip and migration', () => {
     save.settings.audio = { master: 0.55, sfx: 0.4, ui: 0.35, voice: 0.9, stinger: 0.25, music: 0.5, muted: true };
     save.settings.minimap = false;
     save.settings.keyBindings = { bindings: { 'ability-1': 'u', journal: 'l' }, mouseMoveButton: 'right' };
-    save.settings.interface = { uiScale: 1.25, textScale: 1.1, hudOpacity: 0.8, minimapSize: 220, minimapOpacity: 0.65, helpOverlay: false, questTracker: false, questTrackerMax: 2 };
+    save.settings.interface = {
+      uiScale: 1.25,
+      textScale: 1.1,
+      hudOpacity: 0.8,
+      minimapSize: 220,
+      minimapOpacity: 0.65,
+      minimapLegend: false,
+      helpOverlay: false,
+      partyPanel: false,
+      questTracker: false,
+      questTrackerMax: 2,
+      toasts: false,
+      killfeed: false,
+      floatingHints: false,
+      combatReadout: false
+    };
 
     const json = JSON.stringify(save);
     const reloaded = Game.migrateSave(JSON.parse(json) as unknown);
@@ -243,9 +264,15 @@ describe('save round-trip and migration', () => {
       hudOpacity: 1,
       minimapSize: 160,
       minimapOpacity: 1,
+      minimapLegend: true,
       helpOverlay: true,
+      partyPanel: true,
       questTracker: true,
-      questTrackerMax: 3
+      questTrackerMax: 3,
+      toasts: true,
+      killfeed: true,
+      floatingHints: true,
+      combatReadout: true
     });
     expect(Game.validateSave(migrated!)).toBe(true);
   });

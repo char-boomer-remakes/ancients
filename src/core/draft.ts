@@ -103,8 +103,10 @@ function checkRule(rule: DraftRule, heroes: MacroHeroSetup[]): RuleStatus {
       return { rule, ok, label, detail: ok ? 'all unique' : 'duplicate' };
     }
     case 'level-cap': {
-      const offenders = heroes.filter((h) => (h.level ?? 1) > rule.max);
-      return { rule, ok: offenders.length === 0, label, detail: offenders.length ? `${offenders.length} over` : 'ok' };
+      // A cap normalizes overleveled heroes down to it (see cappedLevel); it never
+      // locks them out. Always legal — we just report how many will be scaled.
+      const scaled = heroes.filter((h) => (h.level ?? 1) > rule.max).length;
+      return { rule, ok: true, label, detail: scaled ? `${scaled} scaled to ${rule.max}` : 'ok' };
     }
     case 'item-tier-cap': {
       const offenders = heroes.filter((h) => (h.items ?? []).some((id) => itemTierRank(id) > rule.max));
@@ -139,7 +141,8 @@ function canAdd(format: DraftFormat, team: MacroHeroSetup[], hero: MacroHeroSetu
       case 'cap-role': if (rolesOf(hero.heroId).includes(rule.role) && roleCount(team, rule.role) + 1 > rule.max) return false; break;
       case 'cap-attribute': if (attrOf(hero.heroId) === rule.attribute && attrCount(team, rule.attribute) + 1 > rule.max) return false; break;
       case 'unique-attribute': if (team.some((h) => attrOf(h.heroId) === attrOf(hero.heroId))) return false; break;
-      case 'level-cap': if ((hero.level ?? 1) > rule.max) return false; break;
+      case 'level-cap': break; // never a gate — overleveled heroes are clamped to the cap at field time
+
       case 'item-tier-cap': if ((hero.items ?? []).some((id) => itemTierRank(id) > rule.max)) return false; break;
       case 'point-budget': {
         const spent = team.reduce((acc, h) => acc + heroCost(h.heroId, rule.costByRole), 0);

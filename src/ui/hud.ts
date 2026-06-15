@@ -15,7 +15,7 @@ import { defaultInterfaceSettings } from '../core/phase4';
 import { abilityMaxLevel, abilityRankRequiredHeroLevel, levelArr } from '../core/values';
 import { deriveMasteryTrees, masteryNodeIndex, masteryNodeUnlocked, masteryPointsForLevel } from '../core/mastery';
 import { buildDefaultGambit } from '../core/controllers';
-import { BOARD_COLS, BOARD_ROWS, DOCTRINES, defaultFormation, doctrineFormation, placementHint, reachProfile, type DoctrineId } from '../core/board';
+import { BOARD_COL_LABELS, BOARD_COLS, BOARD_ROWS, DRAFT_TEAM_SIZE, DOCTRINES, defaultFormation, doctrineFormation, placementHint, reachProfile, type BoardCol, type BoardSlot, type DoctrineId } from '../core/board';
 import { describeRule, validateDraft } from '../core/draft';
 import { statLabel, fmtStatValue, statLines, buildAbilityCard, buildItemCard, buildNeutralItemCard, buildHeroCard, type TooltipCard } from '../core/describe';
 import { abilityIcon, itemIcon, neutralItemIcon, heroPortrait } from '../engine/icons';
@@ -402,6 +402,7 @@ export class Hud {
   private killfeed: KillfeedEntry[] = [];
   private abilityCooldowns = new Map<string, number>();
   private abilityReadyUntil = new Map<string, number>();
+  private masteryPanelOpen = false;
   private lastUiHoverEl: Element | null = null;
   private heartbeatNextAt = 0;
   private minimapPings: { x: number; y: number; at: number }[] = [];
@@ -516,6 +517,12 @@ export class Hud {
     this.heroPanel.addEventListener('click', (e) => {
       const el = e.target as HTMLElement;
       if (el.closest('#character-open')) { this.toggleModal('character'); return; }
+      if (el.closest('#mastery-toggle')) {
+        this.masteryPanelOpen = !this.masteryPanelOpen;
+        this.lastHeroPanelHtml = '';
+        this.playUi(this.masteryPanelOpen ? 'open' : 'close');
+        return;
+      }
       if (el.closest('#mastery-respec')) { this.game.respecMasteries(this.game.activeIdx); return; }
       const skill = el.closest('[data-skill]') as HTMLElement | null;
       if (skill?.dataset.skill) { this.game.levelAbility(this.game.activeIdx, Number(skill.dataset.skill)); return; }
@@ -1210,9 +1217,10 @@ export class Hud {
 
   private renderMinimap(): void {
     const g = this.game;
+    const ui = this.interfaceSettings();
     const hidden = g.settings.minimap === false;
     this.minimap.classList.toggle('hidden', hidden);
-    this.minimapLegend.classList.toggle('hidden', hidden);
+    this.minimapLegend.classList.toggle('hidden', hidden || !ui.minimapLegend);
     if (hidden) return;
     const ctx = this.minimapCtx;
     const s = this.minimap.width;
@@ -1325,6 +1333,11 @@ export class Hud {
   }
 
   private renderMinimapLegend(): void {
+    if (!this.interfaceSettings().minimapLegend) {
+      this.minimapLegend.innerHTML = '';
+      this.lastMinimapLegendKey = '';
+      return;
+    }
     const g = this.game;
     const present = Hud.MINIMAP_CATEGORIES.filter((cat) => cat.legend && this.minimapCategoryPresent(cat.id));
     const key = present.map((c) => `${c.id}:${this.minimapHidden.has(c.id) ? 0 : 1}`).join('|');
@@ -1530,6 +1543,12 @@ export class Hud {
   // ---------- party frames ----------
 
   private renderParty(): void {
+    if (!this.interfaceSettings().partyPanel) {
+      if (this.partyCol.innerHTML !== '') this.partyCol.innerHTML = '';
+      this.partyCol.classList.add('hidden');
+      return;
+    }
+    this.partyCol.classList.remove('hidden');
     const g = this.game;
     let html = '';
     g.party.forEach((rec, i) => {
@@ -1734,36 +1753,43 @@ export class Hud {
       : 'Level cap';
     const hpRegenTitle = `HP regen: base + flat ${fmtRegen(u.stats.hpRegen)}/s, max-HP ${fmtRegen((u.stats.maxHp * u.stats.hpRegenPctMax) / 100)}/s, total +${fmtRegen(regen.hp)}/s`;
     const manaRegenTitle = `Mana regen: base + flat ${fmtRegen(u.stats.manaRegen)}/s, max-mana ${fmtRegen((u.stats.maxMana * u.stats.manaRegenPctMax) / 100)}/s, total +${fmtRegen(regen.mana)}/s`;
-    const masteryHtml = `
-      <div class="mastery-panel">
-        <div class="mastery-head">
-          <b>Masteries</b>
-          <span>${pendingMasteryPoints} MP available · ${masterySpent}/${masteryPointsForLevel(rec.level)} spent</span>
-          ${masterySpent > 0 ? '<button class="btn tiny mastery-respec" id="mastery-respec">Refund</button>' : ''}
-        </div>
-        <div class="mastery-grid">
-          ${masteryBranches.map((branch, branchIdx) => {
-            const ability = def.abilities[branchIdx];
-            return `<div class="mastery-branch">
-              <div class="mastery-ability"><img src="${abilityIcon(ability)}" alt=""><span>${esc(branch.name)}</span></div>
-              <div class="mastery-nodes">
-                ${branch.nodes.map((node, tierIdx) => {
-                  const nodeIdx = masteryNodeIndex(branchIdx, tierIdx + 1);
-                  const bought = (rec.masteryRanks[nodeIdx] ?? 0) > 0;
-                  const unlocked = masteryNodeUnlocked(def, rec.level, rec.abilityLevels, nodeIdx);
-                  const canBuy = g.canBuyMasteryNode(g.activeIdx, nodeIdx);
-                  const title = `${node.name}: ${node.description}${unlocked ? '' : ' (locked by ability rank)'}`;
-                  return `<button class="mastery-node ${node.kind} ${bought ? 'bought' : ''} ${unlocked ? 'unlocked' : 'locked'}" data-mastery="${nodeIdx}" ${canBuy ? '' : 'disabled'} title="${esc(title)}">${tierIdx + 1}</button>`;
-                }).join('')}
-              </div>
-            </div>`;
-          }).join('')}
-        </div>
+    const masteryTreeHtml = this.masteryPanelOpen
+      ? `<div class="mastery-panel">
+          <div class="mastery-head">
+            <b>Masteries</b>
+            <span>${pendingMasteryPoints} MP available · ${masterySpent}/${masteryPointsForLevel(rec.level)} spent</span>
+            ${masterySpent > 0 ? '<button class="btn tiny mastery-respec" id="mastery-respec">Refund</button>' : ''}
+          </div>
+          <div class="mastery-grid">
+            ${masteryBranches.map((branch, branchIdx) => {
+              const ability = def.abilities[branchIdx];
+              return `<div class="mastery-branch">
+                <div class="mastery-ability"><img src="${abilityIcon(ability)}" alt=""><span>${esc(branch.name)}</span></div>
+                <div class="mastery-nodes">
+                  ${branch.nodes.map((node, tierIdx) => {
+                    const nodeIdx = masteryNodeIndex(branchIdx, tierIdx + 1);
+                    const bought = (rec.masteryRanks[nodeIdx] ?? 0) > 0;
+                    const unlocked = masteryNodeUnlocked(def, rec.level, rec.abilityLevels, nodeIdx);
+                    const canBuy = g.canBuyMasteryNode(g.activeIdx, nodeIdx);
+                    const title = `${node.name}: ${node.description}${unlocked ? '' : ' (locked by ability rank)'}`;
+                    return `<button class="mastery-node ${node.kind} ${bought ? 'bought' : ''} ${unlocked ? 'unlocked' : 'locked'}" data-mastery="${nodeIdx}" ${canBuy ? '' : 'disabled'} title="${esc(title)}">${tierIdx + 1}</button>`;
+                  }).join('')}
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`
+      : '';
+    const masteryButtonHtml = `
+      <div class="mastery-dock">
+        <button class="btn small mastery-toggle ${pendingMasteryPoints > 0 ? 'ready' : ''}" id="mastery-toggle" aria-expanded="${this.masteryPanelOpen ? 'true' : 'false'}">
+          Masteries ${pendingMasteryPoints > 0 ? `(${pendingMasteryPoints})` : `${masterySpent}/${masteryPointsForLevel(rec.level)}`}
+        </button>
+        ${masteryTreeHtml}
       </div>`;
-    const skillSpendHtml = (pendingAbilityPoints > 0 || pendingMasteryPoints > 0)
+    const skillSpendHtml = pendingAbilityPoints > 0
       ? `<div class="skill-points">
           ${pendingAbilityPoints > 0 ? `<span><b>${pendingAbilityPoints}</b> ability point${pendingAbilityPoints === 1 ? '' : 's'}</span>` : ''}
-          ${pendingMasteryPoints > 0 ? `<span><b>${pendingMasteryPoints}</b> mastery point${pendingMasteryPoints === 1 ? '' : 's'}</span>` : ''}
         </div>`
       : '';
 
@@ -1782,7 +1808,7 @@ export class Hud {
           <div class="bar xp"><div style="width:${xp.pct * 100}%"></div><span>${xpText}</span></div>
           ${this.statusPipsHtml(u, 'hero', 6)}
           ${skillSpendHtml}
-          ${masteryHtml}
+          ${masteryButtonHtml}
           <div class="hp-stats">DMG ${Math.round(u.stats.damage)} · ARM ${u.stats.armor.toFixed(1)} · MS ${Math.round(u.stats.moveSpeed)} · HP +${fmtRegen(regen.hp)}/s · MP +${fmtRegen(regen.mana)}/s</div>
         </div>
       </div>
@@ -1815,6 +1841,13 @@ export class Hud {
 
   private renderToasts(): void {
     const g = this.game;
+    if (!this.interfaceSettings().toasts) {
+      this.lastShownToastId = g.toasts[g.toasts.length - 1]?.id ?? this.lastShownToastId;
+      this.toastCol.innerHTML = '';
+      this.toastCol.classList.add('hidden');
+      return;
+    }
+    this.toastCol.classList.remove('hidden');
     for (const t of g.toasts) {
       if (t.id <= this.lastShownToastId) continue;
       this.lastShownToastId = t.id;
@@ -1861,6 +1894,12 @@ export class Hud {
   }
 
   private renderKillfeed(): void {
+    if (!this.interfaceSettings().killfeed) {
+      this.killfeed = [];
+      this.killfeedLane.classList.add('hidden');
+      this.killfeedLane.innerHTML = '';
+      return;
+    }
     const now = performance.now();
     this.killfeed = this.killfeed.filter((entry) => now - entry.at < 6500);
     if (this.killfeed.length === 0) {
@@ -2152,6 +2191,11 @@ export class Hud {
   }
 
   private renderHint(): void {
+    if (!this.interfaceSettings().floatingHints) {
+      this.hint.textContent = '';
+      this.hint.classList.add('hidden');
+      return;
+    }
     const g = this.game;
     let hint = '';
     if (this.input.attackMoveArmed()) {
@@ -3144,10 +3188,21 @@ export class Hud {
     return null;
   }
 
-  private draftFreeCell(preferCol: number): { col: 0 | 1 | 2; row: number } {
-    const cols = [preferCol, 1, 0, 2].filter((c, i, a) => a.indexOf(c) === i);
+  private draftSlot(col: number, row: number): BoardSlot | null {
+    if (!Number.isInteger(col) || !Number.isInteger(row)) return null;
+    if (col < 0 || col >= BOARD_COLS || row < 0 || row >= BOARD_ROWS) return null;
+    return { col: col as BoardCol, row };
+  }
+
+  private draftFreeCell(preferCol: BoardCol): BoardSlot {
+    const centerCol = (BOARD_COLS - 1) / 2;
+    const cols = [preferCol, ...Array.from({ length: BOARD_COLS }, (_, col) => col)
+      .sort((a, b) => Math.abs(a - preferCol) - Math.abs(b - preferCol)
+        || Math.abs(a - centerCol) - Math.abs(b - centerCol)
+        || a - b)]
+      .filter((c, i, a) => a.indexOf(c) === i);
     for (const c of cols) for (let r = 0; r < BOARD_ROWS; r++) {
-      if (!this.draftCellHero(c, r)) return { col: c as 0 | 1 | 2, row: r };
+      if (!this.draftCellHero(c, r)) return { col: c as BoardCol, row: r };
     }
     return { col: 0, row: 0 };
   }
@@ -3155,6 +3210,8 @@ export class Hud {
   /** Place / swap the held hero onto a cell, or pick up the hero already there. */
   private draftPlaceAt(col: number, row: number): void {
     const d = this.draftEdit!;
+    const slot = this.draftSlot(col, row);
+    if (!slot) return;
     const occupant = this.draftCellHero(col, row);
     if (this.draftPick) {
       const moving = this.draftPick;
@@ -3163,7 +3220,7 @@ export class Hud {
         if (from) d.formation.placements[occupant] = { ...from }; // swap
         else delete d.formation.placements[occupant];             // bump to the bench strip
       }
-      d.formation.placements[moving] = { col: col as 0 | 1 | 2, row };
+      d.formation.placements[moving] = slot;
       this.draftPick = null;
     } else if (occupant) {
       this.draftPick = occupant; // pick up
@@ -3177,7 +3234,7 @@ export class Hud {
     const fielded = d.heroes.some((h) => h.heroId === heroId);
     if (fielded) {
       this.draftPick = this.draftPick === heroId ? null : heroId;
-    } else if (d.heroes.length < BOARD_ROWS) {
+    } else if (d.heroes.length < DRAFT_TEAM_SIZE) {
       d.heroes.push(this.game.draftHeroSetup(heroId));
       const hint = placementHint(REG.hero(heroId));
       d.formation.placements[heroId] = this.draftFreeCell(hint.col);
@@ -3227,8 +3284,10 @@ export class Hud {
     const id = this.draftDragId;
     if (!id) return;
     const d = this.draftEdit!;
+    const slot = this.draftSlot(col, row);
+    if (!slot) { this.draftDragId = null; return; }
     if (!d.heroes.some((h) => h.heroId === id)) {
-      if (d.heroes.length >= BOARD_ROWS) { this.draftDragId = null; return; }
+      if (d.heroes.length >= DRAFT_TEAM_SIZE) { this.draftDragId = null; return; }
       d.heroes.push(this.game.draftHeroSetup(id));
     }
     const occupant = this.draftCellHero(col, row);
@@ -3237,7 +3296,7 @@ export class Hud {
       if (from) d.formation.placements[occupant] = { ...from };
       else delete d.formation.placements[occupant];
     }
-    d.formation.placements[id] = { col: col as 0 | 1 | 2, row };
+    d.formation.placements[id] = slot;
     this.draftPick = null;
     this.draftDragId = null;
     this.renderDraftModal();
@@ -3249,7 +3308,7 @@ export class Hud {
     if (!id) return;
     const d = this.draftEdit!;
     if (!d.heroes.some((h) => h.heroId === id)) {
-      if (d.heroes.length >= BOARD_ROWS) { this.draftDragId = null; return; }
+      if (d.heroes.length >= DRAFT_TEAM_SIZE) { this.draftDragId = null; return; }
       d.heroes.push(this.game.draftHeroSetup(id));
     }
     delete d.formation.placements[id];
@@ -3337,11 +3396,11 @@ export class Hud {
     const pickDef = this.draftPick ? REG.hero(this.draftPick) : null;
     const hintCol = pickDef ? placementHint(pickDef).col : -1;
 
-    // 3 columns × 5 rows; render Back→Front left to right. The Front column carries a
+    // 4 columns × 4 rows; render Back→Front left to right. The Front column carries a
     // faint "enemy contact" overlay (§7) — the edge the opposing front collapses onto.
-    const colName = ['Back', 'Mid', 'Front'];
     let grid = '';
     for (let col = 0; col < BOARD_COLS; col++) {
+      const colName = BOARD_COL_LABELS[col] ?? `Col ${col + 1}`;
       let cells = '';
       for (let row = 0; row < BOARD_ROWS; row++) {
         const id = this.draftCellHero(col, row);
@@ -3349,13 +3408,13 @@ export class Hud {
         const held = id && id === this.draftPick ? 'held' : '';
         const hinted = col === hintCol ? 'hinted' : '';
         const drag = def ? `draggable="true" data-drag="${id}"` : '';
-        cells += `<button class="bd-cell ${held} ${hinted}" data-cell="${col}:${row}" ${drag} title="${colName[col]} · row ${row + 1}">
+        cells += `<button class="bd-cell ${held} ${hinted}" data-cell="${col}:${row}" ${drag} title="${colName} · row ${row + 1}">
           ${def ? `<img src="${heroPortrait(def.palette, def.name[0], 40, def.silhouette)}" alt=""><span>${esc(def.name)}</span>` : ''}
         </button>`;
       }
       const front = col === BOARD_COLS - 1 ? ' front-contact' : '';
       const contact = col === BOARD_COLS - 1 ? '<div class="bd-contact">⚔ enemy contact</div>' : '';
-      grid += `<div class="bd-col${front}"><div class="bd-col-h">${colName[col]}</div>${cells}${contact}</div>`;
+      grid += `<div class="bd-col${front}"><div class="bd-col-h">${colName}</div>${cells}${contact}</div>`;
     }
 
     // bench strip: fielded heroes without a cell
@@ -3381,7 +3440,7 @@ export class Hud {
     const hints = d.heroes.map((h) => {
       const def = REG.hero(h.heroId);
       const hint = placementHint(def);
-      return `<div class="bd-hint"><img src="${heroPortrait(def.palette, def.name[0], 24, def.silhouette)}" alt=""><b>${esc(def.name)}</b><em>${['Back', 'Mid', 'Front'][hint.col]}</em><span>${esc(hint.reason)}</span></div>`;
+      return `<div class="bd-hint"><img src="${heroPortrait(def.palette, def.name[0], 24, def.silhouette)}" alt=""><b>${esc(def.name)}</b><em>${esc(BOARD_COL_LABELS[hint.col])}</em><span>${esc(hint.reason)}</span></div>`;
     }).join('');
 
     const doctrines = DOCTRINES.map((doc) =>
@@ -3402,16 +3461,16 @@ export class Hud {
          </div>`
       : '';
 
-    const placed = d.heroes.length === BOARD_ROWS && d.heroes.every((h) => d.formation.placements[h.heroId]);
+    const placed = d.heroes.length === DRAFT_TEAM_SIZE && d.heroes.every((h) => d.formation.placements[h.heroId]);
     const ready = placed && validation.ok;
-    const commitHint = !validation.ok && d.heroes.length >= BOARD_ROWS
+    const commitHint = !validation.ok && d.heroes.length >= DRAFT_TEAM_SIZE
       ? `<div class="bd-illegal">Illegal under ${esc(gym.name)}'s format — fix the flagged rules to commit.</div>`
       : '';
 
     this.modalShell(
       `Draft &amp; Deploy — ${gym.name}`,
       `<div class="draft">
-        <p class="dim">Build a five from your recruited roster and place them on the board. Front bodies soak the engage; AoE casters want the middle; channels and skillshots want a protected back edge. ${this.draftPick ? `<b>Holding ${esc(REG.hero(this.draftPick).name)} — click a cell.</b>` : 'Drag a hero onto a cell, or click a hero then a cell.'}</p>
+        <p class="dim">Build a five from your recruited roster and place them on the 4×4 board. Front bodies soak the engage; AoE casters want the middle; channels and skillshots want a protected back edge. ${this.draftPick ? `<b>Holding ${esc(REG.hero(this.draftPick).name)} — click a cell.</b>` : 'Drag a hero onto a cell, or click a hero then a cell.'}</p>
         <div class="draft-main">
           <div class="bd-board">${grid}</div>
           <div class="draft-side">
@@ -3428,7 +3487,7 @@ export class Hud {
         <div class="bd-bench">${bench}</div>
         <h3>Draft loadouts</h3>
         <div class="bd-loadouts">${this.draftLoadoutsHtml()}</div>
-        <h3>Recruited (${d.heroes.length}/5 fielded)</h3>
+        <h3>Recruited (${d.heroes.length}/${DRAFT_TEAM_SIZE} fielded)</h3>
         <div class="bd-poolwrap">${pool}</div>
         ${commitHint}
         <div class="pf-foot">
@@ -4112,7 +4171,7 @@ export class Hud {
   //     focus, and the "ult ready → seize" prompt; full overlay during a live raid/gym ---
   private renderCombatReadout(): void {
     const r = this.game.combatReadout();
-    if (!r.active || this.game.cinematic.active) {
+    if (!this.interfaceSettings().combatReadout || !r.active || this.game.cinematic.active) {
       if (!this.combatReadout.classList.contains('hidden')) {
         this.combatReadout.classList.add('hidden');
         this.combatReadout.innerHTML = '';
@@ -4916,13 +4975,20 @@ export class Hud {
           <label class="opt-row"><input type="checkbox" id="opt-minimap" ${g.settings.minimap !== false ? 'checked' : ''}> Show minimap</label>
           <label class="opt-row">Minimap size <input type="range" id="opt-minimap-size" min="120" max="240" step="10" value="${ui.minimapSize}"></label>
           <label class="opt-row">Minimap opacity <input type="range" id="opt-minimap-opacity" min="0.35" max="1" step="0.05" value="${ui.minimapOpacity}"></label>
+          <label class="opt-row"><input type="checkbox" id="opt-minimap-legend" ${ui.minimapLegend ? 'checked' : ''}> Show minimap keys</label>
           <label class="opt-row"><input type="checkbox" id="opt-help-overlay" ${ui.helpOverlay ? 'checked' : ''}> Show help button</label>
+          <h3>HUD layers</h3>
+          <label class="opt-row"><input type="checkbox" id="opt-party-panel" ${ui.partyPanel ? 'checked' : ''}> Show party panel</label>
           <label class="opt-row"><input type="checkbox" id="opt-quest-tracker" ${ui.questTracker ? 'checked' : ''}> Show quest tracker</label>
           <label class="opt-row">Tracked quests
             <select id="opt-quest-tracker-max">
               ${([1, 2, 3] as const).map((v) => `<option value="${v}"${ui.questTrackerMax === v ? ' selected' : ''}>${v}</option>`).join('')}
             </select>
           </label>
+          <label class="opt-row"><input type="checkbox" id="opt-toasts" ${ui.toasts ? 'checked' : ''}> Show toasts</label>
+          <label class="opt-row"><input type="checkbox" id="opt-killfeed" ${ui.killfeed ? 'checked' : ''}> Show killfeed</label>
+          <label class="opt-row"><input type="checkbox" id="opt-floating-hints" ${ui.floatingHints ? 'checked' : ''}> Show interaction hints</label>
+          <label class="opt-row"><input type="checkbox" id="opt-combat-readout" ${ui.combatReadout ? 'checked' : ''}> Show combat readout</label>
           <h3>Gameplay</h3>
           <label class="opt-row"><input type="checkbox" id="opt-swap-charges" ${g.settings.swapCharges ? 'checked' : ''}> Swap charges (high-skill: 2 charges, no floor)</label>`;
 
@@ -5081,14 +5147,34 @@ export class Hud {
       this.interfaceSettings().minimapOpacity = clampNum(Number((e.target as HTMLInputElement).value), 0.35, 1);
       this.applyInterfaceSettings();
     });
+    this.modal.querySelector('#opt-minimap-legend')?.addEventListener('change', (e) => {
+      this.interfaceSettings().minimapLegend = (e.target as HTMLInputElement).checked;
+      this.lastMinimapLegendKey = '';
+      this.renderMinimap();
+    });
     this.modal.querySelector('#opt-help-overlay')?.addEventListener('change', (e) => {
       this.interfaceSettings().helpOverlay = (e.target as HTMLInputElement).checked;
+    });
+    this.modal.querySelector('#opt-party-panel')?.addEventListener('change', (e) => {
+      this.interfaceSettings().partyPanel = (e.target as HTMLInputElement).checked;
     });
     this.modal.querySelector('#opt-quest-tracker')?.addEventListener('change', (e) => {
       this.interfaceSettings().questTracker = (e.target as HTMLInputElement).checked;
     });
     this.modal.querySelector('#opt-quest-tracker-max')?.addEventListener('change', (e) => {
       this.interfaceSettings().questTrackerMax = Math.round(clampNum(Number((e.target as HTMLSelectElement).value), 1, 3));
+    });
+    this.modal.querySelector('#opt-toasts')?.addEventListener('change', (e) => {
+      this.interfaceSettings().toasts = (e.target as HTMLInputElement).checked;
+    });
+    this.modal.querySelector('#opt-killfeed')?.addEventListener('change', (e) => {
+      this.interfaceSettings().killfeed = (e.target as HTMLInputElement).checked;
+    });
+    this.modal.querySelector('#opt-floating-hints')?.addEventListener('change', (e) => {
+      this.interfaceSettings().floatingHints = (e.target as HTMLInputElement).checked;
+    });
+    this.modal.querySelector('#opt-combat-readout')?.addEventListener('change', (e) => {
+      this.interfaceSettings().combatReadout = (e.target as HTMLInputElement).checked;
     });
     this.modal.querySelector('#opt-swap-charges')?.addEventListener('change', (e) => {
       g.setSwapChargesEnabled((e.target as HTMLInputElement).checked);

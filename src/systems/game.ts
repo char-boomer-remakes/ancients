@@ -60,7 +60,7 @@ import { abilityMaxLevel, abilityRankRequiredHeroLevel, autoAbilityLevels, canLe
 import { MASTERY_NODE_COUNT, MASTERY_TIERS_PER_BRANCH, canBuyMasteryNode, deriveMasteryTrees, masteryNodeIndex, masteryNodeUnlocked, masteryPointsForLevel, masterySpent, normalizeMasteryRanks } from '../core/mastery';
 import { dist, fromAngle, norm, sub } from '../core/math2d';
 import { circleBody, collisionBodyPushOut, nearestPointOutsideCollisionBody, obstacleBlocksMovement } from '../core/collision';
-import { defaultFormation } from '../core/board';
+import { BOARD_COLS, DRAFT_TEAM_SIZE, defaultFormation, fitFormationToBoard } from '../core/board';
 import { chooseDraft, counterDraft, runPickBan, validateDraft, type CounterDraftResult, type DraftValidation } from '../core/draft';
 import { isDisabled, summarize } from '../core/status';
 import type { ActiveElement, ArmoryLoadouts, AuraSpec, BossDef, CollisionObstacleInput, CreepTier, CreepInstanceSave, CutsceneDef, DifficultyTier, DishDef, DomainDef, DraftFormat, DraftTeam, DropSource, DungeonDef, DungeonModifierDef, DungeonProgressSave, DungeonRoom, EchoProgress, EchoSpawnDef, EffectNode, GambitRule, GameSave, Formation, GraphicsSettings, GymDef, GroundItemDrop, HeroAugments, HeroLoadoutSlots, HeroSave, ItemDef, ItemDropTable, ItemGrade, ItemQuality, ItemRarity, ItemSave, ItemTier, LootBand, LoreEntryDef, MacroHeroSetup, MetaEffectKey, MetaNodeDef, NeutralItemDef, NeutralStashEntry, Order, QuestDef, QuestGiverDef, QuestKind, QuestProgress, QuestReward, QuestSave, QuestStatus, RaidDef, RegionDef, RolledAffix, RoomTemplate, RoomType, SeasonalEventDef, SimEvent, StingerId, StatModMap, StatusParams, TagArchetype, ValueRef, Vec2, ZoneSpec } from '../core/types';
@@ -241,7 +241,7 @@ function bindIfNeeded(item: ItemSave): ItemSave {
 // camps, capture/entourage, shop, shrine, day clock, save/load.
 // ------------------------------------------------------------------
 
-export const SAVE_VERSION = 10;
+export const SAVE_VERSION = 12;
 const SLOT_KEYS = ['ancients.save.1', 'ancients.save.2', 'ancients.save.3'];
 const AUTO_KEY = 'ancients.save.auto';
 
@@ -674,6 +674,19 @@ function migrateTagGaugeSave(s: GameSave | { version: number; [k: string]: unkno
       tagGaugeReadyAt: Math.max(0, typeof hero.tagGaugeReadyAt === 'number' ? hero.tagGaugeReadyAt : 0)
     }))
   };
+}
+
+/** Refit saved gym drafts onto the current board whenever the grid shape changed across
+ *  versions (3-col pre-v11, 5-col at v11, 4-col from v12). Columns map proportionally,
+ *  rows clamp, and any resulting overlap re-packs into free cells — always a legal board. */
+function migrateGymDraftBoards(save: GameSave, fromVersion: number): GameSave {
+  if (fromVersion >= SAVE_VERSION || !save.gymDrafts) return save;
+  const sourceCols = fromVersion <= 10 ? 3 : fromVersion === 11 ? 5 : BOARD_COLS;
+  const gymDrafts = structuredClone(save.gymDrafts);
+  for (const draft of Object.values(gymDrafts)) {
+    draft.formation = fitFormationToBoard(draft.formation, sourceCols);
+  }
+  return { ...save, gymDrafts };
 }
 
 /** Map the user's graphics-quality choice to a concrete render tier. 'auto'
@@ -2936,7 +2949,7 @@ export class Game {
 
   /** The current party as a gym/macro team (heroId, level, items, authored gambits). */
   gymPlayerTeam(): GymMatchHero[] {
-    return this.party.slice(0, 5).map((r) => ({
+    return this.party.slice(0, DRAFT_TEAM_SIZE).map((r) => ({
       heroId: r.heroId,
       level: r.unit ? r.unit.level : r.level,
       items: r.items.map((i) => i?.id).filter((id): id is string => !!id),
@@ -3007,8 +3020,8 @@ export class Game {
   /** The fielded five + formation for a gym: the committed draft, else the party. */
   private gymTeamFor(gymId: string): { team: GymMatchHero[]; formation?: Formation } {
     const draft = this.gymDrafts.get(gymId);
-    if (draft && draft.heroes.length >= 5) {
-      const team: GymMatchHero[] = draft.heroes.slice(0, 5).map((h) => ({
+    if (draft && draft.heroes.length >= DRAFT_TEAM_SIZE) {
+      const team: GymMatchHero[] = draft.heroes.slice(0, DRAFT_TEAM_SIZE).map((h) => ({
         heroId: h.heroId,
         level: h.level ?? 1,
         items: h.items,
@@ -4071,8 +4084,8 @@ export class Game {
       this.msg('Finish the draft — pick a full five first', 'bad');
       return null;
     }
-    const player = s.player.slice(0, 5);
-    const enemy = s.enemy.slice(0, 5);
+    const player = s.player.slice(0, DRAFT_TEAM_SIZE);
+    const enemy = s.enemy.slice(0, DRAFT_TEAM_SIZE);
     this.eliteDraft = null;
     return this.runEliteMatch({ seed: s.seed, playerTeam: player, enemyTeam: enemy });
   }
@@ -8374,11 +8387,15 @@ export class Game {
   static migrateSave(s: unknown): GameSave | null {
     if (!s || typeof s !== 'object') return null;
     const v = s as Partial<GameSave>;
-    if (v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === 6 || v.version === 7 || v.version === 8 || v.version === 9 || v.version === SAVE_VERSION) {
+    if (v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === 6 || v.version === 7 || v.version === 8 || v.version === 9 || v.version === 10 || v.version === 11 || v.version === SAVE_VERSION) {
       // v2/v3 -> v3 shape, v4 audio/codex fields, v5 exploration, v6 Armory,
       // v7 board quests, v8 tag-gauge persistence, v9 per-gym drafts, v10 Trainer
-      // track + meta dial (optional fields; absent => defaults, plays as before).
-      const migrated = migrateTagGaugeSave(migratePhase3Save(v as unknown as { version: number; [k: string]: unknown }));
+      // track + meta dial, v11 widened gym boards to 5 columns, v12 resizes to 4x4.
+      const fromVersion = v.version!;
+      const migrated = migrateGymDraftBoards(
+        migrateTagGaugeSave(migratePhase3Save(v as unknown as { version: number; [k: string]: unknown })),
+        fromVersion
+      );
       return Game.validateSave(migrated) ? migrated : null;
     }
     return null;
@@ -8525,9 +8542,15 @@ export class Game {
       if (typeof iface.hudOpacity !== 'number' || iface.hudOpacity < 0.55 || iface.hudOpacity > 1) return false;
       if (typeof iface.minimapSize !== 'number' || iface.minimapSize < 120 || iface.minimapSize > 240) return false;
       if (typeof iface.minimapOpacity !== 'number' || iface.minimapOpacity < 0.35 || iface.minimapOpacity > 1) return false;
+      if (typeof iface.minimapLegend !== 'boolean') return false;
       if (typeof iface.helpOverlay !== 'boolean') return false;
+      if (typeof iface.partyPanel !== 'boolean') return false;
       if (typeof iface.questTracker !== 'boolean') return false;
       if (!Number.isInteger(iface.questTrackerMax) || iface.questTrackerMax < 1 || iface.questTrackerMax > 3) return false;
+      if (typeof iface.toasts !== 'boolean') return false;
+      if (typeof iface.killfeed !== 'boolean') return false;
+      if (typeof iface.floatingHints !== 'boolean') return false;
+      if (typeof iface.combatReadout !== 'boolean') return false;
     }
     for (const heroId of v.party) {
       if (typeof heroId !== 'string' || !REG.heroes.has(heroId)) return false;

@@ -41,6 +41,16 @@ test.describe('gameplay red-team journeys', () => {
     expect(staged.claimable).toBe(true);
     expect(staged.pending).toBeGreaterThan(0);
 
+    // Resonance is always-on overworld now, so the staged kills fire the one-time
+    // `resonance-first-reaction` story beat, which freezes the sim mid-fight and
+    // strands the kill-credit events that landed on that frame. Real play drains
+    // those when the cut-scene ends; mirror that here by clearing the cinematic and
+    // stepping once so the leftover kills settle against the still-complete quest
+    // (a no-op) before we claim — otherwise they re-advance the freshly re-armed
+    // bounty and `progress` would read >0.
+    await clearCinematics(page);
+    await fastForward(page, 0.3);
+
     await page.keyboard.press('j');
     await expect(page.locator(MODAL_CARD)).toContainText('Bounties');
     const claimBtn = page.locator('[data-claim-quest="bounty-cull-wilds"]');

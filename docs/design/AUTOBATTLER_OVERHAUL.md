@@ -1,5 +1,7 @@
 # AUTOBATTLER OVERHAUL — classify the spell, draft the team, place the board, and play it
 
+**Goal:** Turn macro gyms and Elite fights into a 5v5 draft-and-deploy loop where spell archetypes, team choice, board placement, and coaching all matter. **Success looks like:** the headless core and draft UI share one 4x4 deployment board, a committed five spawns from authored cells, and old no-draft fights still fall back to the walking party.
+
 How the macro 5v5 stops being "send your walking party at a fixed enemy lineup and watch" and becomes the **classify → draft → deploy → coach** loop the gyms always wanted: every spell is tagged with what *kind* of spell it is so the brain fires it on the right beat (hold Ravage for the cluster, protect the channeler, rake a skillshot down a row); you build a fresh team for each leader; you *place* it on a board where formation and spacing matter; and both sides run a brain that holds the line, flanks the backline, and saves the ally being dived. Companion to `SPEC.md` (§4 the layer split, §7 gambits + draft, §10 principles), `AI_OVERHAUL.md` (the layered brain, team-mind, threat, boss FSM), `GAMBIT_AI_OVERHAUL.md` (item archetypes, role playbooks, the combo planner), `COMBAT_OVERHAUL.md` (Captain's Call, the live fight), and `SWAP_COMBAT_OVERHAUL.md` (the overworld tag-in — explicitly *out of scope* for the macro layer).
 
 Same footing as the rest of the project. **The headless deterministic core (`src/core/`) stays the system of record** — it never imports `three`, never touches the DOM, replays identically for a seed. Everything proposed here is **additive, data-driven, and reversible**, built on primitives that already exist: the macro sim that auto-resolves a 5v5 (`core/macro.ts`), the shared utility/threat/profile brain (`AI_OVERHAUL.md`, shipped), the combo planner (`GAMBIT_AI_OVERHAUL.md`, shipping), and the ability/item intent derivation those already use. It **respects the layer split** — classification, the board, the draft, and the composition rules live in the **macro layer (gyms, the Elite Five, auto-resolve)** and lift raids for free through the shared brain; the overworld Diablo loop and Resonance are untouched. It **spends zero exotic slots**: archetypes are *derived* from effects, and positioning matters through real combat geometry (reach, AoE footprints, focus order, peel), not invented chess-auto-battler stat synergies. `boundary.test.ts` stays green; gyms/Elite Five stay pure-Dota macro.
@@ -139,11 +141,12 @@ A board is a **discrete deployment grid mapped deterministically onto a team's h
 
 ### 3.1 The grid
 
-The arena is `4200 × 3000` (`TUNING.arenaWidth/arenaHeight`), each team inset `macroTeamXInset: 950`. Carve each team a **deployment zone** (its back edge to the arena third-line, the "deploy on your own half" rule from Auto Chess) and lay a grid over it. Proposed: **3 columns (back / mid / front) × 5 rows**, place up to five. A cell maps to a world point by a pure function, so the board is fully deterministic and headless-testable.
+The arena is `4200 × 3000` (`TUNING.arenaWidth/arenaHeight`), each team inset `macroTeamXInset: 950`. Carve each team a **deployment zone** (its back edge to the arena third-line, the "deploy on your own half" rule from Auto Chess) and lay a grid over it. Shipped board: **4 columns (back / guard / vanguard / front) × 4 rows** (16 cells), field a team of five. Because five heroes can't fit a single column, placement always packs into free cells (spilling to the nearest column) so the board stays collision-free. A cell maps to a world point by a pure function, so the board is fully deterministic and headless-testable.
 
 ```ts
 // core/board.ts (new) — pure, deterministic, no DOM/three
-export interface BoardSlot { col: 0 | 1 | 2; row: number; } // col 0=back, 2=front; row 0..4
+export type BoardCol = 0 | 1 | 2 | 3;
+export interface BoardSlot { col: BoardCol; row: number; } // col 0=back, 3=front; row 0..3
 export interface Formation { placements: Record<string, BoardSlot>; } // heroId → slot
 export function slotToWorld(team: 0 | 1, slot: BoardSlot): { pos: Vec2; facing: number };
 ```

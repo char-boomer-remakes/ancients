@@ -92,6 +92,9 @@ test.describe('controls + HUD UI', () => {
       return {
         exists: Boolean(raw),
         version: parsed?.version ?? null,
+        // The current build's save version, so this assertion tracks SAVE_VERSION
+        // bumps instead of pinning a stale literal that breaks on every migration.
+        expectedVersion: (window as any).__test.newGameSave().version,
         gold: parsed?.gold ?? 0,
         regionId: parsed?.regionId ?? null,
         heroId: parsed?.party?.[0] ?? null
@@ -99,7 +102,7 @@ test.describe('controls + HUD UI', () => {
     });
 
     expect(saved.exists).toBe(true);
-    expect(saved.version).toBe(10);
+    expect(saved.version).toBe(saved.expectedVersion);
     expect(saved.gold).toBeGreaterThanOrEqual(4321);
     expect(saved.regionId).toBe('icewrack');
     expect(saved.heroId).toBe('sniper');

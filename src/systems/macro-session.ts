@@ -2,7 +2,7 @@ import { TUNING } from '../data/tuning';
 import { heroesAlive, setupMacroSim, type MacroResult } from '../core/macro';
 import { counterFormation, defaultFormation } from '../core/board';
 import { REG } from '../core/registry';
-import { canDraftHero, chooseDraft, counterDraft, pickEnemyBans, repicksAllowed } from '../core/draft';
+import { canDraftHero, chooseDraft, counterDraft, formatLevelCap, pickEnemyBans, repicksAllowed } from '../core/draft';
 import type { ControllerRef } from '../core/unit';
 import type { Unit } from '../core/unit';
 import type { DifficultyTier, Formation, GambitRule, GymDef, MacroHeroSetup } from '../core/types';
@@ -143,7 +143,12 @@ export class LiveGymFight {
 
   constructor(gym: GymDef, teamA: GymMatchHero[], seed: number, opts?: LiveGymOpts) {
     this.gym = gym;
-    this.teamA = toSetups(teamA);
+    // A format level-cap clamps overleveled heroes down to it (it never locks them
+    // out), so both sides field at the format's level even if the roster outgrew it.
+    const cap = formatLevelCap(gym.format);
+    const clampLevel = (h: MacroHeroSetup): MacroHeroSetup =>
+      cap === undefined ? h : { ...h, level: Math.min(h.level ?? cap, cap) };
+    this.teamA = toSetups(teamA).map(clampLevel);
     this.seed = seed;
     this.autoPlayer = opts?.autoPlayer ?? false;
     this.formationA = opts?.formationA;
@@ -153,7 +158,7 @@ export class LiveGymFight {
     this.playerBonusCalls = Math.max(0, opts?.playerBonusCaptainCalls ?? 0);
     this.banLoopActive = !!opts?.playerRoster;
     this.playerRoster = opts?.playerRoster ? [...new Set(opts.playerRoster)] : this.teamA.map((h) => h.heroId);
-    this.enemyTeam = gym.enemyTeam.map((h) => ({ ...h }));
+    this.enemyTeam = gym.enemyTeam.map((h) => clampLevel({ ...h }));
     this.level = this.teamA[0]?.level ?? 30;
     this.seriesBestOf = opts?.bestOf ?? gym.bestOf;
     this.bestTo = Math.ceil(this.seriesBestOf / 2);

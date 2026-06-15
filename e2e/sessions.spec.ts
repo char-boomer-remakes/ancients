@@ -39,7 +39,7 @@ test.describe('macro sessions (gym & raid)', () => {
     await page.locator('select[data-draft-item="juggernaut:0"]').selectOption('blink-dagger');
     await page.locator('[data-draft-gambit-preset="juggernaut:aggro"]').evaluate((el) => (el as HTMLElement).click());
     await page.locator('[data-pool="juggernaut"]').evaluate((el) => (el as HTMLElement).click());
-    await page.locator('[data-cell="0:4"]').evaluate((el) => (el as HTMLElement).click());
+    await page.locator('[data-cell="0:3"]').evaluate((el) => (el as HTMLElement).click());
     await page.locator('[data-draft="commit"]').evaluate((el) => (el as HTMLElement).click());
 
     await expect(page.locator('#modal-root:not(.hidden)')).toContainText('Drafted five');
@@ -64,7 +64,7 @@ test.describe('macro sessions (gym & raid)', () => {
 
     expect(result).toMatchObject({
       draftItem: 'blink-dagger',
-      placed: { col: 0, row: 4 },
+      placed: { col: 0, row: 3 },
       liveHasBlink: true
     });
     expect(result.draftRules).toBeGreaterThan(0);

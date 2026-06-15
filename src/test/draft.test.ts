@@ -48,7 +48,7 @@ describe('AUTOBATTLER §3.2 — placement hints', () => {
       (d) => d.roles.includes('durable') || d.roles.includes('initiator')
     );
     expect(front, 'catalog has a frontliner').toBeTruthy();
-    expect(placementHint(front!).col).toBe(2);
+    expect(placementHint(front!).col).toBe(BOARD_COLS - 1);
   });
 });
 
@@ -76,12 +76,16 @@ describe('AUTOBATTLER §3/§4 — formations are legal boards', () => {
 
   it('turtle hugs the back edge; phalanx pushes frontliners forward', () => {
     const turtle = doctrineFormation('turtle', defsOf(TEAM));
-    expect(Object.values(turtle.placements).every((s) => s.col === 0)).toBe(true);
+    // 5 heroes can't fit one 4-row column, so the back fills first and the rest spill one
+    // column forward — never beyond, and never overlapping.
+    const back = Object.values(turtle.placements);
+    expect(back.every((s) => s.col <= 1)).toBe(true);
+    expect(back.filter((s) => s.col === 0)).toHaveLength(BOARD_ROWS);
 
     const phalanx = doctrineFormation('phalanx', defsOf(TEAM));
     for (const h of TEAM) {
       const def = REG.hero(h.heroId);
-      const want = def.roles.includes('durable') || def.roles.includes('initiator') ? 2 : 0;
+      const want = def.roles.includes('durable') || def.roles.includes('initiator') ? BOARD_COLS - 1 : 0;
       expect(phalanx.placements[h.heroId].col).toBe(want);
     }
   });
@@ -201,5 +205,39 @@ describe('AUTOBATTLER §4 — draft → place → fight, end to end', () => {
     expect(migrated!.version).toBe(SAVE_VERSION);
     const game = Game.headless(migrated!);
     expect(game.gymDraft('lunar-gym')).toBeNull();
+  });
+
+  it('refits legacy three-column draft placements onto the current 4x4 board', () => {
+    const save = saveForTeam(TEAM) as GameSave & { version: number };
+    save.version = 10;
+    save.gymDrafts = {
+      'lunar-gym': {
+        heroes: TEAM.map((h) => ({ heroId: h.heroId, level: h.level })),
+        formation: {
+          placements: {
+            juggernaut: { col: 0, row: 0 }, // back
+            sven: { col: 1, row: 1 },       // mid
+            sniper: { col: 2, row: 2 }      // front of the old 3-wide grid
+          }
+        }
+      }
+    };
+
+    const migrated = Game.migrateSave(save);
+    expect(migrated).not.toBeNull();
+    expect(migrated!.version).toBe(SAVE_VERSION);
+    const p = migrated!.gymDrafts!['lunar-gym'].formation.placements;
+    // every refit cell is legal on the 4x4 board…
+    for (const s of Object.values(p)) {
+      expect(s.col).toBeGreaterThanOrEqual(0);
+      expect(s.col).toBeLessThan(BOARD_COLS);
+      expect(s.row).toBeGreaterThanOrEqual(0);
+      expect(s.row).toBeLessThan(BOARD_ROWS);
+    }
+    // …columns remap proportionally (old front → new front) and stay distinct.
+    expect(p.juggernaut.col).toBe(0);
+    expect(p.sven.col).toBe(2);
+    expect(p.sniper.col).toBe(BOARD_COLS - 1);
+    expect(new Set(Object.values(p).map((s) => `${s.col}:${s.row}`)).size).toBe(3);
   });
 });

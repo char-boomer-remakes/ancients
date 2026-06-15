@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, waitForPlayableUi, skipActiveCinematic, attachScreenshot, watchPageErrors, expectNoPageErrors } from './helpers';
+import { boot, skipActiveCinematic, attachScreenshot, watchPageErrors, expectNoPageErrors } from './helpers';
 
 // Regression guard for the authored-asset enhancement layer (GRAPHICS_SPEC §13,
 // ASSETS.md). The procedural rig is the boot floor and looks intentional with no
@@ -79,10 +79,18 @@ test.describe('authored GLB rendering', () => {
     test.setTimeout(150_000);
     const errors = watchPageErrors(page);
 
-    // 'high' forces the party-model preload chain (main.ts gates it on tier !== 'low'),
-    // so the starter hero's authored GLB is warm by the time we look.
-    await boot(page, { webgl: true, hud: true, hero: 'juggernaut', seed: 2026, quality: 'high' });
-    await waitForPlayableUi(page);
+    // Any tier above 'low' forces the party-model preload chain (main.ts gates it
+    // on tier !== 'low'), so the starter hero's authored GLB is warm by the time we
+    // look. We use 'medium' rather than 'high': it runs the identical preload chain
+    // but at a far lower per-frame render cost, which matters under the software
+    // (SwiftShader) renderer — at 'high' the scene render pegs the main thread hard
+    // enough that the page can't service Playwright's actionability polls.
+    //
+    // We also boot WITHOUT the HUD and skip `waitForPlayableUi`. This spec asserts
+    // on the live scene's unit views (`g.scene.views`), not on any DOM overlay, so
+    // gating on the HUD top-bar painting only added a flaky 60s timeout under
+    // software rendering for a surface this test never inspects.
+    await boot(page, { webgl: true, hero: 'juggernaut', seed: 2026, quality: 'medium' });
     await skipActiveCinematic(page);
 
     // The GLB mounts asynchronously after the rig's view is created; drive the sim

@@ -19,7 +19,7 @@ function roleCount(heroes: MacroHeroSetup[], role: string): number {
 
 describe('pressure: board cells feed live combat decisions', () => {
   it('moving a backliner from back to front crosses the engage threshold', () => {
-    const frontCell = slotToWorld(0, { col: 2, row: 2 }).pos;
+    const frontCell = slotToWorld(0, { col: 3, row: 2 }).pos;
     const rangeProbe = setupMacroSim({
       seed: 202614,
       teamA: [{ heroId: 'sniper', level: 18 }],
@@ -47,7 +47,7 @@ describe('pressure: board cells feed live combat decisions', () => {
 
     const back = build({
       placements: {
-        sven: { col: 2, row: 2 },
+        sven: { col: 3, row: 2 },
         sniper: { col: 0, row: 2 }
       }
     });
@@ -57,7 +57,7 @@ describe('pressure: board cells feed live combat decisions', () => {
     const front = build({
       placements: {
         sven: { col: 0, row: 2 },
-        sniper: { col: 2, row: 2 }
+        sniper: { col: 3, row: 2 }
       }
     });
     expect(front.sim.teamMind(0).engaged).toBe(true);

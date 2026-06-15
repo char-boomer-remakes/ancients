@@ -27,9 +27,15 @@ describe('save game validation', () => {
       hudOpacity: 1,
       minimapSize: 160,
       minimapOpacity: 1,
+      minimapLegend: true,
       helpOverlay: true,
+      partyPanel: true,
       questTracker: true,
-      questTrackerMax: 3
+      questTrackerMax: 3,
+      toasts: true,
+      killfeed: true,
+      floatingHints: true,
+      combatReadout: true
     });
     expect(glyphForAction(save.settings, 'help')).toBe('F1');
     expect(Game.validateSave(save)).toBe(true);
@@ -48,5 +54,6 @@ describe('save game validation', () => {
     expect(Game.validateSave({ ...save, settings: { ...save.settings, audio: { ...save.settings.audio, ui: 2 } } })).toBe(false);
     expect(Game.validateSave({ ...save, settings: { ...save.settings, interface: { ...save.settings.interface!, uiScale: 2 } } })).toBe(false);
     expect(Game.validateSave({ ...save, settings: { ...save.settings, interface: { ...save.settings.interface!, questTrackerMax: 4 } } })).toBe(false);
+    expect(Game.validateSave({ ...save, settings: { ...save.settings, interface: { ...save.settings.interface!, toasts: 'yes' as unknown as boolean } } })).toBe(false);
   });
 });

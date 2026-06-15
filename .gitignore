@@ -10,6 +10,8 @@ tmp/
 
 # playwright e2e artifacts
 test-results/
+test-results-*/
+e2e_tmp/
 playwright-report/
 blob-report/
 .playwright/

@@ -5,6 +5,7 @@ import {
   boot,
   clearCinematics,
   expectNoPageErrors,
+  waitForAuthoredModels,
   waitForPlayableUi,
   watchPageErrors
 } from './helpers';
@@ -77,6 +78,11 @@ test.describe('visual smoke', () => {
     await expect(page.locator('#hero-panel')).toContainText('Facet:');
     await expect(page.locator('#hero-panel')).toContainText(/HP \+\d/);
     await expect(page.locator('#hero-panel')).toContainText(/MP \+\d/);
+    // The authored hero GLB streams in over the procedural floor a few frames
+    // after the rig is created; without this wait the overworld capture catches
+    // the blocky placeholder instead of the real model (the "GLB never appears"
+    // report). Best-effort — the procedural floor is still a valid fallback.
+    await waitForAuthoredModels(page);
     await attachScreenshot(page, testInfo, '02-overworld-hud');
     await page.waitForFunction(() => Boolean((window as any).__test?.ready?.()), null, { timeout: 30_000 });
 

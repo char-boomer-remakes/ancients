@@ -404,9 +404,15 @@ export interface InterfaceSettings {
   hudOpacity: number;       // 0.55..1 for persistent non-modal panels
   minimapSize: number;      // CSS pixels
   minimapOpacity: number;   // 0.35..1
+  minimapLegend: boolean;   // category key/filter chips above the minimap
   helpOverlay: boolean;     // whether the ?/F1 help affordance is shown
+  partyPanel: boolean;      // left-side party frames
   questTracker: boolean;    // persistent tracker toggle
   questTrackerMax: number;  // 1..3 tracked rows
+  toasts: boolean;          // right-side transient messages
+  killfeed: boolean;        // top-center combat feed
+  floatingHints: boolean;   // bottom-center interaction prompts
+  combatReadout: boolean;   // cast/threat/focus combat readout
 }
 
 export type StingerId = 'capture' | 'merge' | 'levelup' | 'badge' | 'raid-clear' | 'loot' | 'loot-signature';
@@ -1652,9 +1658,10 @@ export interface MacroHeroSetup {
 }
 
 // ---------- Board / draft (AUTOBATTLER_OVERHAUL §3/§4) ----------
-/** A deployment cell. col 0 = back (own edge), 2 = front (toward center); row 0..4. */
+export type BoardCol = 0 | 1 | 2 | 3;
+/** A deployment cell. col 0 = back (own edge), 3 = front (toward center); row 0..3. */
 export interface BoardSlot {
-  col: 0 | 1 | 2;
+  col: BoardCol;
   row: number;
 }
 /** A team's placement: heroId -> cell. Heroes with no entry fall back to formationDepth. */

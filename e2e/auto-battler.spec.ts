@@ -61,11 +61,11 @@ async function prepareAutoBattlerRoster(page: Page, opts: { draft?: boolean } = 
         })),
         formation: {
           placements: {
-            juggernaut: { col: 2, row: 2 },
-            sven: { col: 2, row: 1 },
-            sniper: { col: 0, row: 4 },
+            juggernaut: { col: 3, row: 2 },
+            sven: { col: 3, row: 1 },
+            sniper: { col: 0, row: 3 },
             lich: { col: 0, row: 0 },
-            lina: { col: 1, row: 2 }
+            lina: { col: 2, row: 2 }
           }
         }
       });
@@ -111,7 +111,7 @@ test.describe('auto battler e2e', () => {
 
     await page.locator('[data-pf="draft"]').click();
     await expect(page.locator(MODAL_CARD)).toContainText('Draft & Deploy');
-    await expect(page.locator('[data-cell]')).toHaveCount(15);
+    await expect(page.locator('[data-cell]')).toHaveCount(16);
     await expect(page.locator('[data-pool="zeus"]')).toBeVisible();
     await attachElementScreenshot(page, testInfo, 'auto-battler-02-draft-initial-board', MODAL_CARD);
 
@@ -119,11 +119,11 @@ test.describe('auto battler e2e', () => {
     await expect(page.locator('[data-draft="commit"]')).toBeDisabled();
     await page.locator('[data-pool="zeus"]').click();
     await expect(page.locator(MODAL_CARD)).toContainText('Holding Zeus');
-    await page.locator('[data-cell="2:0"]').click();
+    await page.locator('[data-cell="3:0"]').click();
 
     await page.locator('[data-pool="juggernaut"]').click();
     await expect(page.locator(MODAL_CARD)).toContainText('Holding Juggernaut');
-    await page.locator('[data-cell="0:4"]').click();
+    await page.locator('[data-cell="0:3"]').click();
     await page.locator('select[data-draft-item="juggernaut:0"]').selectOption('blink-dagger');
     await page.locator('[data-draft-gambit-preset="juggernaut:safe"]').click();
     await attachElementScreenshot(page, testInfo, 'auto-battler-03-draft-customized-board', MODAL_CARD);
@@ -151,8 +151,8 @@ test.describe('auto battler e2e', () => {
     expect(result.walkingParty).not.toContain('zeus');
     expect(result.juggernautItems[0]).toBe('blink-dagger');
     expect(result.juggernautRules).toBeGreaterThan(0);
-    expect(result.placements.juggernaut).toEqual({ col: 0, row: 4 });
-    expect(result.placements.zeus).toEqual({ col: 2, row: 0 });
+    expect(result.placements.juggernaut).toEqual({ col: 0, row: 3 });
+    expect(result.placements.zeus).toEqual({ col: 3, row: 0 });
     expectNoPageErrors(errors);
   });
 

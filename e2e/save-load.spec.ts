@@ -1,9 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { boot, clearCinematics, state } from './helpers';
 
-// Save format is at v10. Round-trip the whole thing through real localStorage + a page reload
-// — the path a player actually exercises — not just an in-memory buildSave/migrate
-// unit test.
+// Round-trip the whole thing through real localStorage + a page reload — the path
+// a player actually exercises — not just an in-memory buildSave/migrate unit test.
+// The save format version is read from the running build (newGameSave().version)
+// rather than pinned to a literal, so a SAVE_VERSION bump + migration doesn't
+// spuriously fail this round-trip.
 test.describe('save & load', () => {
   test('a manual slot save survives a page reload', async ({ page }) => {
     await boot(page, { hero: 'sniper', seed: 41, region: 'icewrack' });
@@ -21,6 +23,7 @@ test.describe('save & load', () => {
       return {
         ok,
         version: parsed?.version ?? null,
+        expectedVersion: t.newGameSave().version,
         gold: Math.round(g.gold),
         regionId: g.region.id,
         heroId: g.party[0].heroId,
@@ -29,7 +32,7 @@ test.describe('save & load', () => {
     });
 
     expect(saved.ok).toBe(true);
-    expect(saved.version).toBe(10);
+    expect(saved.version).toBe(saved.expectedVersion);
     expect(saved.gold).toBeGreaterThanOrEqual(7777);
 
     // Hard reload: the auto-boot starts a *fresh* game, proving the restore comes

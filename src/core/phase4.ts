@@ -43,9 +43,15 @@ export function defaultInterfaceSettings(): InterfaceSettings {
     hudOpacity: 1,
     minimapSize: 160,
     minimapOpacity: 1,
+    minimapLegend: true,
     helpOverlay: true,
+    partyPanel: true,
     questTracker: true,
-    questTrackerMax: 3
+    questTrackerMax: 3,
+    toasts: true,
+    killfeed: true,
+    floatingHints: true,
+    combatReadout: true
   };
 }
 
@@ -100,9 +106,15 @@ export function migrateAudioSettings(old: (LegacySettings & { audio?: AudioSetti
       hudOpacity: ix?.hudOpacity ?? id.hudOpacity,
       minimapSize: ix?.minimapSize ?? id.minimapSize,
       minimapOpacity: ix?.minimapOpacity ?? id.minimapOpacity,
+      minimapLegend: ix?.minimapLegend ?? id.minimapLegend,
       helpOverlay: ix?.helpOverlay ?? id.helpOverlay,
+      partyPanel: ix?.partyPanel ?? id.partyPanel,
       questTracker: ix?.questTracker ?? id.questTracker,
-      questTrackerMax: ix?.questTrackerMax ?? id.questTrackerMax
+      questTrackerMax: ix?.questTrackerMax ?? id.questTrackerMax,
+      toasts: ix?.toasts ?? id.toasts,
+      killfeed: ix?.killfeed ?? id.killfeed,
+      floatingHints: ix?.floatingHints ?? id.floatingHints,
+      combatReadout: ix?.combatReadout ?? id.combatReadout
     },
     audio: existing
       ? {

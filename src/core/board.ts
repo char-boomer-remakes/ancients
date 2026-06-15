@@ -1,9 +1,9 @@
 import { TUNING } from '../data/tuning';
 import { abilityArchetypes, type AbilityArchetype } from './ability-archetype';
 import { abilityVal } from './values';
-import type { AbilityDef, BoardSlot, EffectNode, Formation, HeroDef, ValueRef, Vec2 } from './types';
+import type { AbilityDef, BoardCol, BoardSlot, EffectNode, Formation, HeroDef, ValueRef, Vec2 } from './types';
 
-export type { BoardSlot, Formation } from './types';
+export type { BoardCol, BoardSlot, Formation } from './types';
 
 // ============================================================
 // The board (AUTOBATTLER_OVERHAUL §3). A discrete deployment grid
@@ -18,21 +18,30 @@ export type { BoardSlot, Formation } from './types';
 // fallback (`core/macro.ts formationDepth`) is byte-identical to today.
 // ============================================================
 
-/** Columns (back / mid / front) and rows in the deployment grid (§3.1). */
-export const BOARD_COLS = 3;
-export const BOARD_ROWS = 5;
+/** Columns (back -> front) and rows in the deployment grid (§3.1). The board is
+ *  4x4 (16 cells); the fielded team is five, so a column can hold fewer heroes
+ *  than the roster — placement always packs into free cells (never overflows). */
+export const BOARD_COLS = 4;
+export const BOARD_ROWS = 4;
+export const DRAFT_TEAM_SIZE = 5;
+export const BOARD_COL_LABELS = ['Back', 'Guard', 'Vanguard', 'Front'] as const;
+
+const BACK_COL: BoardCol = 0;
+const MID_COL: BoardCol = 1;   // central column: AoE casters, supports, flex
+const FRONT_COL: BoardCol = 3;
 
 /**
  * Map a deployment cell to a world point + facing, deterministically. The column
- * band reuses `macroFormationDepth` around the team's existing X-inset so a placed
- * team occupies the same depth band as the role heuristic — front toward center,
- * back toward its own edge — and the rows spread evenly along the arena height.
+ * bands reuse `macroFormationDepth` around the team's existing X-inset so a placed
+ * team occupies a wider version of the role heuristic: front toward center, back
+ * toward its own edge, and rows spread evenly along the arena height.
  */
 export function slotToWorld(team: 0 | 1, slot: BoardSlot): { pos: Vec2; facing: number } {
   const dir = team === 0 ? 1 : -1;
   const baseX = team === 0 ? TUNING.macroTeamXInset : TUNING.arenaWidth - TUNING.macroTeamXInset;
-  // col 0 = back (behind the base), 1 = mid (the base line), 2 = front (toward center).
-  const colOffset = (slot.col - 1) * TUNING.macroFormationDepth;
+  // col 0 = back (behind the base), center = base line, last col = front (toward center).
+  const centerCol = (BOARD_COLS - 1) / 2;
+  const colOffset = (slot.col - centerCol) * TUNING.macroFormationDepth;
   const x = baseX + dir * colOffset;
 
   const rowGap = Math.min(420, TUNING.arenaHeight / (BOARD_ROWS + 1));
@@ -52,7 +61,7 @@ const RANGED_AT_RANGE = 550; // mirrors core/macro.ts formationDepth
 export type RowPref = 'center' | 'edge' | 'any';
 
 export interface PlacementHint {
-  col: 0 | 1 | 2;
+  col: BoardCol;
   rowPref: RowPref;
   reason: string;
 }
@@ -65,24 +74,24 @@ export function placementHint(def: HeroDef): PlacementHint {
   const ranged = def.baseStats.attackRange >= RANGED_AT_RANGE;
 
   if (roles.includes('durable') || roles.includes('initiator')) {
-    return { col: 2, rowPref: 'center', reason: 'Frontline — soak the engage.' };
+    return { col: FRONT_COL, rowPref: 'center', reason: 'Frontline — soak the engage.' };
   }
   if (arch.has('teamfight-ult') || arch.has('cluster-nuke')) {
-    return { col: 1, rowPref: 'center', reason: 'AoE — a central column catches the most.' };
+    return { col: MID_COL, rowPref: 'center', reason: 'AoE — a central column catches the most.' };
   }
   if (arch.has('channel')) {
-    return { col: 0, rowPref: 'edge', reason: 'Channel — a protected back cell.' };
+    return { col: BACK_COL, rowPref: 'edge', reason: 'Channel — a protected back cell.' };
   }
   if (arch.has('skillshot-line')) {
-    return { col: 0, rowPref: 'edge', reason: 'Skillshot — an edge angle rakes a row.' };
+    return { col: BACK_COL, rowPref: 'edge', reason: 'Skillshot — an edge angle rakes a row.' };
   }
   if (roles.includes('support') || arch.has('team-buff')) {
-    return { col: 1, rowPref: 'any', reason: 'Support — near the core to peel.' };
+    return { col: MID_COL, rowPref: 'any', reason: 'Support — near the core to peel.' };
   }
   if (ranged) {
-    return { col: 0, rowPref: 'any', reason: 'Ranged — hold behind the line.' };
+    return { col: BACK_COL, rowPref: 'any', reason: 'Ranged — hold behind the line.' };
   }
-  return { col: 1, rowPref: 'any', reason: 'Flex.' };
+  return { col: MID_COL, rowPref: 'any', reason: 'Flex.' };
 }
 
 /** A hero's spatial profile for the board editor's hover readout (§7): how far its kit
@@ -134,21 +143,35 @@ export const DOCTRINES: readonly Doctrine[] = [
   { id: 'turtle', name: 'Turtle', describe: 'Everyone hugging the back edge around the saves.' }
 ];
 
-/** Lay an ordered five into the grid with distinct rows (so cells never collide). */
-function layout(defs: HeroDef[], cols: (0 | 1 | 2)[], rows: number[]): Formation {
+/** Row visit order for a preference: center-first, edge-first, or natural. */
+function rowOrder(pref: RowPref): number[] {
+  const rows = Array.from({ length: BOARD_ROWS }, (_, row) => row);
+  const center = (BOARD_ROWS - 1) / 2;
+  if (pref === 'center') return rows.sort((a, b) => Math.abs(a - center) - Math.abs(b - center) || a - b);
+  if (pref === 'edge') return rows.sort((a, b) => Math.abs(b - center) - Math.abs(a - center) || a - b);
+  return rows;
+}
+
+/**
+ * Place an ordered team into the grid, one hero at a time, each into the first free
+ * cell of its desired column (falling back to the nearest column when that column is
+ * full). Guaranteed collision-free and in-bounds as long as the team fits in the grid
+ * (5 heroes on 16 cells), so it stays legal even though a column holds fewer than five.
+ */
+function packFormation(
+  defs: HeroDef[],
+  colFor: (def: HeroDef, i: number) => BoardCol,
+  rowPrefFor: (def: HeroDef, i: number) => RowPref = () => 'any'
+): Formation {
   const placements: Record<string, BoardSlot> = {};
-  defs.forEach((def, i) => {
-    placements[def.id] = { col: cols[i], row: rows[i] };
-  });
+  defs.forEach((def, i) => placeFirstFree(placements, def.id, colFor(def, i), rowOrder(rowPrefFor(def, i))));
   return { placements };
 }
 
-/** The walking-party default: each hero on its hint column, rows fanned by order. */
+/** The walking-party default: each hero on its hint column, packed into free cells. */
 export function defaultFormation(defs: HeroDef[]): Formation {
-  const five = defs.slice(0, BOARD_ROWS);
-  const cols = five.map((d) => placementHint(d).col);
-  const rows = five.map((_, i) => i);
-  return layout(five, cols, rows);
+  const five = defs.slice(0, DRAFT_TEAM_SIZE);
+  return packFormation(five, (d) => placementHint(d).col, (d) => placementHint(d).rowPref);
 }
 
 function rowPressure(formation: Formation | undefined, colMin = 0, colMax = BOARD_COLS - 1): number[] {
@@ -162,32 +185,63 @@ function rowPressure(formation: Formation | undefined, colMin = 0, colMax = BOAR
 }
 
 function rowsByPressure(counts: number[]): number[] {
+  const centerRow = (BOARD_ROWS - 1) / 2;
   return Array.from({ length: BOARD_ROWS }, (_, row) => row)
-    .sort((a, b) => counts[b] - counts[a] || Math.abs(a - 2) - Math.abs(b - 2) || a - b);
+    .sort((a, b) => counts[b] - counts[a] || Math.abs(a - centerRow) - Math.abs(b - centerRow) || a - b);
 }
 
+/**
+ * Seat a hero in the first free cell of its preferred column (rows tried in the given
+ * order), spilling to the nearest column when the preferred one is full. With 16 cells
+ * and a five-hero team this never fails to place, so no hero is ever dropped or stacked.
+ */
 function placeFirstFree(
   placements: Record<string, BoardSlot>,
   heroId: string,
-  col: 0 | 1 | 2,
+  preferCol: BoardCol,
   rows: number[]
 ): void {
   const used = new Set(Object.values(placements).map((s) => `${s.col}:${s.row}`));
-  for (const row of rows) {
-    if (row < 0 || row >= BOARD_ROWS) continue;
-    const key = `${col}:${row}`;
-    if (!used.has(key)) {
-      placements[heroId] = { col, row };
-      return;
+  const cols = Array.from({ length: BOARD_COLS }, (_, c) => c)
+    .sort((a, b) => Math.abs(a - preferCol) - Math.abs(b - preferCol) || a - b);
+  for (const col of cols) {
+    const rowList = col === preferCol ? rows : Array.from({ length: BOARD_ROWS }, (_, r) => r);
+    for (const row of rowList) {
+      if (row < 0 || row >= BOARD_ROWS) continue;
+      if (!used.has(`${col}:${row}`)) {
+        placements[heroId] = { col: col as BoardCol, row };
+        return;
+      }
+    }
+    // the preferred column may have unvisited rows beyond `rows`; scan it fully before spilling.
+    if (col === preferCol) {
+      for (let row = 0; row < BOARD_ROWS; row++) {
+        if (!used.has(`${col}:${row}`)) {
+          placements[heroId] = { col, row };
+          return;
+        }
+      }
     }
   }
-  for (let row = 0; row < BOARD_ROWS; row++) {
-    const key = `${col}:${row}`;
-    if (!used.has(key)) {
-      placements[heroId] = { col, row };
-      return;
-    }
+}
+
+/**
+ * Refit an arbitrary saved formation onto the current board (save migration §4): map
+ * each column proportionally from the source grid width, clamp rows, and re-pack so the
+ * result is always legal even when the board shrank below the source. Pure + deterministic
+ * (heroes seated in stable id order), so two identical saves migrate identically.
+ */
+export function fitFormationToBoard(formation: Formation, sourceCols: number = BOARD_COLS): Formation {
+  const srcMax = Math.max(1, sourceCols - 1);
+  const dstMax = BOARD_COLS - 1;
+  const placements: Record<string, BoardSlot> = {};
+  const entries = Object.entries(formation.placements).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  for (const [id, slot] of entries) {
+    const mappedCol = Math.min(dstMax, Math.max(0, Math.round((slot.col * dstMax) / srcMax))) as BoardCol;
+    const clampedRow = Math.min(BOARD_ROWS - 1, Math.max(0, Math.round(slot.row)));
+    placeFirstFree(placements, id, mappedCol, [clampedRow]);
   }
+  return { placements };
 }
 
 /**
@@ -198,59 +252,53 @@ function placeFirstFree(
  */
 export function counterFormation(defs: HeroDef[], opponent?: Formation): Formation {
   if (!opponent) return defaultFormation(defs);
-  const five = defs.slice(0, BOARD_ROWS);
+  const five = defs.slice(0, DRAFT_TEAM_SIZE);
   const allPressure = rowPressure(opponent);
-  const backPressure = rowPressure(opponent, 0, 0);
+  const backPressure = rowPressure(opponent, BACK_COL, BACK_COL);
   const hotRows = rowsByPressure(allPressure);
   const exposedBackRows = rowsByPressure(backPressure).filter((row) => backPressure[row] > 0);
+  const centerRow = (BOARD_ROWS - 1) / 2;
   const coolRows = Array.from({ length: BOARD_ROWS }, (_, row) => row)
-    .sort((a, b) => allPressure[a] - allPressure[b] || Math.abs(b - 2) - Math.abs(a - 2) || a - b);
+    .sort((a, b) => allPressure[a] - allPressure[b] || Math.abs(b - centerRow) - Math.abs(a - centerRow) || a - b);
   const placements: Record<string, BoardSlot> = {};
 
   const isDiver = (d: HeroDef) => d.roles.includes('initiator') || d.roles.includes('escape');
   const isFront = (d: HeroDef) => d.roles.includes('durable') || d.roles.includes('initiator');
 
   for (const def of five.filter(isDiver)) {
-    placeFirstFree(placements, def.id, 2, exposedBackRows.length ? exposedBackRows : hotRows);
+    placeFirstFree(placements, def.id, FRONT_COL, exposedBackRows.length ? exposedBackRows : hotRows);
   }
   for (const def of five.filter((d) => isFront(d) && !placements[d.id])) {
-    placeFirstFree(placements, def.id, 2, hotRows);
+    placeFirstFree(placements, def.id, FRONT_COL, hotRows);
   }
   for (const def of five.filter((d) => !placements[d.id])) {
     const hint = placementHint(def);
-    const col = hint.col === 2 ? 1 : hint.col;
+    const col = hint.col === FRONT_COL ? MID_COL : hint.col;
     placeFirstFree(placements, def.id, col, coolRows);
   }
 
   return { placements };
 }
 
-/** Stamp a doctrine over the five (§4.2). Always yields a legal, collision-free board. */
+/** Stamp a doctrine over the five (§4.2). Always yields a legal, collision-free board —
+ *  single-column doctrines that can't fit the whole team spill into the nearest column. */
 export function doctrineFormation(id: DoctrineId, defs: HeroDef[]): Formation {
-  const five = defs.slice(0, BOARD_ROWS);
-  const cols: (0 | 1 | 2)[] = five.map((d) => placementHint(d).col);
-  const rows = five.map((_, i) => i);
-
-  switch (id) {
-    case 'spread':
-      break; // hint columns + index rows are already maximally fanned
-    case 'phalanx':
-      five.forEach((d, i) => {
-        cols[i] = d.roles.includes('durable') || d.roles.includes('initiator') ? 2 : 0;
-      });
-      break;
-    case 'flank': {
-      const diver = five.findIndex((d) => d.roles.includes('initiator') || d.roles.includes('escape'));
-      five.forEach((_, i) => { cols[i] = 1; });
-      if (diver >= 0) {
-        cols[diver] = 2;
-        const tmp = rows[0]; rows[0] = rows[diver]; rows[diver] = tmp; // diver to an edge row
-      }
-      break;
+  const five = defs.slice(0, DRAFT_TEAM_SIZE);
+  const isDiver = (d: HeroDef) => d.roles.includes('initiator') || d.roles.includes('escape');
+  const colFor = (def: HeroDef): BoardCol => {
+    switch (id) {
+      case 'phalanx':
+        return def.roles.includes('durable') || def.roles.includes('initiator') ? FRONT_COL : BACK_COL;
+      case 'flank':
+        return isDiver(def) ? FRONT_COL : MID_COL;
+      case 'turtle':
+        return BACK_COL;
+      case 'spread':
+      default:
+        return placementHint(def).col;
     }
-    case 'turtle':
-      five.forEach((_, i) => { cols[i] = 0; });
-      break;
-  }
-  return layout(five, cols, rows);
+  };
+  const rowPrefFor = (def: HeroDef): RowPref =>
+    id === 'flank' && isDiver(def) ? 'edge' : id === 'spread' ? placementHint(def).rowPref : 'any';
+  return packFormation(five, colFor, rowPrefFor);
 }

@@ -77,9 +77,11 @@ describe('AUTOBATTLER §5.1 — the constraint vocabulary validates per rule kin
     expect(isLegalDraft(fmt, team([str[0], agi, int]))).toBe(true);
   });
 
-  it('level-cap: rejects an over-leveled hero', () => {
+  it('level-cap: clamps overleveled heroes rather than locking them out', () => {
+    // A cap normalizes overleveled heroes down to it (clamped at field time), so an
+    // overleveled five is still a legal draft — never a "can't play" wall.
     const fmt: DraftFormat = { rules: [{ kind: 'level-cap', max: 20 }] };
-    expect(isLegalDraft(fmt, team(ALL_IDS().slice(0, 5), 25))).toBe(false);
+    expect(isLegalDraft(fmt, team(ALL_IDS().slice(0, 5), 25))).toBe(true);
     expect(isLegalDraft(fmt, team(ALL_IDS().slice(0, 5), 20))).toBe(true);
   });
 

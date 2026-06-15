@@ -83,6 +83,53 @@ export async function boot(page: Page, opts: BootOpts = {}): Promise<void> {
   });
 }
 
+/**
+ * Drive the sim a few frames until the live rigs have swapped their procedural
+ * floor for the authored GLB, so visual captures show the real models instead
+ * of the placeholder body. The authored mount is async (loadModelAsset ->
+ * mountHeroModel) and is NOT gated on quality tier, so even a `quality:'low'`
+ * boot (which skips the prewarm chain) mounts it lazily — it just needs a few
+ * frames. Best-effort: resolves once at least `minUnits` units carry an authored
+ * model with real geometry, or returns false on timeout so callers can still
+ * proceed (the procedural floor is a valid, intentional fallback).
+ */
+export async function waitForAuthoredModels(
+  page: Page,
+  opts: { minUnits?: number; timeout?: number } = {}
+): Promise<boolean> {
+  const minUnits = opts.minUnits ?? 1;
+  const timeout = opts.timeout ?? 30_000;
+  try {
+    await expect
+      .poll(
+        async () => {
+          await page.evaluate(() => (window as any).__test?.step?.(33));
+          return page.evaluate(() => {
+            const g = (window as any).__game ?? (window as any).__test?.game?.();
+            const views = g?.scene?.views as Map<number, any> | undefined;
+            if (!views) return 0;
+            let authored = 0;
+            for (const [, view] of views) {
+              const model = view?.rig?.authoredModel;
+              if (!model) continue;
+              let meshes = 0;
+              model.traverse((o: any) => {
+                if (o.isMesh && o.geometry) meshes++;
+              });
+              if (meshes > 0) authored++;
+            }
+            return authored;
+          });
+        },
+        { timeout, intervals: [120] }
+      )
+      .toBeGreaterThanOrEqual(minUnits);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function watchPageErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
